@@ -1,0 +1,424 @@
+"""IR → .docx.
+
+서식 값은 전부 프로파일에서 온다. 이 파일에는 pt·mm·글꼴명 상수가 없다.
+표의 열 폭과 글자 크기는 layout 단계가 정해 준 TableLayout을 그대로 쓴다.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from docx import Document as DocxDocument
+from docx.enum.section import WD_SECTION
+from docx.shared import Emu
+
+from ..ir import (
+    Block,
+    Callout,
+    Cell,
+    CodeBlock,
+    Document,
+    Heading,
+    HorizontalRule,
+    Image,
+    ListItem,
+    PageBreak,
+    Paragraph,
+    Run,
+    Table,
+    plain,
+)
+from ..layout.flow import FlowPlan
+from ..layout.table_fit import TableLayout, plan_tables
+from ..profile import FontSpec, Profile
+from . import oxml
+from .markers import format_marker
+
+# "2026. 10. 1" / "2026.10.1." 처럼 날짜만 있는 줄 (제목 아래 날짜 표기 판별용)
+DATE_LINE = re.compile(r"^\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?$")
+
+
+@dataclass
+class RenderResult:
+    document: object  # docx.Document
+    notes: list[str] = field(default_factory=list)
+
+
+class DocxRenderer:
+    def __init__(self, profile: Profile, layouts: dict[int, TableLayout] | None = None,
+                 flow: FlowPlan | None = None):
+        self.profile = profile
+        self.layouts = layouts or {}
+        self.flow = flow or FlowPlan()
+        self.notes: list[str] = list(self.flow.notes)
+        self._table_seq = 0
+        self._figure_seq = 0
+        self._counters: dict[int, int] = {}
+        self._previous: Block | None = None  # 바로 앞에 무엇이 왔는지 (표 뒤 간격 판단용)
+
+    # ── 진입점 ──────────────────────────────────────────────────────────
+
+    def render(self, doc: Document) -> RenderResult:
+        if not self.layouts:
+            self.layouts = plan_tables(doc, self.profile)
+
+        self.docx = (DocxDocument(self.profile.template) if self.profile.template
+                     else DocxDocument())
+        self._apply_document_defaults()
+        oxml.apply_page_setup(self.docx.sections[0], self.profile.page)
+
+        if doc.title:
+            self._paragraph([Run(doc.title)], self.profile.font("title"))
+
+        blocks = self._dateline(doc.blocks)
+        self._blocks(blocks)
+        return RenderResult(document=self.docx, notes=self.notes)
+
+    def _dateline(self, blocks: list[Block]) -> list[Block]:
+        """제목 바로 아래 날짜 한 줄은 본문이 아니라 날짜 서식으로 쓴다."""
+        if not blocks or not self.profile.has_font("date"):
+            return blocks
+        first = blocks[0]
+        if not isinstance(first, Paragraph):
+            return blocks
+        text = plain(first.runs).strip()
+        if not DATE_LINE.match(text):
+            return blocks
+        self._paragraph([Run(text)], self.profile.font("date"))
+        return blocks[1:]
+
+    def save(self, doc: Document, path: str | Path) -> RenderResult:
+        result = self.render(doc)
+        result.document.save(str(path))
+        return result
+
+    # ── 문서 기본값 ─────────────────────────────────────────────────────
+
+    def _apply_document_defaults(self) -> None:
+        """Normal 스타일 자체를 프로파일 본문 서식으로 맞춘다.
+
+        표 안 문단처럼 우리가 직접 만들지 않는 요소까지 일관되게 하기 위함이다.
+        """
+        body = self.profile.font("body")
+        style = self.docx.styles["Normal"]
+        if body.latin:
+            style.font.name = body.latin
+        if body.size:
+            style.font.size = Emu(body.size)
+        if body.east_asia:
+            rpr = style.element.get_or_add_rPr()
+            rfonts = rpr.get_or_add_rFonts()
+            from docx.oxml.ns import qn
+
+            rfonts.set(qn("w:eastAsia"), body.east_asia)
+            if not body.latin:
+                rfonts.set(qn("w:ascii"), body.east_asia)
+                rfonts.set(qn("w:hAnsi"), body.east_asia)
+
+    # ── 블록 디스패치 ───────────────────────────────────────────────────
+
+    def _blocks(self, blocks: list[Block], container=None) -> None:
+        for index, block in enumerate(blocks):
+            following = blocks[index + 1] if index + 1 < len(blocks) else None
+            self._block(block, container, following)
+            if container is None:
+                self._previous = block
+
+    def _block(self, block: Block, container=None, next_block: Block | None = None) -> None:
+        if isinstance(block, Heading):
+            self._after_table_gap(self._heading(block, container), container)
+        elif isinstance(block, Paragraph):
+            self._after_table_gap(
+                self._paragraph(block.runs, self.profile.font("body"), container), container)
+        elif isinstance(block, ListItem):
+            self._list_item(block, container, next_block)
+        elif isinstance(block, Table):
+            self._table(block, container)
+        elif isinstance(block, CodeBlock):
+            self._code(block, container)
+        elif isinstance(block, Callout):
+            self._callout(block, container)
+        elif isinstance(block, Image):
+            self._image(block, container)
+        elif isinstance(block, HorizontalRule):
+            self._rule(container)
+        elif isinstance(block, PageBreak):
+            from docx.enum.text import WD_BREAK
+
+            self._new_paragraph(container).add_run().add_break(WD_BREAK.PAGE)
+
+    # ── 개별 블록 ───────────────────────────────────────────────────────
+
+    def _heading(self, block: Heading, container=None) -> None:
+        self._counters.clear()  # 제목이 나오면 항목 번호를 다시 1부터
+        key = f"heading{block.level}"
+        if not self.profile.has_font(key):
+            for level in range(block.level - 1, 0, -1):
+                if self.profile.has_font(f"heading{level}"):
+                    key = f"heading{level}"
+                    break
+        return self._paragraph(block.runs, self.profile.font(key), container)
+
+    def _after_table_gap(self, paragraph, container) -> None:
+        """표 바로 뒤 문단은 표와 붙어 보이므로 앞 간격을 확보한다.
+
+        (Word는 표 자체에 '단락 뒤 간격'을 줄 수 없어 다음 문단 쪽에서 띄운다.)
+        """
+        gap = self.profile.tables.space_after
+        if container is None and gap and isinstance(self._previous, Table):
+            current = paragraph.paragraph_format.space_before
+            paragraph.paragraph_format.space_before = Emu(max(int(current or 0), gap))
+
+    def _list_item(self, block: ListItem, container=None, next_block: Block | None = None) -> None:
+        level = self.profile.numbering_level(block.depth)
+        spec = self.profile.font("body")
+        if level.size:
+            spec = spec.resized(level.size)
+        if level.bold is not None:
+            # 말머리뿐 아니라 그 항목 문장 전체에 적용된다 ("1. □로 시작하는 문장은 굵은체").
+            spec = spec.model_copy(update={"bold": level.bold})
+
+        marker = self._marker(block, level)
+
+        paragraph = self._new_paragraph(container)
+        oxml.apply_paragraph_format(paragraph, spec, indent=False)
+        oxml.set_list_indent(paragraph, level.indent, level.hanging)
+
+        space = self._item_spacing(block, level, next_block)
+        if space is not None:
+            paragraph.paragraph_format.space_after = Emu(space)
+        before = self._space_before(block, level)
+        if before:
+            paragraph.paragraph_format.space_before = Emu(before)
+
+        if marker:
+            run = paragraph.add_run(marker + "\t")
+            oxml.apply_run_format(run, spec)
+        self._runs(paragraph, block.runs, spec)
+
+    def _marker(self, block: ListItem, level) -> str:
+        """말머리 문자열. {n} 같은 자리표시자가 있으면 깊이별 번호를 매긴다."""
+        template = (level.ordered_marker if block.ordered and level.ordered_marker
+                    else level.marker)
+        if not template:
+            return ""
+        if "{" not in template:
+            return template
+        return format_marker(template, self._next_number(block.depth))
+
+    def _next_number(self, depth: int) -> int:
+        for deeper in [d for d in self._counters if d > depth]:
+            del self._counters[deeper]  # 상위 단계로 돌아오면 하위 번호는 초기화
+        self._counters[depth] = self._counters.get(depth, 0) + 1
+        return self._counters[depth]
+
+    def _item_spacing(self, block: ListItem, level, next_block: Block | None) -> int | None:
+        """단계가 바뀌는 자리(1. → □ → -)에서만 단락 뒤 간격을 준다."""
+        same_level = isinstance(next_block, ListItem) and next_block.depth == block.depth
+        if same_level:
+            return level.space_after
+        return level.level_change_space(self.flow.relaxed)
+
+    def _space_before(self, block: ListItem, level) -> int:
+        """새 절이 시작되는 자리(… - 다음의 2.)와 표 바로 뒤를 넉넉히 띄운다."""
+        previous = self._previous
+        if previous is None:
+            return 0  # 문서 첫 항목은 제목·날짜 간격으로 충분하다
+
+        before = 0
+        deeper_before = isinstance(previous, ListItem) and previous.depth > block.depth
+        if deeper_before and level.space_before:
+            before = level.space_before
+        if isinstance(previous, Table) and self.profile.tables.space_after:
+            before = max(before, self.profile.tables.space_after)
+        return before
+
+    def _code(self, block: CodeBlock, container=None) -> None:
+        spec = self.profile.font("code")
+        paragraph = self._new_paragraph(container)
+        oxml.apply_paragraph_format(paragraph, spec)
+        lines = block.text.splitlines() or [""]
+        for i, line in enumerate(lines):
+            run = paragraph.add_run()
+            if i:
+                run.add_break()
+            run.add_text(line)
+            oxml.apply_run_format(run, spec)
+        if self.profile.tables.border_width:
+            oxml.add_border(paragraph, "left", self.profile.tables.border_width,
+                            self.profile.tables.border_color, space="6")
+
+    def _callout(self, block: Callout, container=None) -> None:
+        spec = self.profile.font("callout")
+        start = len(self._paragraphs(container))
+        for inner in block.blocks:
+            if isinstance(inner, Paragraph):
+                self._paragraph(inner.runs, spec, container)
+            else:
+                self._block(inner, container)
+        if self.profile.tables.border_width:
+            for paragraph in self._paragraphs(container)[start:]:
+                oxml.add_border(paragraph, "left", self.profile.tables.border_width,
+                                self.profile.tables.border_color, space="6")
+
+    def _image(self, block: Image, container=None) -> None:
+        path = Path(block.src)
+        if not path.exists():
+            self.notes.append(f"이미지를 찾을 수 없어 건너뜀: {block.src}")
+            return
+        paragraph = self._new_paragraph(container)
+        try:
+            paragraph.add_run().add_picture(str(path), width=Emu(self._image_width(block)))
+        except Exception as exc:  # 형식 미지원 등
+            self.notes.append(f"이미지 삽입 실패({block.src}): {exc}")
+            return
+        oxml.apply_paragraph_format(paragraph, self.profile.font("caption"))
+        if block.caption:
+            self._figure_seq += 1
+            self._paragraph([Run(f"[그림 {self._figure_seq}] {block.caption}")],
+                            self.profile.font("caption"), container)
+
+    def _image_width(self, block: Image) -> int:
+        usable = self.profile.page.usable_width
+        if not block.width_px:
+            return usable
+        from ..units import parse_length
+
+        natural = parse_length(block.width_px, default_unit="px")
+        return min(natural, usable)
+
+    def _rule(self, container=None) -> None:
+        paragraph = self._new_paragraph(container)
+        rules = self.profile.tables
+        if rules.border_width:
+            oxml.add_border(paragraph, "bottom", rules.border_width, rules.border_color)
+
+    # ── 표 ──────────────────────────────────────────────────────────────
+
+    def _table(self, block: Table, container=None) -> None:
+        layout = self.layouts.get(id(block))
+        if layout is None:
+            layout = plan_tables(Document(blocks=[block]), self.profile)[id(block)]
+        self.notes.extend(f"표 {self._table_seq + 1}: {note}" for note in layout.notes)
+
+        section_switched = layout.landscape and container is None
+        if section_switched:
+            section = self.docx.add_section(WD_SECTION.NEW_PAGE)
+            oxml.apply_page_setup(section, self.profile.page.landscape())
+
+        self._table_seq += 1
+        if block.caption:
+            self._paragraph([Run(f"<표 {self._table_seq}> {block.caption}")],
+                            self.profile.font("caption"), container)
+
+        cols = block.col_count
+        rows = len(block.rows)
+        if cols == 0 or rows == 0:
+            return
+
+        target = container if container is not None else self.docx
+        table = target.add_table(rows=rows, cols=cols)
+        oxml.set_fixed_layout(table, layout.total_width, self.profile.tables.align)
+        oxml.set_table_borders(table, self.profile.tables)
+        oxml.set_cell_margins(table, layout.cell_margin_x, self.profile.tables.cell_margin_y)
+        oxml.set_grid(table, layout.col_widths)
+
+        self._fill_cells(table, block, layout)
+
+        rules = self.profile.tables
+        min_height = rules.min_row_height(self.flow.relaxed)
+        for index, row in enumerate(table.rows):
+            if rules.keep_row_together:
+                oxml.forbid_row_split(row)
+            if rules.repeat_header and index < block.header_rows:
+                oxml.mark_header_row(row)
+            if min_height:
+                oxml.set_min_row_height(row, min_height)
+
+        if section_switched:
+            back = self.docx.add_section(WD_SECTION.NEW_PAGE)
+            oxml.apply_page_setup(back, self.profile.page)
+
+    def _fill_cells(self, table, block: Table, layout: TableLayout) -> None:
+        occupied: set[tuple[int, int]] = set()
+        for r, row in enumerate(block.rows):
+            col = 0
+            for cell in row.cells:
+                while (r, col) in occupied:
+                    col += 1
+                if col >= len(layout.col_widths):
+                    break
+                end_row = min(r + cell.rowspan - 1, len(table.rows) - 1)
+                end_col = min(col + cell.colspan - 1, len(layout.col_widths) - 1)
+                for rr in range(r, end_row + 1):
+                    for cc in range(col, end_col + 1):
+                        occupied.add((rr, cc))
+
+                target = table.cell(r, col)
+                if (end_row, end_col) != (r, col):
+                    target = target.merge(table.cell(end_row, end_col))
+                self._fill_cell(target, cell, layout,
+                                sum(layout.col_widths[col : end_col + 1]))
+                col = end_col + 1
+
+    def _fill_cell(self, docx_cell, cell: Cell, layout: TableLayout, width: int) -> None:
+        oxml.set_cell_width(docx_cell, width)
+        oxml.set_vertical_align(docx_cell, self.profile.tables.valign)
+        if cell.is_header and self.profile.tables.header_shading:
+            oxml.shade_cell(docx_cell, self.profile.tables.header_shading)
+
+        spec = self.profile.font("table_header" if cell.is_header else "table")
+        spec = spec.resized(layout.font_size)
+        if cell.align:
+            spec = spec.model_copy(update={"align": cell.align})
+
+        # python-docx가 만들어 둔 빈 문단을 첫 블록에 재사용한다.
+        blocks = cell.blocks or [Paragraph(runs=[])]
+        for i, inner in enumerate(blocks):
+            if i == 0 and isinstance(inner, Paragraph):
+                self._paragraph(inner.runs, spec, docx_cell,
+                                reuse=docx_cell.paragraphs[0])
+            elif isinstance(inner, Paragraph):
+                self._paragraph(inner.runs, spec, docx_cell)
+            else:
+                self._block(inner, docx_cell)
+
+    # ── 문단/런 ─────────────────────────────────────────────────────────
+
+    def _paragraph(self, runs: list[Run], spec: FontSpec, container=None, reuse=None):
+        paragraph = reuse if reuse is not None else self._new_paragraph(container)
+        oxml.apply_paragraph_format(paragraph, spec)
+        self._runs(paragraph, runs, spec)
+        return paragraph
+
+    def _runs(self, paragraph, runs: list[Run], spec: FontSpec) -> None:
+        for item in runs:
+            if not item.text:
+                continue
+            run_spec = spec
+            if item.code and self.profile.has_font("code"):
+                code = self.profile.font("code")
+                run_spec = code.model_copy(update={"size": spec.size})
+            updates: dict = {}
+            if item.bold:
+                updates["bold"] = True
+            if item.italic:
+                updates["italic"] = True
+            if item.href and self.profile.has_font("link"):
+                link = self.profile.font("link")
+                updates.update({k: v for k, v in link.model_dump().items()
+                                if v is not None and k in ("color", "underline")})
+            if updates:
+                run_spec = run_spec.model_copy(update=updates)
+            run = paragraph.add_run(item.text)
+            oxml.apply_run_format(run, run_spec)
+
+    def _new_paragraph(self, container=None):
+        target = container if container is not None else self.docx
+        return target.add_paragraph()
+
+    def _paragraphs(self, container=None):
+        target = container if container is not None else self.docx
+        return target.paragraphs
