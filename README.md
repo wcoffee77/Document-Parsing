@@ -67,6 +67,32 @@ export CONFLUENCE_API_TOKEN=xxxx
 doc2report convert https://회사.atlassian.net/wiki/spaces/TEAM/pages/12345 -o 보고서.docx
 ```
 
+## 문구를 LLM으로 다듬기 (선택)
+
+기본값(`--polish rules`)은 규칙 기반이다. 규칙으로 못 잡는 어색한 문장만 LLM에
+맡기려면:
+
+```bash
+doc2report convert 보고서.md -o out.docx --polish llm --report 변경내역.md
+```
+
+백엔드는 둘 중 하나를 쓴다.
+
+- **Anthropic API**: `ANTHROPIC_API_KEY` 설정. 모델은 기본값을 쓰거나 `DOC2REPORT_MODEL`로 지정.
+- **OpenAI 호환 온프렘 엔드포인트** (vLLM·Ollama·TGI 등, 사내 Qwen 서빙 포함):
+
+  ```bash
+  export DOC2REPORT_LLM_BASE_URL=http://<host>:<port>/v1
+  export DOC2REPORT_MODEL=<서버에 등록된 모델 id>
+  export DOC2REPORT_LLM_API_KEY=xxxx   # 서버가 인증을 요구할 때만
+  ```
+
+  `DOC2REPORT_LLM_BASE_URL`이 설정돼 있으면 `ANTHROPIC_API_KEY`가 있어도 이쪽을 쓴다.
+
+키·엔드포인트가 없거나 호출이 실패하면 조용히 규칙 기반 결과로 돌아가고, 그 사실이
+`--report`에 `LLM 건너뜀 — <사유>`로 남는다. 실제로 다듬어졌는지는 항상 `--report`
+파일로 확인한다.
+
 ## 서식 규격 자체를 바꾸기
 
 여백·글꼴·글자 크기·말머리는 **코드가 아니라 `profiles/*.yaml`에만** 있다.
