@@ -78,7 +78,9 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 ## 지금 상태와 다음 할 일
 
 사내 서식(A4 세로, 바탕체 14pt, 1.→□→- 체계)은 `profiles/default.yaml`에 반영되어
-있고 Word 실측으로 확인했다. **다음 세션에서 실제 사내 문서로 테스트하며 세밀 조정할 차례다.**
+있고 Word 실측으로 확인했다. **다음은 사내 PC로 옮겨 온프렘 Qwen을 붙이고 실제 문서로
+테스트하며 세밀 조정할 차례다 — 순서는 [docs/onprem-first-run.md](docs/onprem-first-run.md)에
+그대로 따라 하면 되게 정리해 뒀다.**
 
 조정 후보(사용자가 범위만 주고 구체값은 잠정으로 정한 것):
 
