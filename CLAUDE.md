@@ -96,5 +96,9 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
   사내 인증 정보가 필요하다. 당장은 Confluence에서 md로 내보내 파일 경로로 쓰면 된다.
 - **병합 셀(rowspan/colspan)** 은 폭 계산·렌더 코드가 있으나 Markdown에 문법이 없어
   실제로 타본 적이 없다. Confluence 네이티브 파서를 붙일 때 확인해야 한다.
-- **LLM 다듬기**(`--polish llm`)는 구현만 되어 있고 키 없이는 규칙 기반으로 폴백한다.
+- **LLM 다듬기**(`--polish llm`)는 구현만 되어 있고 키/엔드포인트 없이는 규칙 기반으로 폴백한다.
+  Anthropic API 외에 `DOC2REPORT_LLM_BASE_URL`(+`DOC2REPORT_MODEL`, 필요 시
+  `DOC2REPORT_LLM_API_KEY`)로 OpenAI 호환 온프렘 엔드포인트(vLLM/Ollama/TGI 등)도 붙을 수
+  있게 해 뒀다(사내 Qwen 서빙 대응). 실제 온프렘 서버로 호출해 본 적은 없다 — 사내 PC에서
+  검증 필요.
 - 글꼴 선택지는 사용자 요청에 따라 **바탕체·맑은 고딕 둘로 한정**했다.

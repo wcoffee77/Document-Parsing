@@ -1,7 +1,13 @@
 """선택적 LLM 문구 다듬기 (`--polish llm`).
 
-규칙 기반으로 처리한 뒤, 남은 어색한 문장만 Claude에게 맡긴다.
-기본값은 규칙 기반이며, 키가 없거나 호출에 실패하면 조용히 규칙 결과로 돌아간다.
+규칙 기반으로 처리한 뒤, 남은 어색한 문장만 LLM에게 맡긴다.
+기본값은 규칙 기반이며, 키/엔드포인트가 없거나 호출에 실패하면 조용히 규칙 결과로 돌아간다.
+
+백엔드는 두 가지:
+- Anthropic API (기본) — `ANTHROPIC_API_KEY`
+- OpenAI 호환 온프렘 엔드포인트(vLLM/Ollama/TGI 등, Qwen 계열 포함) —
+  `DOC2REPORT_LLM_BASE_URL`을 설정하면 이쪽을 쓴다. 이때 `DOC2REPORT_MODEL`(모델명)은 필수,
+  `DOC2REPORT_LLM_API_KEY`는 서버가 요구할 때만.
 
 보내지 않는 것: 표 안 내용, 코드 블록, 숫자만 있는 문단.
 바꾸지 않는 것: 사실·수치·고유명사 (프롬프트로 고정하고, 길이가 크게 달라지면 원문 유지).
@@ -11,11 +17,13 @@ from __future__ import annotations
 
 import os
 
+import httpx
+
 from ..ir import Block, Callout, Document, ListItem, Paragraph, Run, Table, plain
 from ..profile import Profile
 from .stylize_ko import Change
 
-MODEL = "claude-sonnet-5"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 _SYSTEM = (
     "너는 한국 회사의 보고서 편집자다. 주어진 문장을 개조식 보고서 문체로 다듬어라.\n"
     "규칙:\n"
@@ -36,7 +44,7 @@ def polish_document(doc: Document, profile: Profile) -> tuple[Document, list[Cha
         return doc, []
 
     try:
-        polished = _ask_claude(texts)
+        polished = _ask_llm(texts)
     except Exception as exc:  # 키 없음·네트워크·응답 형식 오류
         return doc, [Change("(LLM)", f"규칙 기반 결과 유지 — {exc}", "LLM 건너뜀")]
 
@@ -67,7 +75,50 @@ def _collect(blocks: list[Block], texts: list[str], targets: list) -> None:
             continue  # 표는 보내지 않는다
 
 
-def _ask_claude(texts: list[str]) -> list[str]:
+def _ask_llm(texts: list[str]) -> list[str]:
+    base_url = os.environ.get("DOC2REPORT_LLM_BASE_URL")
+    if base_url:
+        return _ask_openai_compatible(texts, base_url)
+    return _ask_anthropic(texts)
+
+
+def _ask_openai_compatible(texts: list[str], base_url: str) -> list[str]:
+    """vLLM/Ollama/TGI 등 OpenAI `/chat/completions` 호환 온프렘 엔드포인트용.
+
+    사내 Qwen 서빙처럼 인터넷이 닫힌 환경을 겨냥한 경로라 anthropic SDK에
+    기대지 않고 httpx(코어 의존성)로 직접 호출한다.
+    """
+    model = os.environ.get("DOC2REPORT_MODEL")
+    if not model:
+        raise RuntimeError("DOC2REPORT_LLM_BASE_URL 사용 시 DOC2REPORT_MODEL 이 필수입니다")
+    api_key = os.environ.get("DOC2REPORT_LLM_API_KEY")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+    out: list[str] = []
+    with httpx.Client(timeout=120.0) as client:
+        for chunk in _chunks(texts, 40):
+            response = client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json={
+                    "model": model,
+                    "temperature": 0,
+                    "messages": [
+                        {"role": "system", "content": _SYSTEM},
+                        {"role": "user", "content": "\n".join(chunk)},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            lines = content.strip().splitlines()
+            if len(lines) != len(chunk):
+                raise RuntimeError(f"응답 줄 수가 맞지 않음 ({len(lines)} ≠ {len(chunk)})")
+            out.extend(lines)
+    return out
+
+
+def _ask_anthropic(texts: list[str]) -> list[str]:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY 가 없습니다")
     try:
@@ -79,7 +130,7 @@ def _ask_claude(texts: list[str]) -> list[str]:
     out: list[str] = []
     for chunk in _chunks(texts, 40):
         message = client.messages.create(
-            model=os.environ.get("DOC2REPORT_MODEL", MODEL),
+            model=os.environ.get("DOC2REPORT_MODEL", DEFAULT_ANTHROPIC_MODEL),
             max_tokens=4096,
             system=_SYSTEM,
             messages=[{"role": "user", "content": "\n".join(chunk)}],
