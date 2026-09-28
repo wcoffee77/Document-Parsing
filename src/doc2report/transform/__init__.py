@@ -37,7 +37,7 @@ class TransformResult:
 def apply_text_rules(doc: Document, profile: Profile) -> TransformResult:
     engine = _Engine(profile)
     blocks = engine.blocks(doc.blocks)
-    title = engine.text_only(doc.title) if doc.title else None
+    title = engine.heading_text(doc.title) if doc.title else None
     return TransformResult(
         document=Document(blocks=blocks, title=title, source=doc.source),
         changes=engine.changes,
@@ -76,8 +76,8 @@ class _Engine:
             return [block]
 
         if isinstance(block, Heading):
-            # 제목은 표기만 정리한다 (이미 명사구라 개조식 변환 대상이 아님).
-            return [Heading(level=block.level, runs=self.runs(block.runs, endings=False))]
+            # 제목은 개조식(~함/~음) 대상이 아니라 표기 정리 + 명사 종결만 한다.
+            return [Heading(level=block.level, runs=self.heading_runs(block.runs))]
 
         if isinstance(block, (Paragraph, ListItem)):
             return self.sentence_block(block, in_table=in_table)
@@ -133,6 +133,18 @@ class _Engine:
             out.append(run.copy_with(self.text_only(run.text, endings=endings and last,
                                                     strip=False)))
         return [r for r in out if r.text]
+
+    def heading_runs(self, runs: list[Run]) -> list[Run]:
+        if not runs or not _uniform(runs):
+            return runs  # 서식이 섞인 제목(굵게+링크 등)은 명사 종결 판단이 애매해 건드리지 않는다
+        converted = self.heading_text(plain(runs))
+        return [runs[0].copy_with(converted)] if converted else []
+
+    def heading_text(self, text: str) -> str:
+        body = self.notation.apply(text) if self.notation else text
+        if self.gaechosik:
+            body = self.gaechosik.heading_noun_ending(body)
+        return body
 
     def text_only(self, text: str, *, endings: bool = False, strip: bool = True) -> str:
         if text is None:

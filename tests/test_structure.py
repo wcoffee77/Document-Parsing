@@ -12,7 +12,7 @@ from docx import Document as DocxDocument
 from doc2report.ir import Document, Heading, Run
 from doc2report.pipeline import convert
 from doc2report.profile import load_profile
-from doc2report.transform.structure import fold_headings_into_levels
+from doc2report.transform.structure import fold_headings_into_levels, merge_short_list_items
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_report.md"
 
@@ -78,6 +78,81 @@ def test_quote_under_table_becomes_small_star_note(tmp_path, profile):
     assert int(note.paragraph_format.space_before or 0) < profile.tables.space_after
     following = next(p for p in docx.paragraphs if p.text.startswith("4.\t"))
     assert int(following.paragraph_format.space_before or 0) >= profile.tables.space_after
+
+
+def test_heading_ending_in_a_copula_becomes_a_bare_noun(tmp_path, profile):
+    """제목은 명사로 끝나야 한다("추진 배경임" → "추진 배경", 2026-09-28 사용자 요청)."""
+    source = tmp_path / "heading.md"
+    source.write_text("# 보고서\n\n## 추진 배경임\n\n본문.\n", encoding="utf-8")
+    out = tmp_path / "heading.docx"
+    convert(str(source), out, profile)
+    docx = DocxDocument(str(out))
+    assert any(p.text == "1.\t추진 배경" for p in docx.paragraphs)
+    assert not any("배경임" in p.text for p in docx.paragraphs)
+
+
+def test_short_adjacent_items_are_merged_with_and(tmp_path, profile):
+    """사용자 요청(2026-09-28): 짧은 항목끼리는 "및"으로 한 줄에 합친다."""
+    out = tmp_path / "sample.docx"
+    convert(str(FIXTURE), out, profile)
+    docx = DocxDocument(str(out))
+    texts = [p.text for p in docx.paragraphs]
+    assert any(t == "□\t10월 중 2차 성능 시험 실시 및 미흡 사항은 4분기 과제로 이관"
+              for t in texts)
+    # 셋째 항목은 짝이 없어 그대로 남는다.
+    assert any(t == "□\t결과는 월간 운영보고에 반영 예정" for t in texts)
+
+
+def test_merge_short_list_items_from_ir():
+    from doc2report.ir import ListItem
+
+    doc = Document(blocks=[
+        ListItem(depth=1, runs=[Run("짧은 항목 1")]),
+        ListItem(depth=1, runs=[Run("짧은 항목 2")]),
+    ])
+    merged, changes = merge_short_list_items(doc, max_chars=60)
+    assert len(merged.blocks) == 1
+    assert merged.blocks[0].runs[0].text == "짧은 항목 1 및 짧은 항목 2"
+    assert changes[0].rule == "항목 병합"
+
+
+def test_merge_never_chains_three_items():
+    """A+B+C가 모두 짧아도 A+B, C(홀로)까지만 — "및"이 두 번 겹치지 않는다."""
+    from doc2report.ir import ListItem
+
+    doc = Document(blocks=[
+        ListItem(depth=1, runs=[Run("가")]),
+        ListItem(depth=1, runs=[Run("나")]),
+        ListItem(depth=1, runs=[Run("다")]),
+    ])
+    merged, _ = merge_short_list_items(doc, max_chars=60)
+    texts = [b.runs[0].text for b in merged.blocks]
+    assert texts == ["가 및 나", "다"]
+    assert all(t.count("및") <= 1 for t in texts)
+
+
+def test_merge_respects_depth_and_length_budget():
+    from doc2report.ir import ListItem
+
+    doc = Document(blocks=[
+        ListItem(depth=0, runs=[Run("짧음")]),
+        ListItem(depth=1, runs=[Run("다른 깊이라 안 합쳐짐")]),  # depth 다름
+        ListItem(depth=1, runs=[Run("가" * 60)]),  # 길이 초과라 안 합쳐짐
+        ListItem(depth=1, runs=[Run("나")]),
+    ])
+    merged, changes = merge_short_list_items(doc, max_chars=60)
+    assert len(merged.blocks) == 4  # 아무것도 안 합쳐짐
+    assert changes == []
+
+
+def test_merge_is_a_noop_when_threshold_is_zero():
+    from doc2report.ir import ListItem
+
+    doc = Document(blocks=[ListItem(depth=1, runs=[Run("가")]),
+                           ListItem(depth=1, runs=[Run("나")])])
+    merged, changes = merge_short_list_items(doc, max_chars=0)
+    assert len(merged.blocks) == 2
+    assert changes == []
 
 
 def test_star_paragraph_under_table_is_a_note():

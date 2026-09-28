@@ -130,3 +130,59 @@ def _original_text(block: Block) -> str:
     if isinstance(block, Callout):
         return " / ".join(plain(b.runs) for b in block.blocks if isinstance(b, Paragraph))
     return plain(getattr(block, "runs", []))
+
+
+# ── 짧은 항목 병합 ──────────────────────────────────────────────────────
+
+
+def merge_short_list_items(doc: Document, max_chars: int) -> tuple[Document, list[Change]]:
+    """같은 단계의 짧은 항목이 연달아 나오면 "및"으로 **둘씩** 짝지어 합친다
+    (사용자 요청, 2026-09-28). "10월 중 2차 성능 시험 실시" / "미흡 사항 4분기
+    과제로 이관"처럼 둘 다 짧으면 굳이 줄을 나눌 필요가 없다. 셋 이상을 한 항목에
+    이어 붙이지는 않는다 — "A 및 B 및 C"는 "및"이 반복돼 어색하고, 개조식의
+    핵심인 항목별 스캔 가독성도 해친다. 합친 뒤에도 다음 항목이 짧으면 그 항목은
+    또 다른 항목과 새로 짝짓는다(방금 합친 결과와 다시 합치지 않는다).
+
+    fold_headings_into_levels보다 **먼저** 돌아야 한다 — 그 전에는 제목이
+    아직 Heading 블록이라 ListItem과 섞이지 않는다. 접은 뒤에는 제목도
+    ListItem이 되어 버려서, 짧은 소제목이 그 아래 짧은 항목과 잘못 합쳐질 수 있다.
+    """
+    if max_chars <= 0:
+        return doc, []
+
+    blocks: list[Block] = []
+    changes: list[Change] = []
+    src = doc.blocks
+    i = 0
+    while i < len(src):
+        block = src[i]
+        next_item = src[i + 1] if i + 1 < len(src) else None
+        can_pair = (isinstance(block, ListItem) and isinstance(next_item, ListItem)
+                   and next_item.depth == block.depth
+                   and _merged_length([block], next_item) <= max_chars)
+        group = [block, next_item] if can_pair else [block]
+        j = i + len(group)
+
+        if len(group) > 1:
+            merged = _merge_items(group)
+            changes.append(Change(" / ".join(plain(g.runs) for g in group),
+                                  plain(merged.runs), "항목 병합"))
+            blocks.append(merged)
+        else:
+            blocks.append(block)
+        i = j
+
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def _merged_length(group: list[ListItem], candidate: ListItem) -> int:
+    texts = [plain(g.runs) for g in group] + [plain(candidate.runs)]
+    return len(" 및 ".join(texts))
+
+
+def _merge_items(group: list[ListItem]) -> ListItem:
+    first = group[0]
+    template = first.runs[0] if first.runs else Run("")
+    merged_text = " 및 ".join(plain(g.runs) for g in group)
+    return ListItem(depth=first.depth, runs=[template.copy_with(merged_text)],
+                    ordered=first.ordered, number=first.number)

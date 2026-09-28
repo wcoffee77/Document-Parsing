@@ -70,6 +70,31 @@ def test_headings_and_nouns_are_left_alone(engine):
     assert engine.convert("관련 부서 등") == "관련 부서 등"
 
 
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        # 사용자가 준 예시 (2026-09-28): 제목도 명사로 끝나야 함
+        ("추진 배경임", "추진 배경"),
+        ("개선 결과이다", "개선 결과"),
+        ("향후 계획입니다", "향후 계획"),
+    ],
+)
+def test_heading_noun_ending(before, after):
+    assert Gaechosik(noun_ending=True).heading_noun_ending(before) == after
+
+
+def test_heading_that_is_already_a_noun_phrase_is_unchanged():
+    engine = Gaechosik(noun_ending=True)
+    assert engine.heading_noun_ending("추진 배경") == "추진 배경"
+    assert engine.changes == []  # 안 바뀐 건 --report에도 안 남아야 한다
+
+
+def test_heading_noun_ending_is_a_noop_without_the_profile_flag():
+    """text.noun_ending이 꺼져 있으면(기존 프로파일 등) 제목도 건드리지 않는다."""
+    engine = Gaechosik(noun_ending=False)
+    assert engine.heading_noun_ending("추진 배경임") == "추진 배경임"
+
+
 def test_nominalize_uses_jamo_rules():
     assert nominalize("진행하") == "진행함"       # 받침 없음 → ㅁ
     assert nominalize("확인되") == "확인됨"

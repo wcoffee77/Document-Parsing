@@ -54,6 +54,19 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
   기존 규칙대로 `~음`. 이 문체에서는 마침표를 붙이지 않는다.
   기존 규칙: 표에 없는 어미는 한글 자모를 합성해 처리한다
   (받침 없음 → ㅁ 추가: 진행하→진행함 / ㄹ 받침 → ㄻ: 만들→만듦 / 그 밖 → 음).
+  **제목도 명사로 끝나야 한다**("추진 배경임" → "추진 배경", 2026-09-28 사용자 요청) —
+  `Gaechosik.heading_noun_ending()`이 담당한다. 본문용 `convert()`와 달리 명사로 못
+  줄이면 원문을 그대로 두고(본문처럼 억지로 "~음/~함"을 새로 붙이지 않는다), 서식이
+  섞인 제목(굵게+링크 등)은 통째로 건드리지 않는다. `--polish llm` 프롬프트
+  (`llm_polish.py::_SYSTEM`)도 같은 방향으로 맞춰 뒀다 — 예전 프롬프트가 "명사형으로
+  끝낸다(~함/~임)"만 말해서, 규칙 기반이 이미 명사로 줄여 둔 문장을 LLM이 다시
+  "~함"을 붙여 되돌리는 문제가 있었다(사용자가 "재설계함"으로 관찰, 원인 확정 후 수정).
+- `transform/structure.py::merge_short_list_items` — 같은 단계의 짧은 항목이 연달아
+  나오면 "및"으로 **둘씩만** 합친다(2026-09-28 사용자 요청, `text.merge_short_items` +
+  `max_sentence_chars` 재사용). 셋 이상 잇지 않는다 — "A 및 B 및 C"는 "및"이 반복돼
+  어색하고 개조식의 스캔 가독성도 해친다. `fold_headings_into_levels`보다 **먼저**
+  돌아야 한다(안 그러면 제목도 ListItem이 되어 소제목이 그 아래 항목과 잘못 합쳐질
+  수 있다) — `attach_table_notes`와 같은 이유다.
 - `transform/structure.py::attach_table_notes` — 표 바로 뒤 인용문과 `*`/`※`로 시작하는
   문단을 `Table.notes`로 옮긴다. **제목 접기보다 먼저** 해야 한다(안 그러면 □ 항목으로
   접힌다). 렌더러는 표 바로 아래 `* ` + `fonts.table_note`(10pt)로 쓰고, 표 뒤 간격(18pt)은
@@ -92,7 +105,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 130개
+uv run pytest                           # 141개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -124,7 +137,8 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 | 행 최소 높이 | 7mm (여유 시 10mm) | "답답하지 않게" |
 
 2026-09-28 사용자 확정값: 문단 왼쪽 맞춤, □ 들여쓰기 0.4cm / - 0.8cm (· 1.2cm는 같은
-간격으로 잠정), 표 글자 11~12pt + 장평 90%, 표 주석 `* ` 10pt, 명사 종결.
+간격으로 잠정), 표 글자 11~12pt + 장평 90%, 표 주석 `* ` 10pt, 명사 종결(제목 포함),
+짧은 항목 "및" 병합(둘씩만).
 
 **브랜치가 두 개로 갈라져 있었다가(서식 수정 vs 온프렘 LLM 연동) 2026-09-28에 이
 브랜치(`claude/confluence-document-conversion-dtygn4`)로 합쳤다** — 서로의 커밋을

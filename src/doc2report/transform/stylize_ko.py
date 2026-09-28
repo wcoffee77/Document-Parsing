@@ -123,6 +123,23 @@ class Gaechosik:
 
         return sentence
 
+    def heading_noun_ending(self, text: str) -> str:
+        """제목은 명사로 끝나야 한다("추진 배경임" → "추진 배경"). 본문과 달리
+        명사로 줄이지 못해도 "~음/~함"을 새로 붙이지 않는다 — 원래 명사구가
+        아니면 (드문 경우) 건드리지 않고 그대로 둔다."""
+        if not self.noun_ending or not text.strip():
+            return text
+        core = text.rstrip()
+        trailing = text[len(core):]
+        if any(core.endswith(word) for word in self.rules.keep_as_is):
+            return text
+        noun = self.noun_phrase(core)
+        if noun is None:
+            return text
+        if noun != core:
+            self.changes.append(Change(text.strip(), noun, "제목 명사 종결"))
+        return noun + trailing
+
     def noun_phrase(self, core: str) -> str | None:
         """문장을 명사로 끝낸 형태. 규칙에 안 맞으면 None.
 

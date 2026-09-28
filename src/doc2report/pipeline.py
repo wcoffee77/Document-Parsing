@@ -16,7 +16,7 @@ from .profile import Profile, load_profile
 from .render.docx_writer import DATE_LINE, DocxRenderer
 from .sources import load_source
 from .transform import Change, apply_text_rules
-from .transform.structure import attach_table_notes, fold_headings_into_levels
+from .transform.structure import attach_table_notes, fold_headings_into_levels, merge_short_list_items
 
 
 @dataclass
@@ -89,6 +89,10 @@ def convert(
         doc, note_changes = attach_table_notes(doc, prof.tables.note_markers,
                                                prof.tables.note_marker)
         changes.extend(note_changes)
+    if prof.text.merge_short_items:
+        # 제목 접기보다 먼저 — 접은 뒤에는 제목도 ListItem이라 소제목과 섞여 합쳐질 수 있다.
+        doc, merge_changes = merge_short_list_items(doc, prof.text.max_sentence_chars)
+        changes.extend(merge_changes)
     if prof.text.headings_as_levels:
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
         doc, fold_changes = fold_headings_into_levels(doc)

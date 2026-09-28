@@ -236,6 +236,7 @@ class TextRules(_Base):
     noun_ending: bool = False  # 가능하면 "~함"이 아니라 명사로 끝낸다 ("재설계하였음" → "재설계")
     split_long_sentences: bool = False
     max_sentence_chars: int = 0
+    merge_short_items: bool = False  # 짧은 항목끼리 "및"으로 합치기 (max_sentence_chars 기준)
     rules: list[str] = Field(default_factory=list)
     keep_original_in_tables: bool = True
     date_format: str = ""  # 비우면 rules/notation.yaml 의 형식을 쓴다
