@@ -7,8 +7,15 @@
 ## 0. 사전 준비물
 
 - [ ] 사내 PC에 Python 3.11+, `uv`, MS Word 설치 확인
-- [ ] 온프렘 Qwen 서버(vLLM/Ollama/TGI 등) 주소·포트, 필요하면 인증 토큰
+- [x] 온프렘 서버 주소 확정: `http://75.12.15.121:8080/v1`, 모델명 `thinkingcap`
+      (`scripts/onprem_env.sh` / `onprem_env.ps1`에 반영해 둠 — 인증 토큰이
+      필요하면 그 파일의 주석 처리된 줄을 채운다)
 - [ ] 변환 테스트용 실제 사내 문서(.md, Confluence에서 내보낸 것)
+
+> 이 값들은 사내 인트라넷 주소라 클라우드 세션에서는 연결을 확인할 수 없었다
+> (`curl` 시도 결과 타임아웃). **2번부터는 반드시 사내 PC에서 직접 실행**한다.
+> 모델명이 `thinkingcap`인 걸 보면 추론(thinking) 모드가 켜져 있을 가능성이 있다 —
+> 2번 응답 확인 항목 중 `<think>` 블록 여부를 특히 주의해서 본다.
 
 ## 1. 코드 받기
 
@@ -22,18 +29,19 @@ uv sync
 `llm` extra(`uv sync --extra llm`)는 **필요 없다** — 온프렘 경로는 코어 의존성
 `httpx`만 쓴다. `anthropic` 패키지는 Anthropic API로 쓸 때만 필요.
 
-## 2. Qwen 서버 자체를 먼저 curl로 확인 (doc2report 실행 전)
+## 2. 서버 자체를 먼저 curl로 확인 (doc2report 실행 전)
 
 ```bash
-curl -s http://<host>:<port>/v1/models | python -m json.tool
+curl -s http://75.12.15.121:8080/v1/models | python -m json.tool
 ```
 
-여기 나온 `id` 값을 3단계 `DOC2REPORT_MODEL`에 그대로 쓴다.
+`id` 값이 `thinkingcap`과 일치하는지 확인한다(다르면 3단계 `DOC2REPORT_MODEL`을
+실제 `id` 값으로 바꾼다).
 
 ```bash
-curl -s http://<host>:<port>/v1/chat/completions \
+curl -s http://75.12.15.121:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"<위에서 확인한 id>","temperature":0,
+  -d '{"model":"thinkingcap","temperature":0,
        "messages":[{"role":"system","content":"너는 한국 회사의 보고서 편집자다."},
                     {"role":"user","content":"검토했습니다.\n완료하였습니다."}]}' \
   | python -m json.tool
@@ -51,13 +59,17 @@ curl -s http://<host>:<port>/v1/chat/completions \
 
 ## 3. 환경 변수 설정
 
+준비해 둔 스크립트를 불러 쓴다 (값 직접 입력할 필요 없음).
+
 ```bash
-export DOC2REPORT_LLM_BASE_URL="http://<host>:<port>/v1"
-export DOC2REPORT_MODEL="<2단계에서 확인한 모델 id>"
-export DOC2REPORT_LLM_API_KEY="<토큰>"   # 서버가 인증을 요구할 때만
+source scripts/onprem_env.sh          # bash/zsh
+```
+```powershell
+. .\scripts\onprem_env.ps1            # PowerShell (맨 앞 ". " 필수)
 ```
 
-PowerShell이면 `$env:DOC2REPORT_LLM_BASE_URL = "..."` 형태.
+서버가 인증 토큰을 요구하면 위 스크립트 파일을 열어 `DOC2REPORT_LLM_API_KEY` 줄의
+주석을 풀고 값을 채운 뒤 다시 불러온다.
 
 ## 4. 실제 사내 문서 변환
 
