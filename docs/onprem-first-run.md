@@ -42,6 +42,21 @@ uv sync
 `llm` extra(`uv sync --extra llm`)는 **필요 없다** — 온프렘 경로는 코어 의존성
 `httpx`만 쓴다. `anthropic` 패키지는 Anthropic API로 쓸 때만 필요.
 
+> **`uv` 설치가 막힐 때 (실제로 겪음)**: 이 사내 PC는 `astral.sh`, `pypi.org`
+> 등 외부 인터넷 접속 자체가 정책으로 막혀 있어서 `irm ... | iex`나
+> `pip install uv`가 안 될 수 있다. 그럴 땐 인터넷 되는 다른 PC에서
+> `https://github.com/astral-sh/uv/releases/latest`의
+> `uv-x86_64-pc-windows-msvc.zip`을 받아 `uv.exe`만 뽑아서 USB/사내 파일
+> 공유로 옮긴다. 프로젝트 폴더에 두고 이렇게 쓰면 된다(PowerShell은 현재
+> 폴더 실행파일에 `.\`가 필요):
+> ```powershell
+> .\uv.exe --version
+> .\uv.exe sync
+> ```
+> 매번 `.\` 붙이기 귀찮으면 그 세션에서 `Set-Alias uv .\uv.exe` 해두고
+> 이 문서의 `uv ...` 명령을 그대로 쓴다(창 새로 열면 다시 설정 필요).
+> `uv.exe`는 `.gitignore`에 이미 추가돼 있어 실수로 커밋되지 않는다.
+
 ## 2. 서버 자체를 먼저 curl로 확인 (doc2report 실행 전)
 
 ```bash
