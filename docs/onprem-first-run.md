@@ -62,10 +62,12 @@ uv sync
 > 의존성 파일(wheel)도 인터넷 되는 곳에서 미리 받아 통째로 옮기면 된다.
 > `scripts/onprem-requirements.txt`에 이 프로젝트가 실제로 필요로 하는
 > 24개 패키지가 정확히 고정돼 있다(`uv.lock` 기준, dev 도구 제외). 클로드가
-> 이미 Windows/Python 3.13용으로 받아 압축해 둔 `wheelhouse` 파일을 전달받았다면
-> USB/사내 파일공유로 옮긴 뒤:
+> 이미 Windows/Python 3.13용으로 받아 압축해 둔 zip 파일을 전달받았다면
+> USB/사내 파일공유로 옮긴 뒤 압축을 푼다 — **압축 안의 폴더 이름이
+> `wheelhouse_win`이다**(프로젝트 폴더 바로 밑에 풀리도록). `dir`로 실제
+> 생긴 폴더 이름을 확인하고 그 이름을 `--find-links`에 그대로 쓴다:
 > ```powershell
-> .\uv.exe sync --offline --find-links wheelhouse --no-dev
+> .\uv.exe sync --offline --find-links wheelhouse_win --no-dev
 > ```
 > 로 한 번에 설치된다(직접 검증 완료 — 네트워크 요청 없이 24개 패키지 전부
 > 설치되고 `doc2report`도 정상 빌드됨). 이후 `uv run` 명령에도 매번
