@@ -8,6 +8,30 @@
 > 오프라인 설치, `--offline --no-sync`, PowerShell 인코딩 문제 등 공통되는
 > 부분은 그 문서를 그대로 참고하면 된다 — 여기서는 Confluence 쪽만 다룬다.
 
+## 지금 상태 (2026-09-28)
+
+API 토큰 발급에 **사내 승인 절차가 필요해 진행 중**이다. 그 결과만 기다리면
+되고, 나머지(주소 확정, 코드 수정)는 이미 끝나 있다.
+
+**승인이 나서 토큰을 받으면, 이 문서 나머지는 안 보고 아래만 하면 된다:**
+
+```powershell
+notepad scripts\confluence_env.ps1
+```
+파일이 없다면(아직 한 번도 안 만들었다면) 먼저
+`copy scripts\confluence_env.example.ps1 scripts\confluence_env.ps1`.
+파일을 열면 이 줄이 보인다 — 따옴표 안을 받은 토큰으로 바꾸고 저장:
+```powershell
+$env:CONFLUENCE_API_TOKEN = "여기에_PAT"
+```
+저장 후 같은 PowerShell 창에서:
+```powershell
+. .\scripts\confluence_env.ps1
+```
+여기까지가 **토큰을 입력하는 전부**다. 이어서 검증하려면 3번(REST API 직접
+확인)부터 이어서 하면 된다. 아래 0~2번은 이미 끝났으므로 다시 안 해도 된다
+(맨 처음 실행이거나 확인차 다시 보고 싶을 때만 참고).
+
 ## 0. 사전 준비물
 
 - [ ] 이 브랜치(`claude/confluence-document-conversion-dtygn4`)로 코드가 최신인지
@@ -21,8 +45,9 @@
       1번에서 Personal Access Token 발급 메뉴가 보이면 Server/DC, 안 보이고
       Atlassian 계정 자체의 API tokens 메뉴만 있으면 Cloud.
 - [ ] 테스트로 변환해 볼 **실제 접근 권한이 있는 페이지** 하나(URL 또는 페이지 ID)
-- [ ] Server/DC면: 개인 액세스 토큰(PAT)만. Cloud면: 계정 이메일 + API 토큰.
-      (발급 방법은 1번 참고)
+- [ ] **API 토큰 — 사내 승인 절차 진행 중.** Server/DC면 개인 액세스 토큰(PAT)만,
+      Cloud면 계정 이메일 + API 토큰. (발급 방법은 1번 참고. **받으면 위
+      "지금 상태" 박스에 적힌 대로 입력.**)
 
 ## 1. 인증 정보 발급
 
@@ -62,6 +87,14 @@ source scripts/confluence_env.sh
 > $env:CONFLUENCE_API_TOKEN = "여기에_토큰"
 > ```
 > 이 값은 **현재 창에서만 유지**된다.
+
+**제대로 들어갔는지 확인** (토큰 값 전체를 화면에 띄우지 않고 길이·앞 4자만):
+```powershell
+"길이=$($env:CONFLUENCE_API_TOKEN.Length), 시작=$($env:CONFLUENCE_API_TOKEN.Substring(0,[Math]::Min(4,$env:CONFLUENCE_API_TOKEN.Length)))"
+```
+길이가 0이거나 `여기에_PAT`가 그대로 보이면 저장을 안 했거나 `.` 없이
+스크립트를 실행한 것이다 — `notepad`로 다시 열어 확인하고, `.` 을 빠뜨리지
+않았는지(`. .\scripts\confluence_env.ps1`) 다시 확인.
 
 ## 3. REST API 자체를 먼저 확인 (doc2report 실행 전)
 
