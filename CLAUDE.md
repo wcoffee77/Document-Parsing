@@ -92,7 +92,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 113개
+uv run pytest                           # 121개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -109,7 +109,9 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 ## 지금 상태와 다음 할 일
 
 사내 서식(A4 세로, 바탕체 14pt, 1.→□→- 체계)은 `profiles/default.yaml`에 반영되어
-있고 Word 실측으로 확인했다. **다음 세션에서 실제 사내 문서로 테스트하며 세밀 조정할 차례다.**
+있고 Word 실측으로 확인했다. 온프렘 LLM 연동(`thinkingcap`)도 사내 PC에서 끝까지
+검증 완료했다(아래 절 참고, 순서는 [docs/onprem-first-run.md](docs/onprem-first-run.md)).
+**다음은 실제 사내 문서·Confluence 페이지로 세밀 조정할 차례다.**
 
 조정 후보(사용자가 범위만 주고 구체값은 잠정으로 정한 것):
 
@@ -123,8 +125,13 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 
 2026-09-28 사용자 확정값: 문단 왼쪽 맞춤, □ 들여쓰기 0.4cm / - 0.8cm (· 1.2cm는 같은
 간격으로 잠정), 표 글자 11~12pt + 장평 90%, 표 주석 `* ` 10pt, 명사 종결.
-**작업 결과는 main에 합쳐져야 사용자가 받는다** — 사용자는 main을 pull해서 확인한다
-(9-28에 feature 브랜치에만 올린 수정을 사용자가 못 받아 '개선 안 됨'으로 보고된 적 있음).
+
+**브랜치가 두 개로 갈라져 있었다가(서식 수정 vs 온프렘 LLM 연동) 2026-09-28에 이
+브랜치(`claude/confluence-document-conversion-dtygn4`)로 합쳤다** — 서로의 커밋을
+모르는 채로 나뉘어 작업되다가, 사내 PC가 온프렘 LLM 브랜치로 실행하는 바람에 서식
+수정이 안 보여서 "개선 안 됨"으로 보고된 적이 있다. **지금부터는 이 브랜치 하나만
+pull하면 둘 다 받는다.** 아직 `main`에는 합쳐지지 않았다 — 사용자가 PR 병합 여부를
+정하기로 함.
 
 ## Confluence 연동 (2026-09-28 재작업)
 
@@ -149,5 +156,21 @@ Server/Data Center로 보고 Bearer(PAT)를 쓴다. 필요한 환경변수는 RE
   꼭 확인해야 한다.
 - 인증 방식 분기(Cloud/Server 판별을 USERNAME 유무로)가 실제 사내 Confluence 배포
   형태와 맞는지 확인 필요.
-- **LLM 다듬기**(`--polish llm`)는 구현만 되어 있고 키 없이는 규칙 기반으로 폴백한다.
 - 글꼴 선택지는 사용자 요청에 따라 **바탕체·맑은 고딕 둘로 한정**했다.
+
+## 온프렘 LLM 연동 (검증 완료 — thinkingcap)
+
+**LLM 다듬기 온프렘 연동**(`--polish llm` + `DOC2REPORT_LLM_BASE_URL`)은 사내 PC에서
+실제 온프렘 모델(`thinkingcap`, OpenAI 호환)로 끝까지 검증 완료됐다. 응답 문자열 정상,
+`<think>` 블록 없음, `rule='LLM'`로 실제 다듬어짐 확인함(`docs/onprem-first-run.md` 참고).
+다만 이 PC의 `HTTP_PROXY`가 사내 Squid로 요청을 우회시켜 목적지를 차단하는 문제가 있어
+`NO_PROXY` 환경변수로 우회 중 — 네트워크팀에 정식 프록시 예외 등록 요청 필요(임시 조치임).
+또한 규칙 기반이 LLM보다 먼저 실행되므로, 문장이 이미 완벽하면 `--report`에 "LLM" 행이
+하나도 안 남을 수 있다(정상 동작, 오작동 아님).
+
+**오프라인 설치**(인터넷이 막힌 사내망): `uv sync` 대신 `wheelhouse` zip을 받아
+`uv pip install`로 설치하는 절차를 `docs/onprem-first-run.md`에 정리해 뒀다.
+`uv run` 뒤에 붙이는 플래그는 **반드시 하이픈 두 개**(`--offline --no-sync`)여야 한다 —
+하이픈 하나(`-offline`)로 쓰면 uv가 그걸 `-o -f -f -l -i -n -e`처럼 한 글자씩 쪼개
+해석하다 "unexpected argument" 에러를 낸다(2026-09-28 실제로 겪음). `--report`,
+`--polish`, `--date` 등 doc2report 자체 옵션도 마찬가지로 하이픈 두 개.
