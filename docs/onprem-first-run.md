@@ -7,7 +7,7 @@
 ## 0. 사전 준비물
 
 - [ ] 사내 PC에 Python 3.11+, `uv`, MS Word 설치 확인
-- [x] 온프렘 서버 주소 확정: `http://75.12.15.121:8080/v1`, 모델명 `thinkingcap`
+- [x] 온프렘 서버 주소 확정: `http://75.12.15.121:8000/v1`, 모델명 `thinkingcap`
       (`scripts/onprem_env.sh` / `onprem_env.ps1`에 반영해 둠)
 - [x] 인증 토큰 불필요 확인됨 — 스크립트의 `DOC2REPORT_LLM_API_KEY` 줄은 그대로 주석 유지
 - [ ] 변환 테스트용 실제 사내 문서(.md, Confluence에서 내보낸 것)
@@ -19,12 +19,16 @@
 > 와도 코드가 자동으로 잘라내도록 이미 반영해 뒀다(`llm_polish.py`). 다만 추론
 > 과정이 길면 응답이 느려질 수 있으니 2번에서 응답 시간도 같이 봐 둔다.
 >
-> **사내 프록시 차단 관련**: 2번 curl/`Invoke-RestMethod`에서 `403` +
-> `authentication required` 류 HTML 페이지가 오면 서버 응답이 아니라 사내
-> 프록시가 요청을 가로챈 것이다. 같은 PC의 일반 브라우저로 같은 URL을 열어
-> 똑같이 막히는지 먼저 확인하고, 막히면 `netsh winhttp show proxy`로 프록시
-> 설정을 보고 이 내부 IP가 예외(우회) 목록에 있는지 IT팀에 확인한다 —
-> 코드로 우회할 문제가 아니라 망 정책 문제다.
+> **포트 정정**: 처음엔 `8080`으로 안내했으나 실제 포트는 **`8000`**이다(정정 반영
+> 완료). 앞서 `8080`에서 났던 `403` + `authentication required` HTML 페이지는
+> Qwen 서버가 아니라 그 포트에 떠 있는 다른 서비스(사내 프록시 등)를 잘못 두드린
+> 것이었을 가능성이 높다 — `8000`으로 다시 시도해서 먼저 확인.
+>
+> 그래도 같은 `403`/인증 페이지가 나오면 그때는 사내 프록시가 요청을 가로챈
+> 것이다. 같은 PC의 일반 브라우저로 같은 URL을 열어 똑같이 막히는지 확인하고,
+> 막히면 `netsh winhttp show proxy`로 프록시 설정을 보고 이 내부 IP가 예외
+> (우회) 목록에 있는지 IT팀에 확인한다 — 코드로 우회할 문제가 아니라 망 정책
+> 문제다.
 
 ## 1. 코드 받기
 
@@ -41,14 +45,14 @@ uv sync
 ## 2. 서버 자체를 먼저 curl로 확인 (doc2report 실행 전)
 
 ```bash
-curl -s http://75.12.15.121:8080/v1/models | python -m json.tool
+curl -s http://75.12.15.121:8000/v1/models | python -m json.tool
 ```
 
 `id` 값이 `thinkingcap`과 일치하는지 확인한다(다르면 3단계 `DOC2REPORT_MODEL`을
 실제 `id` 값으로 바꾼다).
 
 ```bash
-curl -s http://75.12.15.121:8080/v1/chat/completions \
+curl -s http://75.12.15.121:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"thinkingcap","temperature":0,
        "messages":[{"role":"system","content":"너는 한국 회사의 보고서 편집자다."},
@@ -62,7 +66,7 @@ curl -s http://75.12.15.121:8080/v1/chat/completions \
 > PowerShell 네이티브로 실행한다.
 >
 > ```powershell
-> Invoke-RestMethod -Uri "http://75.12.15.121:8080/v1/models" | ConvertTo-Json -Depth 5
+> Invoke-RestMethod -Uri "http://75.12.15.121:8000/v1/models" | ConvertTo-Json -Depth 5
 > ```
 > ```powershell
 > $body = @{
@@ -74,7 +78,7 @@ curl -s http://75.12.15.121:8080/v1/chat/completions \
 >     )
 > } | ConvertTo-Json -Depth 5
 >
-> Invoke-RestMethod -Uri "http://75.12.15.121:8080/v1/chat/completions" `
+> Invoke-RestMethod -Uri "http://75.12.15.121:8000/v1/chat/completions" `
 >   -Method Post -ContentType "application/json; charset=utf-8" `
 >   -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
 > ```
