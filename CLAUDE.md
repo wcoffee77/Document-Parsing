@@ -92,7 +92,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 124개
+uv run pytest                           # 130개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 

@@ -12,11 +12,16 @@
 
 - [ ] 이 브랜치(`claude/confluence-document-conversion-dtygn4`)로 코드가 최신인지
       (`git log -1 --oneline` — 이 문서를 만든 커밋 이후인지 확인)
-- [ ] **Confluence 종류 확인**: 주소가 `*.atlassian.net`이면 **Cloud**, 사내
-      자체 도메인(`wiki.회사.com` 등)이면 **Server/Data Center**. 아래 단계가
-      갈린다.
+- [x] **REST API 주소 확정**: `http://api.confluence.samsungds.net/rest/api/`
+      (`scripts/confluence_env.example.ps1`/`.sh`에 이미 반영해 둠). 브라우저로
+      보는 위키 주소와는 다른 REST 전용 게이트웨이다. `http`(평문)라 사내망
+      바깥에서는 안 열릴 수 있다 — 사내 PC/VPN에서 실행 전제.
+- [ ] **Cloud/Server-DC 판별**: 이 주소만 봐서는 API 게이트웨이를 자체 구축한
+      Server/Data Center로 보이지만(회사 도메인 서브호스트), 확정은 아니다.
+      1번에서 Personal Access Token 발급 메뉴가 보이면 Server/DC, 안 보이고
+      Atlassian 계정 자체의 API tokens 메뉴만 있으면 Cloud.
 - [ ] 테스트로 변환해 볼 **실제 접근 권한이 있는 페이지** 하나(URL 또는 페이지 ID)
-- [ ] Cloud면: 계정 이메일 + API 토큰. Server/DC면: 개인 액세스 토큰(PAT)만.
+- [ ] Server/DC면: 개인 액세스 토큰(PAT)만. Cloud면: 계정 이메일 + API 토큰.
       (발급 방법은 1번 참고)
 
 ## 1. 인증 정보 발급
@@ -63,10 +68,17 @@ source scripts/confluence_env.sh
 doc2report를 거치지 않고 Confluence REST API에 직접 붙어서, 인증과 페이지 ID가
 맞는지부터 확인한다. `123456`은 0번에서 정한 테스트 페이지 ID로 바꾼다.
 
-**Server/DC (PAT, Bearer):**
+`$base`를 먼저 만든다 — `CONFLUENCE_URL`에 `/rest/api`가 이미 있든(우리 경우처럼)
+없든 doc2report 코드와 똑같은 방식으로 맞춰 준다:
+```powershell
+$base = $env:CONFLUENCE_URL.TrimEnd('/')
+if ($base -notmatch '/rest/api$') { $base += '/rest/api' }
+```
+
+**Server/DC (PAT, Bearer) — 우리 경우 이쪽일 가능성이 높음:**
 ```powershell
 $headers = @{ Authorization = "Bearer $env:CONFLUENCE_API_TOKEN" }
-Invoke-RestMethod -Uri "$env:CONFLUENCE_URL/rest/api/content/123456?expand=body.storage" -Headers $headers
+Invoke-RestMethod -Uri "$base/content/123456?expand=body.storage" -Headers $headers
 ```
 
 **Cloud (이메일 + API 토큰, Basic):**
@@ -74,7 +86,7 @@ Invoke-RestMethod -Uri "$env:CONFLUENCE_URL/rest/api/content/123456?expand=body.
 $pair = "$env:CONFLUENCE_USERNAME`:$env:CONFLUENCE_API_TOKEN"
 $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pair))
 $headers = @{ Authorization = "Basic $basic" }
-Invoke-RestMethod -Uri "$env:CONFLUENCE_URL/rest/api/content/123456?expand=body.storage" -Headers $headers
+Invoke-RestMethod -Uri "$base/content/123456?expand=body.storage" -Headers $headers
 ```
 
 확인할 것:
@@ -99,7 +111,9 @@ Invoke-RestMethod -Uri "$env:CONFLUENCE_URL/rest/api/content/123456?expand=body.
 .\uv.exe run --offline --no-sync doc2report convert https://wiki.회사.com/pages/viewpage.action?pageId=123456 -o out\보고서.docx --report out\변경내역.md
 ```
 
-URL 그대로 넣으면 된다 — 페이지 ID는 자동으로 뽑는다. 지원하는 URL 형태:
+여기 넣는 URL은 **브라우저 주소창의 페이지 링크**다 — `CONFLUENCE_URL`(REST
+게이트웨이 주소)과는 다른 도메인이어도 된다. 코드는 이 URL에서 숫자 페이지
+ID만 뽑아내고, 실제 요청은 `CONFLUENCE_URL` 쪽으로 보낸다. 지원하는 URL 형태:
 
 | 형태 | 예 |
 |---|---|

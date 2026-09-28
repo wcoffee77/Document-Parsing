@@ -11,6 +11,12 @@ parsers/confluence_storage.py 로 넘긴다.
     CONFLUENCE_USERNAME  계정 이메일 — 있으면 Cloud(API 토큰 + Basic 인증)로 인식
     CONFLUENCE_API_TOKEN API 토큰(Cloud) 또는 개인 액세스 토큰(Server/DC, USERNAME 없이 Bearer로 씀)
 
+CONFLUENCE_URL은 REST 엔드포인트 앞의 기본 주소여야 한다(`/rest/api/content/...`는
+코드가 붙인다). 회사에 따라 REST 전용 게이트웨이가 브라우저 주소와 다른 서브도메인에
+있고(예: `wiki.회사.com`이 아니라 `api.confluence.회사.com`), 안내받은 주소 자체에
+`/rest/api`가 이미 포함된 경우도 있다 — 둘 다 그대로 넣어도 되도록 `/rest/api` 접미사는
+있으면 떼고 쓴다(`_normalize_base_url`).
+
 받는 URL은 숫자 페이지 ID를 담고 있어야 한다 (`/pages/123456`, `?pageId=123456`,
 또는 페이지 ID 숫자 그 자체). `/x/AbCd` 같은 단축 링크는 그 자체로 리다이렉트라
 REST API 한 번으로는 못 푼다 — 페이지를 열어 실제 URL(또는 "..." 메뉴의 페이지 ID)을
@@ -50,7 +56,7 @@ def page_id_from_url(url: str) -> str | None:
 
 
 def load_confluence(url_or_id: str) -> LoadedSource:
-    base_url = _require("CONFLUENCE_URL")
+    base_url = _normalize_base_url(_require("CONFLUENCE_URL"))
     page_id = page_id_from_url(url_or_id)
     if page_id is None:
         raise RuntimeError(
@@ -81,6 +87,19 @@ def load_confluence(url_or_id: str) -> LoadedSource:
         format="confluence_storage",
         title=title,
     )
+
+
+_REST_API_SUFFIX = re.compile(r"/rest/api/?$", re.IGNORECASE)
+
+
+def _normalize_base_url(url: str) -> str:
+    """끝의 슬래시와, 있다면 '/rest/api'까지 뗀다.
+
+    안내받은 주소가 사람이 쓰는 위키 주소(`.../wiki`)일 수도, REST 게이트웨이
+    주소(`.../rest/api/`)일 수도 있어서 둘 다 그대로 CONFLUENCE_URL에 넣어도
+    되게 한다 — 코드가 항상 `/rest/api/content/...`를 새로 붙이기 때문이다.
+    """
+    return _REST_API_SUFFIX.sub("", url.rstrip("/"))
 
 
 def _client(base_url: str) -> httpx.Client:

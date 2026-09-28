@@ -10,7 +10,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from doc2report.sources.confluence import load_confluence, page_id_from_url
+from doc2report.sources.confluence import _normalize_base_url, load_confluence, page_id_from_url
 
 
 @pytest.mark.parametrize("url,expected", [
@@ -24,6 +24,37 @@ from doc2report.sources.confluence import load_confluence, page_id_from_url
 ])
 def test_page_id_from_url(url, expected):
     assert page_id_from_url(url) == expected
+
+
+@pytest.mark.parametrize("url,expected", [
+    # 사내 REST 게이트웨이가 사용자 안내 주소 자체에 /rest/api를 포함하는 경우
+    # (실제 사례: http://api.confluence.samsungds.net/rest/api/, 2026-09-28).
+    ("http://api.confluence.samsungds.net/rest/api/", "http://api.confluence.samsungds.net"),
+    ("http://api.confluence.samsungds.net/rest/api", "http://api.confluence.samsungds.net"),
+    ("http://api.confluence.samsungds.net", "http://api.confluence.samsungds.net"),
+    ("https://wiki.company.com/", "https://wiki.company.com"),
+    ("https://x.atlassian.net/wiki", "https://x.atlassian.net/wiki"),
+])
+def test_normalize_base_url_accepts_either_form(url, expected):
+    assert _normalize_base_url(url) == expected
+
+
+def test_confluence_url_with_rest_api_suffix_does_not_duplicate_path(monkeypatch):
+    """CONFLUENCE_URL에 /rest/api가 이미 있어도 요청 경로가 두 번 붙지 않는다."""
+    monkeypatch.setenv("CONFLUENCE_URL", "http://api.confluence.samsungds.net/rest/api/")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/child/attachment"):
+            return httpx.Response(200, json={"results": []})
+        seen["path"] = request.url.path
+        return _page_response(request)
+
+    _patch_client(monkeypatch, handler)
+    load_confluence("999")
+
+    assert seen["path"] == "/rest/api/content/999"
 
 
 def test_unrecognized_url_fails_fast_with_a_clear_message(monkeypatch):
