@@ -42,7 +42,13 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 - `transform/stylize_ko.py` — 표에 없는 어미는 한글 자모를 합성해 처리한다
   (받침 없음 → ㅁ 추가: 진행하→진행함 / ㄹ 받침 → ㄻ: 만들→만듦 / 그 밖 → 음).
 - `transform/structure.py` — 사내 보고서는 제목/본문이 따로 없고 `1.→□→-` 한 체계라
-  마크다운 `##`/`###`를 이 체계로 접어 넣는다(`text.headings_as_levels`).
+  마크다운 `##`/`###`를 이 체계로 접어 넣는다(`text.headings_as_levels`). Confluence
+  제목은 이미 "1. 추진 배경"처럼 번호가 박혀 있는 경우가 흔해, 접기 전에 그 번호를
+  떼어 낸다(안 그러면 "1.\t1. 추진 배경"처럼 겹친다) — 뗀 것도 Change로 남겨 --report에 보인다.
+- `parsers/confluence_storage.py` — Confluence REST API가 주는 storage format(XHTML)을
+  마크다운을 거치지 않고 곧장 IR로 읽는다. 마크다운 표 문법에는 병합 셀 표현이 없어서,
+  한번이라도 마크다운을 거치면 rowspan/colspan이 사라진다 — Confluence는 표 폭 제약이
+  없어 셀 병합을 자유롭게 쓰므로 이 경로가 핵심이다.
 
 ## 겪은 함정 (다시 밟지 말 것)
 
@@ -57,11 +63,19 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
   `_SENTENCE_SPLIT`의 `(?<![0-9][.!?])` 가 그 방지책이다.
 - docx는 길이를 twips로 저장하므로 되읽으면 **최대 635 EMU 오차**가 난다.
   테스트에서 정확히 같은지 비교하면 실패한다.
+- **표 셀은 `<td>텍스트</td>`처럼 `<p>` 없이 바로 텍스트가 들어가기도 한다.**
+  자식 요소만 훑으면(`_children_blocks`) 아무 자식이 없어 통째로 빈 문단이 된다 —
+  실제로 걸렸던 버그다(`_cell_blocks`/리스트의 같은 패턴 참고). 표/리스트 새 파서를
+  쓸 때는 꼭 "블록 자식이 하나도 없는 컨테이너"를 인라인으로도 읽어야 한다.
+- **`python-docx`의 세로 병합(`rowspan`)은 아래 칸의 내용을 위 칸으로 옮겨 버린다**
+  (`CT_Tc._span_to_width`가 `_move_content_to`로 그렇게 동작). 병합 *먼저*, 내용 채우기는
+  *그 다음*이어야 한다 — 순서를 바꾸면 먼저 써 둔 내용이 사라진다.
+  (`render/docx_writer.py::_fill_cells`는 이미 그 순서를 지킨다.)
 
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 55개
+uv run pytest                           # 81개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -90,11 +104,28 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 | 표 뒤 간격 | 18pt | 18pt 이상 |
 | 행 최소 높이 | 7mm (여유 시 10mm) | "답답하지 않게" |
 
-아직 검증되지 않은 것:
+## Confluence 연동 (2026-09-28 재작업)
 
-- **Confluence 연동**(`sources/confluence.py`)은 코드만 있고 실제로 돌려본 적이 없다.
-  사내 인증 정보가 필요하다. 당장은 Confluence에서 md로 내보내 파일 경로로 쓰면 된다.
-- **병합 셀(rowspan/colspan)** 은 폭 계산·렌더 코드가 있으나 Markdown에 문법이 없어
-  실제로 타본 적이 없다. Confluence 네이티브 파서를 붙일 때 확인해야 한다.
+`sources/confluence.py`가 더 이상 외부 `confluence-markdown-exporter` 바이너리에
+의존하지 않는다. REST API(`GET /rest/api/content/{id}?expand=body.storage`)를
+`httpx`로 직접 불러 storage format(XHTML)을 받고, `parsers/confluence_storage.py`가
+그 XHTML을 마크다운을 거치지 않고 곧장 IR로 옮긴다 — 그래서 병합 셀(rowspan/colspan),
+info/warning 패널, code 매크로가 살아남는다. 첨부 이미지는
+`/rest/api/content/{id}/child/attachment`로 목록을 받아 파일명 그대로 내려받는다.
+
+인증: `CONFLUENCE_USERNAME`이 있으면 Cloud로 보고 Basic(이메일+API 토큰), 없으면
+Server/Data Center로 보고 Bearer(PAT)를 쓴다. 필요한 환경변수는 README 참고.
+
+**아직 검증되지 않은 것 — 실제 사내 Confluence로 다음에 확인할 것:**
+
+- 이 코드는 `tests/test_confluence_storage.py`(파서, 고정 XHTML 픽스처),
+  `tests/test_confluence_source.py`(REST 클라이언트, `httpx.MockTransport`로 흉내),
+  `tests/test_confluence_pipeline.py`(파서→변환→렌더 전 과정)로 검증했지만, 셋 다
+  **실제 Confluence 서버를 흉내 낸 것**이다. 진짜 사내 인스턴스의 storage XHTML이
+  여기서 다루지 않은 매크로(레이아웃, 특수 패널 등)를 쓰면 `_block()`의 "알 수 없는
+  요소" 경로로 빠져 --report에 노트로만 남고 본문에선 빠진다 — 처음 몇 건은 리포트를
+  꼭 확인해야 한다.
+- 인증 방식 분기(Cloud/Server 판별을 USERNAME 유무로)가 실제 사내 Confluence 배포
+  형태와 맞는지 확인 필요.
 - **LLM 다듬기**(`--polish llm`)는 구현만 되어 있고 키 없이는 규칙 기반으로 폴백한다.
 - 글꼴 선택지는 사용자 요청에 따라 **바탕체·맑은 고딕 둘로 한정**했다.

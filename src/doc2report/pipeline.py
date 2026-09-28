@@ -67,7 +67,14 @@ def convert(
     prof = profile if isinstance(profile, Profile) else load_profile(profile)
 
     loaded = load_source(source)
-    doc = parse_markdown(loaded.text, source=loaded.name)
+    if loaded.format == "confluence_storage":
+        from .parsers.confluence_storage import parse_confluence_storage
+
+        parsed = parse_confluence_storage(loaded.text, source=loaded.name, title=loaded.title)
+        doc = parsed.document
+        loaded.notes.extend(parsed.notes)
+    else:
+        doc = parse_markdown(loaded.text, source=loaded.name)
     if loaded.base_dir:
         _resolve_image_paths(doc, loaded.base_dir)
     if date:
@@ -79,7 +86,8 @@ def convert(
         doc, changes = transformed.document, transformed.changes
     if prof.text.headings_as_levels:
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
-        doc = fold_headings_into_levels(doc)
+        doc, fold_changes = fold_headings_into_levels(doc)
+        changes.extend(fold_changes)
     if polish == "llm":
         from .transform.llm_polish import polish_document
 

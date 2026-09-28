@@ -1,0 +1,57 @@
+<h2>추진 배경</h2>
+<p>운영 시스템의 응답 지연이 <strong>지속적으로</strong> 발생하였다.</p>
+<ac:structured-macro ac:name="warning">
+  <ac:rich-text-body><p>본 변경은 운영 반영 전 검토가 필요합니다.</p></ac:rich-text-body>
+</ac:structured-macro>
+<h2>개선 결과</h2>
+<table>
+  <tbody>
+    <tr>
+      <th>구분</th>
+      <th colspan="2">응답시간</th>
+      <th>개선율</th>
+      <th>담당 부서</th>
+      <th>협조 부서</th>
+      <th>추진 일정</th>
+      <th>소요 예산</th>
+      <th>기대 효과</th>
+      <th>비고 및 향후 조치 계획</th>
+    </tr>
+    <tr>
+      <td rowspan="2">조회 API</td>
+      <td>개선 전</td>
+      <td>3200ms</td>
+      <td>85%</td>
+      <td>플랫폼개발팀</td>
+      <td>데이터엔지니어링팀</td>
+      <td>2026. 7. ~ 2026. 9.</td>
+      <td>45,000천원</td>
+      <td>응답시간 80% 단축</td>
+      <td>1단계 완료, 추가 튜닝 예정</td>
+    </tr>
+    <tr>
+      <td>개선 후</td>
+      <td>480ms</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+  </tbody>
+</table>
+<h2>다음 단계</h2>
+<ul>
+  <li>2차 성능 시험
+    <ul>
+      <li>10월 중 실시</li>
+    </ul>
+  </li>
+  <li>미흡 사항 이관</li>
+</ul>
+<ac:structured-macro ac:name="code">
+  <ac:parameter ac:name="language">sql</ac:parameter>
+  <ac:plain-text-body><![CDATA[SELECT idx_name FROM pg_stat_user_indexes WHERE idx_scan = 0;]]></ac:plain-text-body>
+</ac:structured-macro>

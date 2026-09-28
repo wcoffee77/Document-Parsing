@@ -17,7 +17,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-confluence = ["confluence-markdown-exporter>=0.3.0"]
 llm = ["anthropic>=0.40.0"]
 
 [project.scripts]

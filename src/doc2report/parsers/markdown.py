@@ -109,7 +109,8 @@ def _blocks(tokens: list[Token], depth: int) -> list[Block]:
             i = close + 1
 
         elif t.type == "html_block":
-            i += 1  # 원시 HTML은 무시 (Confluence 경유 시 exporter가 이미 정리)
+            i += 1  # 원시 HTML은 무시. Confluence는 이제 storage XHTML을 직접 파싱하므로
+            # (parsers/confluence_storage.py) 여기로 오지 않는다 — .md 원본 안의 raw HTML만 해당.
 
         else:
             i += 1

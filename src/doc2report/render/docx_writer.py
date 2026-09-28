@@ -137,13 +137,13 @@ class DocxRenderer:
         elif isinstance(block, Table):
             self._table(block, container)
         elif isinstance(block, CodeBlock):
-            self._code(block, container)
+            self._after_table_gap(self._code(block, container), container)
         elif isinstance(block, Callout):
             self._callout(block, container)
         elif isinstance(block, Image):
-            self._image(block, container)
+            self._after_table_gap(self._image(block, container), container)
         elif isinstance(block, HorizontalRule):
-            self._rule(container)
+            self._after_table_gap(self._rule(container), container)
         elif isinstance(block, PageBreak):
             from docx.enum.text import WD_BREAK
 
@@ -235,7 +235,7 @@ class DocxRenderer:
             before = max(before, self.profile.tables.space_after)
         return before
 
-    def _code(self, block: CodeBlock, container=None) -> None:
+    def _code(self, block: CodeBlock, container=None):
         spec = self.profile.font("code")
         paragraph = self._new_paragraph(container)
         oxml.apply_paragraph_format(paragraph, spec)
@@ -249,6 +249,7 @@ class DocxRenderer:
         if self.profile.tables.border_width:
             oxml.add_border(paragraph, "left", self.profile.tables.border_width,
                             self.profile.tables.border_color, space="6")
+        return paragraph
 
     def _callout(self, block: Callout, container=None) -> None:
         spec = self.profile.font("callout")
@@ -258,27 +259,31 @@ class DocxRenderer:
                 self._paragraph(inner.runs, spec, container)
             else:
                 self._block(inner, container)
+        paragraphs = self._paragraphs(container)
+        if len(paragraphs) > start:
+            self._after_table_gap(paragraphs[start], container)
         if self.profile.tables.border_width:
-            for paragraph in self._paragraphs(container)[start:]:
+            for paragraph in paragraphs[start:]:
                 oxml.add_border(paragraph, "left", self.profile.tables.border_width,
                                 self.profile.tables.border_color, space="6")
 
-    def _image(self, block: Image, container=None) -> None:
+    def _image(self, block: Image, container=None):
         path = Path(block.src)
         if not path.exists():
             self.notes.append(f"이미지를 찾을 수 없어 건너뜀: {block.src}")
-            return
+            return None
         paragraph = self._new_paragraph(container)
         try:
             paragraph.add_run().add_picture(str(path), width=Emu(self._image_width(block)))
         except Exception as exc:  # 형식 미지원 등
             self.notes.append(f"이미지 삽입 실패({block.src}): {exc}")
-            return
+            return None
         oxml.apply_paragraph_format(paragraph, self.profile.font("caption"))
         if block.caption:
             self._figure_seq += 1
             self._paragraph([Run(f"[그림 {self._figure_seq}] {block.caption}")],
                             self.profile.font("caption"), container)
+        return paragraph
 
     def _image_width(self, block: Image) -> int:
         usable = self.profile.page.usable_width
@@ -289,11 +294,12 @@ class DocxRenderer:
         natural = parse_length(block.width_px, default_unit="px")
         return min(natural, usable)
 
-    def _rule(self, container=None) -> None:
+    def _rule(self, container=None):
         paragraph = self._new_paragraph(container)
         rules = self.profile.tables
         if rules.border_width:
             oxml.add_border(paragraph, "bottom", rules.border_width, rules.border_color)
+        return paragraph
 
     # ── 표 ──────────────────────────────────────────────────────────────
 

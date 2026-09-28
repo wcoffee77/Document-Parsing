@@ -13,6 +13,8 @@ class LoadedSource:
     name: str  # 원본 경로/URL — 로그용
     base_dir: Path | None = None  # 이미지 등 상대 경로 기준
     notes: list[str] = field(default_factory=list)
+    format: str = "markdown"  # "markdown" | "confluence_storage" — pipeline이 파서를 고를 때 씀
+    title: str | None = None  # Confluence 페이지 제목처럼 본문과 별도로 오는 제목
 
 
 def load_source(source: str) -> LoadedSource:
