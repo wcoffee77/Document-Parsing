@@ -1,0 +1,10 @@
+# doc2report를 -e(editable)로 설치할 때 필요한 빌드 도구.
+# scripts/onprem-requirements.txt(런타임 의존성)와는 별개 — pyproject.toml의
+# [build-system] requires = ["hatchling"] 를 오프라인으로 만족시키기 위한 것.
+hatchling==1.32.4
+editables==0.6
+packaging==26.3
+pathspec==1.1.1
+pluggy==1.6.0
+tomlkit==0.15.1
+trove-classifiers==2026.9.21.13

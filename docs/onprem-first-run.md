@@ -58,23 +58,32 @@ uv sync
 > `uv.exe`는 `.gitignore`에 이미 추가돼 있어 실수로 커밋되지 않는다.
 >
 > **`uv sync`도 막힐 때 (실제로 겪음 — `pypi.org` 접속 자체가 막혀
-> `typing-inspection` 등 의존성을 못 받음)**: `uv.exe`와 똑같은 방식으로,
-> 의존성 파일(wheel)도 인터넷 되는 곳에서 미리 받아 통째로 옮기면 된다.
-> `scripts/onprem-requirements.txt`에 이 프로젝트가 실제로 필요로 하는
-> 24개 패키지가 정확히 고정돼 있다(`uv.lock` 기준, dev 도구 제외). 클로드가
-> 이미 Windows/Python 3.13용으로 받아 압축해 둔 zip 파일을 전달받았다면
-> USB/사내 파일공유로 옮긴 뒤 압축을 푼다 — **압축 안의 폴더 이름이
-> `wheelhouse_win`이다**(프로젝트 폴더 바로 밑에 풀리도록). `dir`로 실제
-> 생긴 폴더 이름을 확인하고 그 이름을 `--find-links`에 그대로 쓴다:
+> `typing-inspection` 등 의존성을 못 받음)**: 처음엔 `uv sync --offline
+> --find-links <폴더>`를 안내했으나 **이건 틀렸다** — `uv.lock`이 각 패키지의
+> 정확한 PyPI 다운로드 URL을 그대로 박아 두기 때문에, `uv sync`는
+> `--find-links`가 있어도 그 URL만 찾다가 캐시가 비어 있으면 실패한다(직접
+> 캐시를 비우고 재현해서 확인함). **`uv sync` 대신 `uv pip install`로 직접
+> 설치해야 한다** — 이건 `uv.lock`을 참고하지 않고 `--find-links`만 본다.
+>
+> 클로드가 Windows/Python 3.13용으로 미리 받아 압축해 둔 `wheelhouse` zip을
+> 전달받았다면(런타임 24개 + `doc2report`를 빌드하는 데 필요한 hatchling 등
+> 7개, 총 31개 wheel 포함), USB/사내 파일공유로 옮기고 압축을 풀어 프로젝트
+> 폴더 바로 밑에 `wheelhouse` 폴더가 생기게 한 뒤(`dir`로 확인):
 > ```powershell
-> .\uv.exe sync --offline --find-links wheelhouse_win --no-dev
+> .\uv.exe venv
+> .\uv.exe pip install --no-index --find-links wheelhouse -r scripts\onprem-requirements.txt -r scripts\onprem-build-requirements.txt
+> .\uv.exe pip install --no-index --find-links wheelhouse -e .
 > ```
-> 로 한 번에 설치된다(직접 검증 완료 — 네트워크 요청 없이 24개 패키지 전부
-> 설치되고 `doc2report`도 정상 빌드됨). 이후 `uv run` 명령에도 매번
-> `--offline`를 붙이면 안전하다:
+> 이 세 줄로 가상환경 생성 + 의존성 설치 + `doc2report` 자체 설치가 끝난다
+> (uv 0.12.19, 완전히 빈 캐시 상태에서 직접 재현해 검증 완료 — 네트워크 요청
+> 0회, `doc2report convert`까지 정상 동작 확인함). 이후 실행은 `uv run`에
+> `--no-sync`를 붙여서 `uv.lock`을 다시 확인하지 않게 한다:
 > ```powershell
-> .\uv.exe run --offline doc2report convert ...
+> .\uv.exe run --offline --no-sync doc2report convert ...
 > ```
+> **이 문서의 4번 이후 모든 `uv run ...` 명령 앞에 `--offline --no-sync`를
+> 붙여서 실행**하면 된다.
+>
 > `wheelhouse`가 없다면, 인터넷 되는 아무 PC(Windows 아니어도 됨, pip만 있으면
 > 됨)에서 이렇게 받아서 그 폴더를 옮기면 된다:
 > ```bash
@@ -82,6 +91,7 @@ uv sync
 >   --platform win_amd64 --python-version 3.13 --implementation cp --abi cp313 \
 >   --only-binary=:all:
 > pip download colorama==0.4.6 -d wheelhouse --only-binary=:all:   # Windows 전용 조건부 의존성, 위 명령엔 안 잡힘
+> pip download -r scripts/onprem-build-requirements.txt -d wheelhouse --only-binary=:all:   # doc2report 빌드(-e .)에 필요
 > ```
 
 ## 2. 서버 자체를 먼저 curl로 확인 (doc2report 실행 전)
