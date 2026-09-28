@@ -196,8 +196,15 @@ source scripts/onprem_env.sh          # bash/zsh
 
 ## 4. 실제 사내 문서 변환
 
-```bash
-uv run doc2report convert 사내문서.md -o out/보고서.docx --polish llm --report out/변경내역.md --date today
+> 3번에서 오프라인 설치(wheelhouse)로 했다면 **`uv run`에 반드시
+> `--offline --no-sync`를 붙인다** — 빠뜨리면 uv가 `uv.lock` 전체(확장 기능
+> 포함)와 다시 동기화하려다 네트워크를 필요로 해서 엉뚱한 패키지(예:
+> `pycparser`) 다운로드 실패로 막힌다(실제로 겪음). 아래 명령들은 이미
+> 그 플래그를 넣은 상태다 — 온라인 환경이면 `.\uv.exe run` 대신 `uv run`,
+> 플래그 없이 써도 된다.
+
+```powershell
+.\uv.exe run --offline --no-sync doc2report convert 사내문서.md -o out\보고서.docx --polish llm --report out\변경내역.md --date today
 ```
 
 ## 5. 결과 확인 (이 순서로)
@@ -205,7 +212,7 @@ uv run doc2report convert 사내문서.md -o out/보고서.docx --polish llm --r
 1. `out/변경내역.md`를 **가장 먼저** 연다 — "LLM" 규칙으로 다듬어진 줄이 있는지,
    아니면 `LLM 건너뜀 — <사유>`로 규칙 기반에 폴백했는지 확인.
 2. `out/보고서.docx`를 Word로 열어 문구·서식을 육안 확인.
-3. 표 배치만 따로 보고 싶으면: `uv run doc2report check 사내문서.md`
+3. 표 배치만 따로 보고 싶으면: `.\uv.exe run --offline --no-sync doc2report check 사내문서.md`
 4. (선택, 실측까지 하려면) Word COM으로 PDF 추출 → `pdfplumber`로 여백·정렬·표 폭
    측정. 명령은 `CLAUDE.md`의 "검증 방법" 절 참고. Word 프로세스가 남아 파일을
    잠그면 다음 변환이 `PermissionError`로 실패하니 `$word.Quit()` 확인.
@@ -222,8 +229,8 @@ uv run doc2report convert 사내문서.md -o out/보고서.docx --polish llm --r
 | 표 뒤 간격 | 18pt | 18pt 이상 |
 | 행 최소 높이 | 7mm (여유 시 10mm) | "답답하지 않게" |
 
-```bash
-uv run doc2report convert 사내문서.md -o out/보고서.docx -p default --watch --open
+```powershell
+.\uv.exe run --offline --no-sync doc2report convert 사내문서.md -o out\보고서.docx -p default --watch --open
 ```
 
 YAML을 고치고 저장 → Word 새로고침을 반복하면 빠르게 맞출 수 있다.
