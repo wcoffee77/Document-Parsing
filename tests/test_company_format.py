@@ -123,14 +123,16 @@ def test_table_cells_are_centered_and_single_spaced(docx, profile):
 
 
 def test_rows_have_a_minimum_height(docx, profile):
+    """행 최소 높이는 기본값, 지면에 여유가 있으면 넉넉한 값 — 둘 중 하나여야 한다."""
     from docx.oxml.ns import qn
 
+    allowed = {round(profile.tables.row_height / 635),
+               round(profile.tables.row_height_relaxed / 635)}
     for row in docx.tables[0].rows:
         height = row._tr.find(qn("w:trPr")).find(qn("w:trHeight"))
         assert height is not None
         assert height.get(qn("w:hRule")) == "atLeast"
-        assert int(height.get(qn("w:val"))) == pytest.approx(
-            profile.tables.row_height / 635, abs=1)
+        assert min(abs(int(height.get(qn("w:val"))) - a) for a in allowed) <= 1
 
 
 def test_overrides_change_font_and_size(tmp_path, profile):

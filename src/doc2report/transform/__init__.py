@@ -50,7 +50,8 @@ class _Engine:
         rules = profile.text
         self.use_notation = "notation" in rules.rules or not rules.rules
         self.use_endings = rules.gaechosik and ("endings" in rules.rules or not rules.rules)
-        self.gaechosik = Gaechosik() if self.use_endings or rules.split_long_sentences else None
+        self.gaechosik = (Gaechosik(noun_ending=rules.noun_ending)
+                          if self.use_endings or rules.split_long_sentences else None)
         self.notation = Notation(_notation_rules(profile)) if self.use_notation else None
 
     @property

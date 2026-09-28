@@ -41,6 +41,9 @@ class EndingRules:
     keep_as_is: list[str] = field(default_factory=list)
     replacements: list[tuple[str, str]] = field(default_factory=list)
     connectives: list[str] = field(default_factory=list)
+    noun_endings: list[tuple[str, str]] = field(default_factory=list)
+    drop_particles: list[str] = field(default_factory=list)
+    adverb_to_noun: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path | None = None) -> EndingRules:
@@ -52,14 +55,22 @@ class EndingRules:
             keep_as_is=list(data.get("keep_as_is", [])),
             replacements=[(a, b) for a, b in data.get("replacements", [])],
             connectives=list(data.get("connectives", [])),
+            noun_endings=[(a, b) for a, b in data.get("noun_endings", [])],
+            drop_particles=list(data.get("drop_particles", [])),
+            adverb_to_noun=list(data.get("adverb_to_noun", [])),
         )
 
 
 class Gaechosik:
-    """문장 단위 개조식 변환기."""
+    """문장 단위 개조식 변환기.
 
-    def __init__(self, rules: EndingRules | None = None):
+    noun_ending이 켜져 있으면 가능한 문장은 명사로 끝내고("인덱스 재설계"),
+    안 되는 문장만 "~음/~함"으로 끝낸다. 명사 종결 문체에서는 마침표를 붙이지 않는다.
+    """
+
+    def __init__(self, rules: EndingRules | None = None, *, noun_ending: bool = False):
         self.rules = rules or EndingRules.load()
+        self.noun_ending = noun_ending
         self.changes: list[Change] = []
 
     # ── 공개 API ────────────────────────────────────────────────────────
@@ -95,6 +106,12 @@ class Gaechosik:
         if any(core.endswith(word) for word in self.rules.keep_as_is):
             return sentence
 
+        if self.noun_ending:
+            noun = self.noun_phrase(core)
+            if noun is not None:
+                return noun + trailing
+            punct = ""  # 명사 종결 문체에서는 "~음/~함"으로 끝나도 마침표를 붙이지 않는다
+
         for suffix, replacement in self.rules.suffix_rules:
             if core.endswith(suffix):
                 return core[: -len(suffix)] + replacement + punct + trailing
@@ -105,6 +122,52 @@ class Gaechosik:
                 return nominalize(stem) + punct + trailing
 
         return sentence
+
+    def noun_phrase(self, core: str) -> str | None:
+        """문장을 명사로 끝낸 형태. 규칙에 안 맞으면 None.
+
+        "응답 지연 문제가 지속적으로 발생하였습니다"
+          → 끝말 '하였습니다'를 떼면 마지막 단어 '발생'(명사)
+          → 바로 앞 부사 '지속적으로' → '지속', 그 앞 '문제가'의 조사 '가'를 뗌
+          → "응답 지연 문제 지속 발생"
+        """
+        for suffix, tail in self.rules.noun_endings:
+            if not core.endswith(suffix):
+                continue
+            stem = core[: -len(suffix)]
+            words = stem.split(" ")
+            if not stem or stem != stem.rstrip() or not _is_noun_word(words[-1]):
+                return None
+            return " ".join(self._tidy_before_noun(words)) + tail
+        return None
+
+    def _tidy_before_noun(self, words: list[str]) -> list[str]:
+        words = list(words)
+        i = len(words) - 2
+        while i >= 0:
+            word = words[i]
+            adverb = next((a for a in self.rules.adverb_to_noun
+                           if word.endswith(a) and len(word) > len(a) + 1), None)
+            if adverb:
+                words[i] = word[: -len(adverb)]
+                i -= 1
+                continue
+            words[i] = self._drop_particle(word)
+            break
+        return words
+
+    def _drop_particle(self, word: str) -> str:
+        for particle in self.rules.drop_particles:
+            if not word.endswith(particle):
+                continue
+            rest = word[: -len(particle)]
+            if len(rest) < 2 or not _is_hangul(rest[-1]):
+                return word
+            needs_batchim = particle in ("을", "이", "은")
+            if _has_batchim(rest[-1]) == needs_batchim:
+                return rest
+            return word
+        return word
 
     def split_long(self, text: str, max_chars: int) -> list[str]:
         """긴 문장을 문장 부호와 연결어미에서 끊어 여러 항목으로."""
@@ -132,6 +195,22 @@ class Gaechosik:
 
 
 # ── 자모 합성 ───────────────────────────────────────────────────────────
+
+
+def _is_hangul(ch: str) -> bool:
+    return _HANGUL_BASE <= ord(ch) <= _HANGUL_LAST
+
+
+def _has_batchim(ch: str) -> bool:
+    return (ord(ch) - _HANGUL_BASE) % 28 != 0
+
+
+def _is_noun_word(word: str) -> bool:
+    """명사로 끝낼 수 있는 단어인가 — 한글로 끝나는 2자 이상.
+
+    한 글자('말했습니다'→'말', '못했습니다'→'못')는 명사가 아닐 가능성이 커서 뺀다.
+    """
+    return len(word) >= 2 and _is_hangul(word[-1])
 
 
 def nominalize(stem: str) -> str:

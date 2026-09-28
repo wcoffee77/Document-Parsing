@@ -45,6 +45,7 @@ class FontSpec(_Base):
     first_line_indent: int | None = None
     keep_next: bool | None = None
     page_break_before: bool | None = None
+    char_scale: float | None = None  # 장평 (1.0 = 100%)
 
     @field_validator("size", "space_before", "space_after", mode="before")
     @classmethod
@@ -56,7 +57,7 @@ class FontSpec(_Base):
     def _mm_length(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="mm")
 
-    @field_validator("line_spacing", mode="before")
+    @field_validator("line_spacing", "char_scale", mode="before")
     @classmethod
     def _ratio(cls, v: Any) -> Any:
         return None if v is None else parse_ratio(v)
@@ -180,7 +181,11 @@ class TableRules(_Base):
     cell_margin_y: int = 0
     cell_margin_x_min: int | None = None
     font_ladder: list[int] = Field(default_factory=list)
+    char_scale_ladder: list[float] = Field(default_factory=list)  # 장평 후보 (1.0 = 100%)
     max_cell_lines: int = 0  # 한 셀이 이 줄 수를 넘으면 글자 크기를 낮춰 본다 (0=제한 없음)
+    max_header_lines: int = 0  # 머리행이 이 줄 수를 넘으면 머리 문구를 축약한다 (0=축약 안 함)
+    note_markers: list[str] = Field(default_factory=list)  # 표 바로 아래 이 기호로 시작하면 주석
+    note_marker: str | None = None  # 주석을 쓸 때 앞에 붙일 기호
     safety_margin: float = 0.0
     repeat_header: bool = True
     keep_row_together: bool = True
@@ -215,6 +220,11 @@ class TableRules(_Base):
             return []
         return [parse_length(x, default_unit="pt") for x in v]
 
+    @field_validator("char_scale_ladder", mode="before")
+    @classmethod
+    def _scales(cls, v: Any) -> Any:
+        return [] if v is None else [parse_ratio(x) for x in v]
+
     @field_validator("safety_margin", "width_ratio", mode="before")
     @classmethod
     def _ratio(cls, v: Any) -> Any:
@@ -223,6 +233,7 @@ class TableRules(_Base):
 
 class TextRules(_Base):
     gaechosik: bool = False  # 개조식(명사형 종결) 변환 여부
+    noun_ending: bool = False  # 가능하면 "~함"이 아니라 명사로 끝낸다 ("재설계하였음" → "재설계")
     split_long_sentences: bool = False
     max_sentence_chars: int = 0
     rules: list[str] = Field(default_factory=list)
@@ -350,6 +361,16 @@ class Profile(_Base):
         """표 글자 크기 축소 사다리. 비어 있으면 표 서식 크기 하나만."""
         return self.tables.font_ladder or [self.font("table").size]
 
+    def table_steps(self) -> list[tuple[int, float]]:
+        """(글자 크기, 장평) 후보를 글자 폭이 덜 줄어드는 순서로.
+
+        12pt·90%(폭 10.8)가 11pt·100%(폭 11)보다 좁으므로 크기와 장평을 따로
+        내리지 않고 실제 글자 폭(크기 × 장평)으로 줄 세운다 — 필요한 만큼만 줄이기 위해.
+        """
+        scales = self.tables.char_scale_ladder or [self.font("table").char_scale or 1.0]
+        steps = {(size, scale) for size in self.table_font_ladder() for scale in scales}
+        return sorted(steps, key=lambda s: (-s[0] * s[1], -s[0]))
+
 
 def load_profile(name_or_path: str | Path) -> Profile:
     """이름('default') 또는 경로('./my.yaml') 로 프로파일을 읽는다."""
@@ -416,6 +437,7 @@ def _dump_font(spec: FontSpec) -> dict:
     for key in ("indent", "first_line_indent"):
         data[key] = _mm(data[key])
     data["line_spacing"] = _pct(data["line_spacing"])
+    data["char_scale"] = _pct(data["char_scale"])
     return _strip(data)
 
 
@@ -436,5 +458,6 @@ def _dump_tables(rules: TableRules) -> dict:
     for key in ("cell_margin_x", "cell_margin_x_min", "row_height", "row_height_relaxed"):
         data[key] = _mm(data[key])
     data["font_ladder"] = [_pt(step) for step in rules.font_ladder]
+    data["char_scale_ladder"] = [_pct(step) for step in rules.char_scale_ladder]
     data["safety_margin"] = _pct(rules.safety_margin)
     return _strip(data)

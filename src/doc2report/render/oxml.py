@@ -41,6 +41,14 @@ _SEQ: dict[str, tuple[str, ...]] = {
         "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr",
     ),
     "w:pBdr": ("w:top", "w:left", "w:bottom", "w:right", "w:between", "w:bar"),
+    "w:rPr": (
+        "w:rStyle", "w:rFonts", "w:b", "w:bCs", "w:i", "w:iCs", "w:caps", "w:smallCaps",
+        "w:strike", "w:dstrike", "w:outline", "w:shadow", "w:emboss", "w:imprint",
+        "w:noProof", "w:snapToGrid", "w:vanish", "w:webHidden", "w:color", "w:spacing",
+        "w:w", "w:kern", "w:position", "w:sz", "w:szCs", "w:highlight", "w:u", "w:effect",
+        "w:bdr", "w:shd", "w:fitText", "w:vertAlign", "w:rtl", "w:cs", "w:em", "w:lang",
+        "w:eastAsianLayout", "w:specVanish", "w:oMath",
+    ),
     "w:tblPr": (
         "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual", "w:tblStyleRowBandSize",
         "w:tblStyleColBandSize", "w:tblW", "w:jc", "w:tblCellSpacing", "w:tblInd",
@@ -115,6 +123,10 @@ def apply_run_format(run, spec: FontSpec) -> None:
         if not spec.latin:
             rfonts.set(qn("w:ascii"), spec.east_asia)
             rfonts.set(qn("w:hAnsi"), spec.east_asia)
+    if spec.char_scale and abs(spec.char_scale - 1.0) > 1e-6:
+        # 장평 — python-docx API에 없다. 값은 백분율 정수(90 = 90%).
+        scale = _ordered(run._element.get_or_add_rPr(), "w:w")
+        scale.set(qn("w:val"), str(int(round(spec.char_scale * 100))))
 
 
 def apply_paragraph_format(paragraph, spec: FontSpec, *, indent: bool = True) -> None:

@@ -1,4 +1,4 @@
-"""문서 구조 정규화 — 제목을 단락 체계 안으로 접어 넣는다.
+"""문서 구조 정규화 — 제목을 단락 체계 안으로 접어 넣고, 표 주석을 표에 붙인다.
 
 사내 보고서는 제목/본문이 따로 있는 것이 아니라 1. → □ → - 한 체계로 쓰인다.
 반면 Confluence·Markdown 문서는 ##, ### 제목과 목록을 섞어 쓴다.
@@ -17,14 +17,14 @@ from __future__ import annotations
 
 import re
 
-from ..ir import Block, Document, Heading, ListItem, Paragraph, Run, plain
+from ..ir import Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table, plain
 from .stylize_ko import Change
 
 HEADING_BASE = 2  # H1은 문서 제목이므로 H2가 첫 단계(1.)가 된다
 
-# "1. ", "2) ", "(3) " 같이 흔히 쓰는 수동 번호. 소수점 다단계("2.1")는 프로파일
-# 체계가 표현하지 못해 건드리지 않는다.
-_EXISTING_NUMBER = re.compile(r"^\(?\d+[.)]\s+")
+# 제목 앞 수동 번호: "1. ", "1.추진", "1.1. ", "2) ", "(3) ".
+# 끝의 (?!\d) 가 "1.5배 향상"처럼 숫자로 시작하는 제목을 번호로 오인하지 않게 한다.
+_EXISTING_NUMBER = re.compile(r"^\s*(?:\(\d+\)|\d+(?:\.\d+)*[.)])(?!\d)\s*")
 
 
 def fold_headings_into_levels(doc: Document) -> tuple[Document, list[Change]]:
@@ -58,9 +58,75 @@ def _strip_existing_number(runs: list[Run]) -> tuple[list[Run], Change | None]:
         return runs, None
     first = runs[0]
     match = _EXISTING_NUMBER.match(first.text)
-    if not match:
-        return runs, None
+    if not match or match.end() >= len(first.text.rstrip()) and len(runs) == 1:
+        return runs, None  # 번호만 있는 제목("1.")은 그대로 둔다
     before = plain(runs)
     stripped = first.copy_with(first.text[match.end():])
     new_runs = [stripped, *runs[1:]] if stripped.text else list(runs[1:])
     return new_runs, Change(before, plain(new_runs), "제목 중복 번호 제거")
+
+
+# ── 표 주석 ─────────────────────────────────────────────────────────────
+
+
+def attach_table_notes(doc: Document, markers: list[str],
+                       note_marker: str | None) -> tuple[Document, list[Change]]:
+    """표 바로 뒤의 주석 문단을 표에 붙인다.
+
+    - 인용문(`> 측정 기준은 …`)은 Markdown·Confluence에서 표 설명을 다는 흔한 방식이다.
+    - `*`, `※` 등 markers 로 시작하는 문단도 주석으로 본다.
+    본문 흐름에서 빼 두지 않으면 제목 접기에서 □ 항목이 되어 버리고, 표와 주석 사이에
+    '표 뒤 간격'이 끼어 주석이 표에서 떨어져 보인다.
+    """
+    blocks: list[Block] = []
+    changes: list[Change] = []
+    current: Table | None = None
+
+    for block in doc.blocks:
+        if current is not None:
+            notes = _as_notes(block, markers)
+            if notes is not None:
+                for runs in notes:
+                    current.notes.append(runs)
+                    after = f"{note_marker} {plain(runs)}" if note_marker else plain(runs)
+                    changes.append(Change(_original_text(block), after, "표 주석"))
+                continue
+        current = block if isinstance(block, Table) else None
+        blocks.append(block)
+
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def _as_notes(block: Block, markers: list[str]) -> list[list[Run]] | None:
+    if isinstance(block, Callout) and block.kind == "quote":
+        if not block.blocks or not all(isinstance(b, Paragraph) for b in block.blocks):
+            return None
+        return [_strip_marker(b.runs, markers) for b in block.blocks]
+    if isinstance(block, Paragraph) and _marker_of(plain(block.runs), markers):
+        return [_strip_marker(block.runs, markers)]
+    return None
+
+
+def _marker_of(text: str, markers: list[str]) -> str | None:
+    stripped = text.lstrip()
+    for marker in sorted(markers, key=len, reverse=True):
+        if stripped.startswith(marker):
+            return marker
+    return None
+
+
+def _strip_marker(runs: list[Run], markers: list[str]) -> list[Run]:
+    if not runs:
+        return runs
+    marker = _marker_of(runs[0].text, markers)
+    if not marker:
+        return runs
+    text = runs[0].text.lstrip()[len(marker):].lstrip()
+    head = runs[0].copy_with(text)
+    return [head, *runs[1:]] if text else list(runs[1:])
+
+
+def _original_text(block: Block) -> str:
+    if isinstance(block, Callout):
+        return " / ".join(plain(b.runs) for b in block.blocks if isinstance(b, Paragraph))
+    return plain(getattr(block, "runs", []))

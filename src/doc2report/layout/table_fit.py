@@ -1,11 +1,14 @@
 """표를 A4 폭에 밀어 넣는 엔진 — 이 프로젝트의 핵심.
 
-브라우저의 CSS 자동 테이블 레이아웃과 같은 접근을 쓴다.
-  1. 셀마다 min(가장 긴 끊을 수 없는 덩어리) / max(한 줄로 다 썼을 때) 폭을 잰다
-  2. 열 단위로 모으고, 사용가능폭 안에 max가 들어가면 그대로
-  3. 안 들어가면 min을 바닥으로 두고 남는 폭을 (max-min) 비례로 배분
-  4. min의 합조차 넘치면 프로파일의 축소 사다리를 순서대로 내려간다
-     글자 크기 ↓ → 셀 여백 ↓ → (허용 시) 가로 페이지
+브라우저의 CSS 자동 테이블 레이아웃과 비슷하되, 사내 보고서 관례에 맞게 세 가지를 바꿨다.
+  1. 열 폭은 '내용'이 정한다. 머리행은 최소 폭(끊을 수 없는 덩어리)만 요구하고
+     자연 폭은 요구하지 않는다 — 값은 짧은데 제목만 긴 열이 넓어지지 않도록.
+  2. 폭을 나눌 때 열 크기를 비슷하게 맞춘다(수위 채우기).
+     남으면 좁은 열부터 같은 높이까지 채우고, 모자라면 넓은 열부터 같은 높이로 깎는다.
+  3. 안 들어가면 (글자 크기, 장평) 조합을 '글자 폭이 덜 줄어드는' 순서로 내려간다
+     → 셀 여백 ↓ → (허용 시) 가로 페이지.
+폭을 정한 뒤 머리가 tables.max_header_lines보다 길게 줄바꿈되면 머리 문구를 축약한다
+(규칙은 rules/abbreviations.yaml, 결과는 --report에 남는다).
 확정된 폭은 렌더러가 tblLayout=fixed + tcW로 못 박아 Word가 다시 흐트러뜨리지 못하게 한다.
 """
 
@@ -13,11 +16,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..ir import Cell, Document, Table, iter_tables, plain
-from ..ir import Paragraph
+from ..ir import Cell, Document, Paragraph, Table, iter_tables, plain
 from ..profile import Profile
+from ..transform.abbreviate import default_abbreviator
 from ..units import fmt_pt
 from .measure import TextMeasurer
+
+_BISECT_STEPS = 60
 
 
 @dataclass
@@ -27,9 +32,12 @@ class TableLayout:
     col_widths: list[int]  # EMU
     font_size: int  # EMU
     cell_margin_x: int  # EMU
+    char_scale: float = 1.0  # 장평
     landscape: bool = False
     overflow: bool = False  # 최소 폭조차 못 맞춰 강제로 줄인 경우
     notes: list[str] = field(default_factory=list)
+    # (행 번호, 행 안의 칸 번호) → (원래 머리, 축약한 머리)
+    header_text: dict[tuple[int, int], tuple[str, str]] = field(default_factory=dict)
 
     @property
     def total_width(self) -> int:
@@ -46,8 +54,14 @@ def plan_tables(doc: Document, profile: Profile) -> dict[int, TableLayout]:
 
 
 def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayout:
+    layout = _fit_widths(table, profile, available_width)
+    _abbreviate_headers(table, profile, layout)
+    return layout
+
+
+def _fit_widths(table: Table, profile: Profile, available_width: int) -> TableLayout:
     rules = profile.tables
-    ladder = profile.table_font_ladder()
+    steps = profile.table_steps()
     margins = [rules.cell_margin_x]
     if rules.cell_margin_x_min is not None and rules.cell_margin_x_min < rules.cell_margin_x:
         margins.append(rules.cell_margin_x_min)
@@ -56,42 +70,44 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     if rules.allow_landscape:
         widths.append(int(profile.page.landscape().usable_width * rules.width_ratio))
 
-    base_size = ladder[0]
+    base = steps[0]
 
     # 1차: 폭도 맞고 셀 줄 수도 읽을 만한 조합을 위에서부터 찾는다.
     for page_idx, avail in enumerate(widths):
-        for size in ladder:
+        for step in steps:
             for margin in margins:
-                attempt = _try_fit(table, profile, avail, size, margin, check_lines=True)
+                attempt = _try_fit(table, profile, avail, step, margin, check_lines=True)
                 if attempt is not None:
                     attempt.landscape = page_idx > 0
-                    _annotate(attempt, base_size, size, rules.cell_margin_x, margin)
+                    _annotate(attempt, base, step, rules.cell_margin_x, margin)
                     return attempt
 
-    # 2차: 줄 수 제약은 못 지키더라도 폭은 맞춘다. 줄 수는 글자가 작을수록 적으므로 최소 크기로.
+    # 2차: 줄 수 제약은 못 지키더라도 폭은 맞춘다. 줄 수는 글자가 좁을수록 적으므로 최소 조합으로.
     for page_idx, avail in enumerate(widths):
-        for margin in margins:
-            attempt = _try_fit(table, profile, avail, ladder[-1], margins[-1], check_lines=False)
-            if attempt is not None:
-                attempt.landscape = page_idx > 0
-                _annotate(attempt, base_size, ladder[-1], rules.cell_margin_x, margins[-1])
-                if rules.max_cell_lines:
-                    attempt.notes.append(
-                        f"셀 줄 수가 {rules.max_cell_lines}줄을 넘어 최소 글자 크기를 적용함"
-                    )
-                return attempt
+        attempt = _try_fit(table, profile, avail, steps[-1], margins[-1], check_lines=False)
+        if attempt is not None:
+            attempt.landscape = page_idx > 0
+            _annotate(attempt, base, steps[-1], rules.cell_margin_x, margins[-1])
+            if rules.max_cell_lines:
+                attempt.notes.append(
+                    f"셀 줄 수가 {rules.max_cell_lines}줄을 넘어 가장 좁은 글자 폭을 적용함"
+                )
+            return attempt
 
     # 3차: 최소 폭조차 넘치면 비례 축소 (텍스트는 세로로 길어질 뿐 잘리지 않음)
-    result = _force_fit(table, profile, widths[-1], ladder[-1], margins[-1])
+    result = _force_fit(table, profile, widths[-1], steps[-1], margins[-1])
     result.landscape = len(widths) > 1
-    _annotate(result, base_size, ladder[-1], rules.cell_margin_x, margins[-1])
-    result.notes.append("최소 글자 크기로도 자연 폭을 맞출 수 없어 비례 축소함 (줄바꿈이 늘어남)")
+    _annotate(result, base, steps[-1], rules.cell_margin_x, margins[-1])
+    result.notes.append("가장 좁은 글자 폭으로도 최소 폭을 맞출 수 없어 비례 축소함 (줄바꿈이 늘어남)")
     return result
 
 
-def _annotate(layout: TableLayout, base_size: int, size: int, base_margin: int, margin: int) -> None:
-    if size != base_size:
-        layout.notes.append(f"표 글자 크기 {fmt_pt(base_size)} → {fmt_pt(size)} 하향")
+def _annotate(layout: TableLayout, base: tuple[int, float], step: tuple[int, float],
+              base_margin: int, margin: int) -> None:
+    if step[0] != base[0]:
+        layout.notes.append(f"표 글자 크기 {fmt_pt(base[0])} → {fmt_pt(step[0])} 하향")
+    if step[1] != base[1]:
+        layout.notes.append(f"표 장평 {base[1]:.0%} → {step[1]:.0%} 축소")
     if margin != base_margin:
         layout.notes.append(f"셀 여백 {fmt_pt(base_margin)} → {fmt_pt(margin)} 축소")
     if layout.landscape:
@@ -99,10 +115,11 @@ def _annotate(layout: TableLayout, base_size: int, size: int, base_margin: int, 
 
 
 def _try_fit(
-    table: Table, profile: Profile, available: int, size: int, margin: int,
+    table: Table, profile: Profile, available: int, step: tuple[int, float], margin: int,
     *, check_lines: bool = True,
 ) -> TableLayout | None:
-    """주어진 글자 크기·여백에서 배치 가능하면 TableLayout, 아니면 None."""
+    """주어진 (글자 크기, 장평)·여백에서 배치 가능하면 TableLayout, 아니면 None."""
+    size, scale = step
     cols = table.col_count
     if cols == 0:
         return None
@@ -110,63 +127,83 @@ def _try_fit(
     if usable <= 0:
         return None
 
-    mins, maxs = column_demands(table, profile, size)
-    total_min, total_max = sum(mins), sum(maxs)
-
-    if total_max <= usable:
-        widths = _scale_to(maxs, usable)
-    elif total_min <= usable:
-        slack = usable - total_min
-        spread = [mx - mn for mn, mx in zip(mins, maxs)]
-        denom = sum(spread)
-        widths = [mn + (slack * s / denom if denom else slack / cols)
-                  for mn, s in zip(mins, spread)]
-        widths = _scale_to(widths, usable)
+    mins, maxs = column_demands(table, profile, size, scale, content_first=True)
+    if sum(maxs) <= usable:
+        widths = _fill_up(maxs, usable)
+    elif sum(mins) <= usable:
+        widths = _cap_down(mins, maxs, usable)
     else:
         return None
 
     limit = profile.tables.max_cell_lines
-    if check_lines and limit and _max_cell_lines(table, profile, size, widths) > limit:
+    if check_lines and limit and _max_cell_lines(table, profile, size, scale, widths) > limit:
         return None
 
     return TableLayout(
         col_widths=_to_cell_widths(widths, margin),
         font_size=size,
         cell_margin_x=margin,
+        char_scale=scale,
     )
 
 
+def _fill_up(maxs: list[float], target: float) -> list[float]:
+    """남는 폭을 좁은 열부터 채운다 — 모든 열이 최소 L이 되도록 (넓은 열은 그대로)."""
+    level = _bisect(lambda lv: sum(max(mx, lv) for mx in maxs), target, max(target, 1))
+    return _scale_to([max(mx, level) for mx in maxs], target)
+
+
+def _cap_down(mins: list[float], maxs: list[float], target: float) -> list[float]:
+    """모자란 폭을 넓은 열부터 깎는다 — 넓은 열들이 같은 폭 L로 맞춰진다."""
+    level = _bisect(lambda lv: sum(max(mn, min(mx, lv)) for mn, mx in zip(mins, maxs)),
+                    target, max(maxs, default=1))
+    return _scale_to([max(mn, min(mx, level)) for mn, mx in zip(mins, maxs)], target)
+
+
+def _bisect(total_at, target: float, high: float) -> float:
+    """total_at(level)이 target이 되는 level (total_at은 단조 증가)."""
+    low = 0.0
+    for _ in range(_BISECT_STEPS):
+        mid = (low + high) / 2
+        if total_at(mid) < target:
+            low = mid
+        else:
+            high = mid
+    return high
+
+
 def _max_cell_lines(
-    table: Table, profile: Profile, size: int, content_widths: list[float]
+    table: Table, profile: Profile, size: int, scale: float, content_widths: list[float]
 ) -> int:
-    """확정 폭에서 가장 많이 줄바꿈되는 셀의 줄 수.
+    """확정 폭에서 가장 많이 줄바꿈되는 '내용' 셀의 줄 수. (머리는 축약으로 따로 다룬다)
 
     열을 1글자 폭까지 좁혀 '폭은 맞지만 세로로 한없이 길어지는' 표를 막는 기준이다.
     """
     worst = 0
     for cell, col, span in iter_grid(table):
-        if col >= len(content_widths):
+        if col >= len(content_widths) or (cell.is_header and _has_body(table)):
             continue
         width = sum(content_widths[col : min(col + span, len(content_widths))])
-        spec = profile.font("table_header" if cell.is_header else "table")
-        measurer = TextMeasurer(spec.east_asia, spec.latin, size, bold=bool(spec.bold))
+        measurer = _measurer(cell, profile, size, scale)
         for line in cell_lines(cell):
             worst = max(worst, measurer.wrap_count(line, width))
     return worst
 
 
 def _force_fit(
-    table: Table, profile: Profile, available: int, size: int, margin: int
+    table: Table, profile: Profile, available: int, step: tuple[int, float], margin: int
 ) -> TableLayout:
     """어떤 조합으로도 min 합을 못 맞출 때: 최소 폭을 비례 축소해서라도 넣는다."""
+    size, scale = step
     cols = max(1, table.col_count)
     usable = max(_content_budget(profile, available, cols, margin), cols * 1)
-    mins, _ = column_demands(table, profile, size)
+    mins, _ = column_demands(table, profile, size, scale, content_first=True)
     widths = _scale_to(mins, usable)
     return TableLayout(
         col_widths=_to_cell_widths(widths, margin),
         font_size=size,
         cell_margin_x=margin,
+        char_scale=scale,
         overflow=True,
     )
 
@@ -192,20 +229,64 @@ def _scale_to(widths: list[float], target: float) -> list[float]:
     return [w * factor for w in widths]
 
 
+# ── 머리 축약 ───────────────────────────────────────────────────────────
+
+
+def _abbreviate_headers(table: Table, profile: Profile, layout: TableLayout) -> None:
+    limit = profile.tables.max_header_lines
+    if not limit or not _has_body(table):
+        return
+    content = [w - layout.cell_margin_x * 2 for w in layout.col_widths]
+    abbreviator = default_abbreviator()
+    row_texts: dict[int, list[str]] = {}
+    for row_index, _, cell, _, _ in _iter_grid_indexed(table):
+        if cell.is_header:
+            row_texts.setdefault(row_index, []).append(" ".join(cell_lines(cell)))
+
+    for row_index, cell_index, cell, col, span in _iter_grid_indexed(table):
+        if not cell.is_header or col >= len(content):
+            continue
+        lines = [line for line in cell_lines(cell) if line]
+        if len(lines) != 1:
+            continue  # 여러 문단짜리 머리는 사람이 일부러 그렇게 쓴 것 — 건드리지 않는다
+        text = lines[0]
+        width = sum(content[col : min(col + span, len(content))])
+        measurer = _measurer(cell, profile, layout.font_size, layout.char_scale)
+        if measurer.wrap_count(text, width) <= limit:
+            continue
+        candidates = abbreviator.candidates(text, row_texts.get(row_index, []))
+        if not candidates:
+            continue
+        # 줄 수 안에 드는 첫 후보. 없으면 줄 수가 가장 적은 것 중 덜 줄인 것.
+        chosen = next((c for c in candidates if measurer.wrap_count(c, width) <= limit),
+                      min(candidates, key=lambda c: measurer.wrap_count(c, width)))
+        layout.header_text[(row_index, cell_index)] = (text, chosen)
+
+
 # ── 열별 요구 폭 ────────────────────────────────────────────────────────
 
 
-def column_demands(table: Table, profile: Profile, size: int) -> tuple[list[float], list[float]]:
-    """각 열의 (최소 폭, 자연 폭). colspan은 걸친 열들에 나눠 반영한다."""
+def column_demands(
+    table: Table, profile: Profile, size: int, scale: float = 1.0,
+    *, content_first: bool = False,
+) -> tuple[list[float], list[float]]:
+    """각 열의 (최소 폭, 자연 폭). colspan은 걸친 열들에 나눠 반영한다.
+
+    content_first면 머리행은 최소 폭만 요구한다 (열 폭은 내용이 정한다).
+    """
     cols = table.col_count
     mins = [0.0] * cols
     maxs = [0.0] * cols
     spans: list[tuple[int, int, float, float]] = []  # (start, span, min, max)
+    header_min_only = content_first and _has_body(table)
 
     for cell, col, span in iter_grid(table):
         if col >= cols:
             continue
-        mn, mx = _cell_demand(cell, profile, size)
+        mn, mx = _cell_demand(cell, profile, size, scale)
+        if header_min_only and cell.is_header:
+            # 머리는 자연 폭을 요구하지 않되, 어절 중간에서 끊기지는 않게("순/번" 방지).
+            mn = mx = max(mn, _longest_eojeol(cell, profile, size, scale))
         if span == 1:
             mins[col] = max(mins[col], mn)
             maxs[col] = max(maxs[col], mx)
@@ -228,27 +309,47 @@ def column_demands(table: Table, profile: Profile, size: int) -> tuple[list[floa
 
 def iter_grid(table: Table):
     """(셀, 시작 열, colspan) 순회 — rowspan으로 밀리는 자리를 고려."""
+    for _, _, cell, col, span in _iter_grid_indexed(table):
+        yield cell, col, span
+
+
+def _iter_grid_indexed(table: Table):
+    """(행 번호, 행 안의 칸 번호, 셀, 시작 열, colspan)."""
     occupied: dict[tuple[int, int], bool] = {}
     for r, row in enumerate(table.rows):
         col = 0
-        for cell in row.cells:
+        for index, cell in enumerate(row.cells):
             while occupied.get((r, col)):
                 col += 1
             for rr in range(r, r + cell.rowspan):
                 for cc in range(col, col + cell.colspan):
                     occupied[(rr, cc)] = True
-            yield cell, col, cell.colspan
+            yield r, index, cell, col, cell.colspan
             col += cell.colspan
 
 
-def _cell_demand(cell: Cell, profile: Profile, size: int) -> tuple[float, float]:
+def _has_body(table: Table) -> bool:
+    return any(not cell.is_header for row in table.rows for cell in row.cells)
+
+
+def _measurer(cell: Cell, profile: Profile, size: int, scale: float) -> TextMeasurer:
     spec = profile.font("table_header" if cell.is_header else "table")
-    measurer = TextMeasurer(spec.east_asia, spec.latin, size, bold=bool(spec.bold))
+    return TextMeasurer(spec.east_asia, spec.latin, size, bold=bool(spec.bold), scale=scale)
+
+
+def _cell_demand(cell: Cell, profile: Profile, size: int, scale: float) -> tuple[float, float]:
+    measurer = _measurer(cell, profile, size, scale)
     mn = mx = 0.0
     for line in cell_lines(cell):
         mn = max(mn, measurer.longest_word_width(line))
         mx = max(mx, measurer.width(line))
     return mn, mx
+
+
+def _longest_eojeol(cell: Cell, profile: Profile, size: int, scale: float) -> float:
+    measurer = _measurer(cell, profile, size, scale)
+    return max((measurer.width(word) for line in cell_lines(cell) for word in line.split()),
+               default=0.0)
 
 
 def cell_lines(cell: Cell) -> list[str]:

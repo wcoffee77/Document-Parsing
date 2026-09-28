@@ -16,7 +16,7 @@ from .profile import Profile, load_profile
 from .render.docx_writer import DATE_LINE, DocxRenderer
 from .sources import load_source
 from .transform import Change, apply_text_rules
-from .transform.structure import fold_headings_into_levels
+from .transform.structure import attach_table_notes, fold_headings_into_levels
 
 
 @dataclass
@@ -84,6 +84,11 @@ def convert(
     if polish != "none":
         transformed = apply_text_rules(doc, prof)
         doc, changes = transformed.document, transformed.changes
+    if prof.tables.note_markers or prof.tables.note_marker:
+        # 제목 접기보다 먼저 — 안 그러면 주석 문단이 □ 항목으로 접혀 버린다.
+        doc, note_changes = attach_table_notes(doc, prof.tables.note_markers,
+                                               prof.tables.note_marker)
+        changes.extend(note_changes)
     if prof.text.headings_as_levels:
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
         doc, fold_changes = fold_headings_into_levels(doc)
@@ -95,6 +100,9 @@ def convert(
         changes.extend(llm_changes)
 
     layouts = plan_tables(doc, prof)
+    for layout in layouts.values():
+        changes.extend(Change(before, after, "표 머리 축약")
+                       for before, after in layout.header_text.values())
     flow = plan_flow(doc, prof, layouts)
     renderer = DocxRenderer(prof, layouts, flow)
 

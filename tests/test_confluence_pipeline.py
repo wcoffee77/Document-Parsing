@@ -77,7 +77,7 @@ def test_merged_cells_survive_into_the_docx_table(docx):
 def test_panel_code_and_nested_list_all_made_it_through(docx):
     document, _, _ = docx
     texts = [p.text for p in document.paragraphs]
-    assert any("검토가 필요" in t for t in texts)
+    assert any("검토 필요" in t for t in texts)  # "검토가 필요합니다" → 명사 종결
     assert any("SELECT idx_name" in t for t in texts)
     assert any(t.startswith("□\t") and "2차 성능 시험" in t for t in texts)
     assert any(t.startswith("-\t") and "10월 중 실시" in t for t in texts)

@@ -51,10 +51,43 @@ def test_sample_report_headings_are_not_double_numbered(tmp_path, profile):
         assert not rest.startswith(marker), f"제목 번호가 겹침: {text!r}"
 
 
-def test_callout_after_table_is_pushed_down(tmp_path, profile):
-    """표 바로 뒤에 오는 인용문(Callout)도 표에 붙지 않고 간격이 확보된다."""
+@pytest.mark.parametrize("text", ["1.1. 추진 배경", "1.추진 배경", "(1) 추진 배경", "2) 추진 배경"])
+def test_other_manual_number_styles_are_stripped(text):
+    doc = Document(blocks=[Heading(level=2, runs=[Run(text)])])
+    folded, _ = fold_headings_into_levels(doc)
+    assert folded.blocks[0].runs[0].text == "추진 배경"
+
+
+@pytest.mark.parametrize("text", ["1.5배 향상 방안", "2026년 계획", "3D 설계"])
+def test_headings_that_merely_start_with_a_number_are_kept(text):
+    doc = Document(blocks=[Heading(level=2, runs=[Run(text)])])
+    folded, changes = fold_headings_into_levels(doc)
+    assert folded.blocks[0].runs[0].text == text
+    assert changes == []
+
+
+def test_quote_under_table_becomes_small_star_note(tmp_path, profile):
+    """표 아래 설명(인용문)은 '* '로 시작하는 표 주석이 되고, 글자는 table_note 크기."""
     out = tmp_path / "sample.docx"
     convert(str(FIXTURE), out, profile)
     docx = DocxDocument(str(out))
-    quote = next(p for p in docx.paragraphs if p.text.startswith("측정 기준은"))
-    assert int(quote.paragraph_format.space_before or 0) >= profile.tables.space_after
+    note = next(p for p in docx.paragraphs if "측정 기준은" in p.text)
+    assert note.text.startswith(f"{profile.tables.note_marker} ")
+    assert all(int(run.font.size) == profile.font("table_note").size for run in note.runs)
+    # 주석은 표에 붙어 있고, '표 뒤 간격'은 그 다음 항목이 가져간다.
+    assert int(note.paragraph_format.space_before or 0) < profile.tables.space_after
+    following = next(p for p in docx.paragraphs if p.text.startswith("4.\t"))
+    assert int(following.paragraph_format.space_before or 0) >= profile.tables.space_after
+
+
+def test_star_paragraph_under_table_is_a_note():
+    from doc2report.ir import Cell, Paragraph, Row, Table
+    from doc2report.transform.structure import attach_table_notes
+
+    table = Table(rows=[Row(cells=[Cell(blocks=[Paragraph(runs=[Run("a")])])])])
+    doc = Document(blocks=[table, Paragraph(runs=[Run("※ 단위: 천원")]),
+                           Paragraph(runs=[Run("본문")])])
+    attached, changes = attach_table_notes(doc, ["*", "※"], "*")
+    assert [len(b.notes) if isinstance(b, Table) else None for b in attached.blocks] == [1, None]
+    assert table.notes[0][0].text == "단위: 천원"
+    assert changes[0].after == "* 단위: 천원"

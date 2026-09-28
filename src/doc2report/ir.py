@@ -88,6 +88,7 @@ class Table:
     rows: list[Row] = field(default_factory=list)
     header_rows: int = 1
     caption: str | None = None
+    notes: list[list[Run]] = field(default_factory=list)  # 표 바로 아래 주석 (기호는 뗀 본문)
 
     @property
     def col_count(self) -> int:

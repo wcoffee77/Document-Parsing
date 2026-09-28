@@ -67,6 +67,47 @@ def test_colspan_demand_is_spread_over_covered_columns(profile):
     assert sum(maxs) > 0
 
 
+def test_column_width_follows_content_not_header(profile):
+    """값은 짧은데 머리만 긴 열이 넓어지지 않는다."""
+    table = table_of([["구분", "개선 전 평균 응답시간과 비고 사항", "설명"],
+                      ["조회", "3200ms", "인덱스 재설계 및 캐시 계층 도입으로 개선함"]])
+    layout = fit_table(table, profile, profile.page.usable_width)
+    short_values, long_values = layout.col_widths[1], layout.col_widths[2]
+    assert short_values < long_values
+
+
+def test_short_columns_are_levelled_to_similar_widths(profile):
+    """남는 폭은 좁은 열부터 같은 폭이 되도록 채운다."""
+    table = table_of([["가", "나", "다", "라"], ["1", "22", "333", "4"]])
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert max(layout.col_widths) - min(layout.col_widths) <= 2 * 635  # twips 반올림 오차
+
+
+def test_crowded_table_uses_char_scale_within_font_range(profile):
+    """글자가 많으면 11~12pt 안에서 크기와 장평(90%)을 줄인다."""
+    long = "가나다라마바사아자차카타파하 " * 3
+    table = table_of([[f"열{i}" for i in range(10)], [long] * 10])
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert min(profile.table_font_ladder()) <= layout.font_size <= max(profile.table_font_ladder())
+    assert layout.char_scale == pytest.approx(0.9)
+    assert any("장평" in note for note in layout.notes)
+
+
+def test_steps_go_from_least_to_most_narrowing(profile):
+    widths = [size * scale for size, scale in profile.table_steps()]
+    assert widths == sorted(widths, reverse=True)
+
+
+def test_long_header_over_short_values_is_abbreviated(profile):
+    table = table_of([["구분", "개선 전 평균 응답시간", "개선 후 평균 응답시간", "비고"],
+                      ["조회", "3200ms", "480ms", "인덱스 튜닝 예정"]])
+    narrow = int(profile.page.usable_width * 0.5)
+    layout = fit_table(table, profile, narrow)
+    after = {before: short for before, short in layout.header_text.values()}
+    assert "개선 전 평균 응답시간" in after
+    assert len(after["개선 전 평균 응답시간"]) < len("개선 전 평균 응답시간")
+
+
 def test_landscape_is_used_only_when_allowed(profile):
     long = "가나다라마바사아자차카타파하" * 3
     table = table_of([[f"열{i}" for i in range(10)], [long] * 10])

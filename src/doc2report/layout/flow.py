@@ -153,7 +153,9 @@ def table_height(table: Table, profile: Profile, layout: TableLayout | None,
         total += max(int(lines * line_height + padding), floor)
     caption = _text_height(table.caption, profile.font("caption"),
                            profile.page.usable_width, profile) if table.caption else 0
-    return total + caption
+    notes = sum(_text_height(plain(runs), profile.font("table_note"),
+                             profile.page.usable_width, profile) for runs in table.notes)
+    return total + caption + notes
 
 
 def _grid_with_row(table: Table):
@@ -181,7 +183,7 @@ def _cell_line_count(cell, profile: Profile, layout: TableLayout,
     width = sum(widths[col : min(col + span, len(widths))]) - layout.cell_margin_x * 2
     spec = profile.font("table_header" if cell.is_header else "table")
     measurer = TextMeasurer(spec.east_asia, spec.latin, layout.font_size,
-                            bold=bool(spec.bold))
+                            bold=bool(spec.bold), scale=layout.char_scale)
     return max((measurer.wrap_count(line, width) for line in cell_lines(cell)), default=1)
 
 

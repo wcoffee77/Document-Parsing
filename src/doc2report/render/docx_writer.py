@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from docx import Document as DocxDocument
@@ -343,15 +343,30 @@ class DocxRenderer:
             if min_height:
                 oxml.set_min_row_height(row, min_height)
 
+        self._table_notes(block, container)
+
         if section_switched:
             back = self.docx.add_section(WD_SECTION.NEW_PAGE)
             oxml.apply_page_setup(back, self.profile.page)
+
+    def _table_notes(self, block: Table, container=None) -> None:
+        """표 바로 아래 주석 — "* 측정 기준은 …" 형태로 작은 글씨."""
+        if not block.notes:
+            return
+        spec = self.profile.font("table_note")
+        marker = self.profile.tables.note_marker
+        for runs in block.notes:
+            prefix = [Run(f"{marker} ")] if marker else []
+            self._paragraph(prefix + list(runs), spec, container)
 
     def _fill_cells(self, table, block: Table, layout: TableLayout) -> None:
         occupied: set[tuple[int, int]] = set()
         for r, row in enumerate(block.rows):
             col = 0
-            for cell in row.cells:
+            for index, cell in enumerate(row.cells):
+                override = layout.header_text.get((r, index))
+                if override:
+                    cell = _with_text(cell, override[1])
                 while (r, col) in occupied:
                     col += 1
                 if col >= len(layout.col_widths):
@@ -377,6 +392,8 @@ class DocxRenderer:
 
         spec = self.profile.font("table_header" if cell.is_header else "table")
         spec = spec.resized(layout.font_size)
+        if layout.char_scale != (spec.char_scale or 1.0):
+            spec = spec.model_copy(update={"char_scale": layout.char_scale})
         if cell.align:
             spec = spec.model_copy(update={"align": cell.align})
 
@@ -428,3 +445,10 @@ class DocxRenderer:
     def _paragraphs(self, container=None):
         target = container if container is not None else self.docx
         return target.paragraphs
+
+
+def _with_text(cell: Cell, text: str) -> Cell:
+    """머리 축약 결과로 바꾼 셀 (서식은 원래 첫 런을 따른다). IR 원본은 건드리지 않는다."""
+    template = next((run for block in cell.blocks if isinstance(block, Paragraph)
+                     for run in block.runs), Run(""))
+    return replace(cell, blocks=[Paragraph(runs=[template.copy_with(text)])])
