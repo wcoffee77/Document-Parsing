@@ -60,7 +60,7 @@ curl -s http://75.12.15.121:8000/v1/chat/completions \
   | python -m json.tool
 ```
 
-> **PowerShell 주의**: `curl`은 PowerShell에서 `Invoke-WebRequest`의 별칭이라
+> **PowerShell 주의 1**: `curl`은 PowerShell에서 `Invoke-WebRequest`의 별칭이라
 > 위 명령을 그대로 치면 옵션을 오해석해 "Uri 값을 제공하십시오"류 오류가 난다.
 > `curl` 대신 `curl.exe`를 쓰거나(줄바꿈은 `\` 대신 백틱 `` ` ``), 아래처럼
 > PowerShell 네이티브로 실행한다.
@@ -68,6 +68,12 @@ curl -s http://75.12.15.121:8000/v1/chat/completions \
 > ```powershell
 > Invoke-RestMethod -Uri "http://75.12.15.121:8000/v1/models" | ConvertTo-Json -Depth 5
 > ```
+>
+> **PowerShell 주의 2 (중요)**: Windows PowerShell 5.1의 `Invoke-RestMethod`는
+> 응답 헤더에 `charset=utf-8`이 명시 안 돼 있으면 한글을 잘못된 인코딩으로
+> 먼저 디코딩해버려서 콘솔·파일 어디로 출력해도 이미 깨진 상태가 된다(실제로
+> 겪음). `Invoke-WebRequest` + 원본 바이트를 직접 UTF-8로 디코딩해야 한다:
+>
 > ```powershell
 > $body = @{
 >     model = "thinkingcap"
@@ -78,18 +84,35 @@ curl -s http://75.12.15.121:8000/v1/chat/completions \
 >     )
 > } | ConvertTo-Json -Depth 5
 >
-> Invoke-RestMethod -Uri "http://75.12.15.121:8000/v1/chat/completions" `
+> $resp = Invoke-WebRequest -Uri "http://75.12.15.121:8000/v1/chat/completions" `
 >   -Method Post -ContentType "application/json; charset=utf-8" `
 >   -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+>
+> $text = [System.Text.Encoding]::UTF8.GetString($resp.RawContentStream.ToArray())
+> $obj = $text | ConvertFrom-Json
+> $obj.choices[0].message.content | Out-File out\llm_test_response.txt -Encoding utf8
+> notepad out\llm_test_response.txt
 > ```
+>
+> PowerShell 7(`pwsh`)이 있으면 이 버그가 없어 `Invoke-RestMethod`를 그대로 써도 된다.
 
 응답에서 확인:
 
 - [ ] HTTP 200, `choices[0].finish_reason` == `"stop"` (`"length"`면 잘린 것)
-- [ ] `choices[0].message.content`가 **문자열**인가 (파츠 배열이면 코드 수정 필요)
-- [ ] `<think>...</think>` 블록이 섞여 있는가 — 섞여 있어도 코드가 자동으로
-      제거하도록 이미 반영했으니 정상, 응답 속도만 참고로 본다
-- [ ] 응답 줄 수가 요청 줄 수(2줄)와 같은가 (`<think>` 제거 후 기준)
+- [x] `choices[0].message.content`가 **문자열**인가 — 문자열 맞음, 확인 완료
+- [x] `<think>...</think>` 블록이 섞여 있는가 — **없음**, 추론 모드 관련 걱정 안 해도 됨
+- [x] 응답 줄 수가 요청 줄 수(2줄)와 같은가 — **아니오, 12줄 나옴** (아래 참고)
+
+> **확인된 결과**: `<think>` 없고 `content`는 정상 문자열 — 여기까진 문제없다.
+> 다만 12줄에 "권장표현", "편집자 팁" 같은 설명이 섞여 나오고 문장도 `~다`로
+> 끝났는데, 이건 이 curl 테스트가 접속 확인용으로 시스템 프롬프트를
+> `"너는 한국 회사의 보고서 편집자다."` 한 줄로 일부러 간단히 줄였기 때문이다.
+> 실제 코드(`llm_polish.py`)가 보내는 프롬프트는 "한 줄에 한 문장, 설명 금지,
+> 같은 줄 수로만 답변, 명사형(~함/~임)으로 종결" 을 명시하는 훨씬 엄격한
+> 버전이라 다르게 나올 수 있다 — **최종 판단은 4번(실제 문서 변환) 결과로
+> 한다.** 4번에서도 여전히 줄 수가 안 맞으면 코드가 자동으로 규칙 기반에
+> 폴백하니 안전하게 동작은 하되, LLM 다듬기 기능 자체는 이 모델엔 프롬프트를
+> 더 세게 조정해야 살아날 수 있다.
 
 이상이 있으면 7번 항목을 보고 대응한다.
 
@@ -106,6 +129,18 @@ source scripts/onprem_env.sh          # bash/zsh
 
 서버가 인증 토큰을 요구하면 위 스크립트 파일을 열어 `DOC2REPORT_LLM_API_KEY` 줄의
 주석을 풀고 값을 채운 뒤 다시 불러온다.
+
+> **PowerShell 주의 (실제로 겪음)**: 사내 PC 실행 정책(execution policy)이
+> `.ps1` 실행 자체를 막아서 "파일을 로드할 수 없습니다" 오류가 날 수 있다.
+> 이럴 땐 스크립트 대신 값을 직접 입력해도 결과는 같다 — 이건 정책 제한과
+> 무관하다.
+> ```powershell
+> $env:DOC2REPORT_LLM_BASE_URL = "http://75.12.15.121:8000/v1"
+> $env:DOC2REPORT_MODEL = "thinkingcap"
+> ```
+> 단, 이 값은 **현재 PowerShell 창에서만 유지된다** — 창을 새로 열면 다시
+> 입력해야 한다. 매번 `.ps1`을 쓰고 싶으면 창 열 때마다 먼저
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` 실행.
 
 ## 4. 실제 사내 문서 변환
 
