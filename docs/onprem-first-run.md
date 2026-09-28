@@ -49,6 +49,29 @@ curl -s http://75.12.15.121:8080/v1/chat/completions \
   | python -m json.tool
 ```
 
+> **PowerShell 주의**: `curl`은 PowerShell에서 `Invoke-WebRequest`의 별칭이라
+> 위 명령을 그대로 치면 옵션을 오해석해 "Uri 값을 제공하십시오"류 오류가 난다.
+> `curl` 대신 `curl.exe`를 쓰거나(줄바꿈은 `\` 대신 백틱 `` ` ``), 아래처럼
+> PowerShell 네이티브로 실행한다.
+>
+> ```powershell
+> Invoke-RestMethod -Uri "http://75.12.15.121:8080/v1/models" | ConvertTo-Json -Depth 5
+> ```
+> ```powershell
+> $body = @{
+>     model = "thinkingcap"
+>     temperature = 0
+>     messages = @(
+>         @{ role = "system"; content = "너는 한국 회사의 보고서 편집자다." },
+>         @{ role = "user"; content = "검토했습니다.`n완료하였습니다." }
+>     )
+> } | ConvertTo-Json -Depth 5
+>
+> Invoke-RestMethod -Uri "http://75.12.15.121:8080/v1/chat/completions" `
+>   -Method Post -ContentType "application/json; charset=utf-8" `
+>   -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+> ```
+
 응답에서 확인:
 
 - [ ] HTTP 200, `choices[0].finish_reason` == `"stop"` (`"length"`면 잘린 것)
