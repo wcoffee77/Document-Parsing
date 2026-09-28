@@ -24,11 +24,16 @@
 > Qwen 서버가 아니라 그 포트에 떠 있는 다른 서비스(사내 프록시 등)를 잘못 두드린
 > 것이었을 가능성이 높다 — `8000`으로 다시 시도해서 먼저 확인.
 >
-> 그래도 같은 `403`/인증 페이지가 나오면 그때는 사내 프록시가 요청을 가로챈
-> 것이다. 같은 PC의 일반 브라우저로 같은 URL을 열어 똑같이 막히는지 확인하고,
-> 막히면 `netsh winhttp show proxy`로 프록시 설정을 보고 이 내부 IP가 예외
-> (우회) 목록에 있는지 IT팀에 확인한다 — 코드로 우회할 문제가 아니라 망 정책
-> 문제다.
+> **원인 확정 (사내 LLM에 직접 물어서 확인함)**: 위 403들은 전부 **`HTTP_PROXY`
+> 환경변수 때문에 httpx가 요청을 사내 Squid 프록시(`12.26.204.100:8000`)로
+> 우회했고, 그 프록시의 접근 차단 정책이 `75.12.15.121`을 거부**해서 난 것이었다.
+> `curl.exe`/PowerShell(`Invoke-WebRequest` 등)은 이 프록시를 안 타서 그때는
+> 됐던 것 — `netsh winhttp show proxy`가 "direct access"라고 답한 것과도
+> 모순 없다(그건 WinHTTP 설정이고, `HTTP_PROXY`는 별개의 프로세스 환경변수).
+> **해결**: `scripts/onprem_env.sh`/`.ps1`에 `NO_PROXY=75.12.15.121`을 이미
+> 넣어 뒀다 — 이 스크립트를 불러 쓰면 자동으로 우회된다. 다만 이건 임시
+> 조치이고, **네트워크 담당자에게 이 목적지에 대한 정식 프록시 예외 등록을
+> 요청**하는 게 정석이다.
 
 ## 1. 코드 받기
 
@@ -189,7 +194,10 @@ source scripts/onprem_env.sh          # bash/zsh
 > ```powershell
 > $env:DOC2REPORT_LLM_BASE_URL = "http://75.12.15.121:8000/v1"
 > $env:DOC2REPORT_MODEL = "thinkingcap"
+> $env:NO_PROXY = "75.12.15.121"
 > ```
+> `NO_PROXY`를 빠뜨리면 안 된다 — 없으면 `HTTP_PROXY`가 걸려 있을 때
+> httpx 요청이 사내 프록시로 우회돼 403이 난다(0번 항목 참고, 실제로 겪음).
 > 단, 이 값은 **현재 PowerShell 창에서만 유지된다** — 창을 새로 열면 다시
 > 입력해야 한다. 매번 `.ps1`을 쓰고 싶으면 창 열 때마다 먼저
 > `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` 실행.
