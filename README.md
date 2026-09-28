@@ -70,6 +70,11 @@ export CONFLUENCE_API_TOKEN=xxxx
 doc2report convert https://회사.atlassian.net/wiki/spaces/TEAM/pages/12345 -o 보고서.docx
 ```
 
+Server/Data Center(사내 자체 호스팅)면 `CONFLUENCE_USERNAME`은 비우고
+개인 액세스 토큰(PAT)만 `CONFLUENCE_API_TOKEN`에 넣는다. 사내 PC에서 처음
+연결할 때 확인할 체크리스트와 흔한 오류 대응은
+[docs/confluence-first-run.md](docs/confluence-first-run.md)에 정리해 뒀다.
+
 ## 문구를 LLM으로 다듬기 (선택)
 
 기본값(`--polish rules`)은 규칙 기반이다. 규칙으로 못 잡는 어색한 문장만 LLM에

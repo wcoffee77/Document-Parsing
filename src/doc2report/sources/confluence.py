@@ -10,6 +10,11 @@ parsers/confluence_storage.py 로 넘긴다.
     CONFLUENCE_URL       https://회사.atlassian.net/wiki  (Server/DC면 https://wiki.회사.com)
     CONFLUENCE_USERNAME  계정 이메일 — 있으면 Cloud(API 토큰 + Basic 인증)로 인식
     CONFLUENCE_API_TOKEN API 토큰(Cloud) 또는 개인 액세스 토큰(Server/DC, USERNAME 없이 Bearer로 씀)
+
+받는 URL은 숫자 페이지 ID를 담고 있어야 한다 (`/pages/123456`, `?pageId=123456`,
+또는 페이지 ID 숫자 그 자체). `/x/AbCd` 같은 단축 링크는 그 자체로 리다이렉트라
+REST API 한 번으로는 못 푼다 — 페이지를 열어 실제 URL(또는 "..." 메뉴의 페이지 ID)을
+확인해서 넣어야 한다.
 """
 
 from __future__ import annotations
@@ -23,14 +28,22 @@ import httpx
 
 from . import LoadedSource
 
-_PAGE_ID = re.compile(r"/pages/(\d+)")
 _TIMEOUT = 30.0
+
+# Cloud: https://x.atlassian.net/wiki/spaces/TEAM/pages/123456/제목
+# Server/DC(고전 URL, 흔함): https://wiki.회사.com/pages/viewpage.action?pageId=123456
+# Server/DC(짧은 링크): https://wiki.회사.com/x/AbCd — 이건 REST로 못 푼다(모듈 docstring 참고)
+_PAGE_ID_PATTERNS = (
+    re.compile(r"/pages/(\d+)(?:/|$)"),
+    re.compile(r"[?&]pageId=(\d+)"),
+)
 
 
 def page_id_from_url(url: str) -> str | None:
-    match = _PAGE_ID.search(url)
-    if match:
-        return match.group(1)
+    for pattern in _PAGE_ID_PATTERNS:
+        match = pattern.search(url)
+        if match:
+            return match.group(1)
     if url.isdigit():
         return url
     return None
@@ -38,7 +51,13 @@ def page_id_from_url(url: str) -> str | None:
 
 def load_confluence(url_or_id: str) -> LoadedSource:
     base_url = _require("CONFLUENCE_URL")
-    page_id = page_id_from_url(url_or_id) or url_or_id
+    page_id = page_id_from_url(url_or_id)
+    if page_id is None:
+        raise RuntimeError(
+            f"URL에서 페이지 ID를 못 찾았습니다: {url_or_id}\n"
+            "'/pages/123456', '?pageId=123456' 형태이거나 페이지 ID 숫자 자체여야 합니다. "
+            "('/x/AbCd' 같은 단축 링크는 지원하지 않습니다 — 페이지를 열어 실제 URL을 쓰세요.)"
+        )
 
     with _client(base_url) as client:
         page = _get_page(client, page_id)

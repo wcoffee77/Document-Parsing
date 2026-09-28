@@ -92,7 +92,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 121개
+uv run pytest                           # 124개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -144,6 +144,20 @@ info/warning 패널, code 매크로가 살아남는다. 첨부 이미지는
 
 인증: `CONFLUENCE_USERNAME`이 있으면 Cloud로 보고 Basic(이메일+API 토큰), 없으면
 Server/Data Center로 보고 Bearer(PAT)를 쓴다. 필요한 환경변수는 README 참고.
+
+사내 PC에서 처음 연결할 때 그대로 따라 하는 절차는
+[docs/confluence-first-run.md](docs/confluence-first-run.md)에 정리해 뒀다
+(`scripts/confluence_env.example.ps1`/`.sh` 템플릿 포함, 실제 토큰이 든 복사본은
+`.gitignore`에 있어 커밋 안 됨).
+
+**겪은 버그**: `page_id_from_url`이 Server/DC의 고전 URL 형식
+(`/pages/viewpage.action?pageId=123456`)을 못 잡고 있었다 — 정규식이 `/pages/`
+뒤에 숫자가 바로 오는 형태(`/pages/123456`, Cloud 형식)만 잡았기 때문이다.
+Server/DC 사용자가 이 형식으로 URL을 넣으면 페이지 ID 대신 URL 전체가
+REST 경로에 들어가 404가 났을 것 — 실제 사내 인스턴스로 시도하기 전에
+가이드 문서를 쓰다가 코드를 다시 보고 발견해 고쳤다(2026-09-28). 이제
+못 알아보는 URL(단축 링크 등)은 조용히 엉뚱한 요청을 보내는 대신 바로
+명확한 에러를 낸다.
 
 **아직 검증되지 않은 것 — 실제 사내 Confluence로 다음에 확인할 것:**
 

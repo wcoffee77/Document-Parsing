@@ -15,12 +15,22 @@ from doc2report.sources.confluence import load_confluence, page_id_from_url
 
 @pytest.mark.parametrize("url,expected", [
     ("https://회사.atlassian.net/wiki/spaces/TEAM/pages/123456/제목", "123456"),
-    ("https://wiki.회사.com/pages/viewpage.action?pageId=7890", None),
+    # Server/Data Center의 고전 URL 형식 — 한동안 못 잡던 버그였다(2026-09-28 발견·수정).
+    ("https://wiki.회사.com/pages/viewpage.action?pageId=7890", "7890"),
+    ("https://wiki.회사.com/pages/viewpage.action?spaceKey=TEAM&pageId=7890", "7890"),
     ("123456", "123456"),
+    ("https://wiki.회사.com/x/AbCd", None),  # 단축 링크는 REST 한 번으로 못 푼다
     ("not-a-url", None),
 ])
 def test_page_id_from_url(url, expected):
     assert page_id_from_url(url) == expected
+
+
+def test_unrecognized_url_fails_fast_with_a_clear_message(monkeypatch):
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "t")
+    with pytest.raises(RuntimeError, match="페이지 ID를 못 찾았습니다"):
+        load_confluence("https://wiki.company.com/x/AbCd")
 
 
 def _patch_client(monkeypatch, handler) -> None:

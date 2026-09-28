@@ -7,3 +7,5 @@ __pycache__/
 ~$*.docx
 uv.exe
 wheelhouse/
+scripts/confluence_env.ps1
+scripts/confluence_env.sh
