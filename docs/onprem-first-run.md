@@ -56,6 +56,31 @@ uv sync
 > 매번 `.\` 붙이기 귀찮으면 그 세션에서 `Set-Alias uv .\uv.exe` 해두고
 > 이 문서의 `uv ...` 명령을 그대로 쓴다(창 새로 열면 다시 설정 필요).
 > `uv.exe`는 `.gitignore`에 이미 추가돼 있어 실수로 커밋되지 않는다.
+>
+> **`uv sync`도 막힐 때 (실제로 겪음 — `pypi.org` 접속 자체가 막혀
+> `typing-inspection` 등 의존성을 못 받음)**: `uv.exe`와 똑같은 방식으로,
+> 의존성 파일(wheel)도 인터넷 되는 곳에서 미리 받아 통째로 옮기면 된다.
+> `scripts/onprem-requirements.txt`에 이 프로젝트가 실제로 필요로 하는
+> 24개 패키지가 정확히 고정돼 있다(`uv.lock` 기준, dev 도구 제외). 클로드가
+> 이미 Windows/Python 3.13용으로 받아 압축해 둔 `wheelhouse` 파일을 전달받았다면
+> USB/사내 파일공유로 옮긴 뒤:
+> ```powershell
+> .\uv.exe sync --offline --find-links wheelhouse --no-dev
+> ```
+> 로 한 번에 설치된다(직접 검증 완료 — 네트워크 요청 없이 24개 패키지 전부
+> 설치되고 `doc2report`도 정상 빌드됨). 이후 `uv run` 명령에도 매번
+> `--offline`를 붙이면 안전하다:
+> ```powershell
+> .\uv.exe run --offline doc2report convert ...
+> ```
+> `wheelhouse`가 없다면, 인터넷 되는 아무 PC(Windows 아니어도 됨, pip만 있으면
+> 됨)에서 이렇게 받아서 그 폴더를 옮기면 된다:
+> ```bash
+> pip download -r scripts/onprem-requirements.txt -d wheelhouse \
+>   --platform win_amd64 --python-version 3.13 --implementation cp --abi cp313 \
+>   --only-binary=:all:
+> pip download colorama==0.4.6 -d wheelhouse --only-binary=:all:   # Windows 전용 조건부 의존성, 위 명령엔 안 잡힘
+> ```
 
 ## 2. 서버 자체를 먼저 curl로 확인 (doc2report 실행 전)
 
