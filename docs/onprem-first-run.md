@@ -219,6 +219,29 @@ source scripts/onprem_env.sh          # bash/zsh
 
 1. `out/변경내역.md`를 **가장 먼저** 연다 — "LLM" 규칙으로 다듬어진 줄이 있는지,
    아니면 `LLM 건너뜀 — <사유>`로 규칙 기반에 폴백했는지 확인.
+
+   > **"LLM" 행이 하나도 없어도 실패가 아닐 수 있다(실제로 겪음)**: 규칙
+   > 기반(`stylize_ko`)이 LLM보다 먼저 실행되므로(`pipeline.py`), LLM은 이미
+   > 개조식으로 바뀐 문장을 받는다. LLM이 "이미 맞다"고 판단해 입력과 똑같은
+   > 문장을 돌려주면 `after == before`라 report에 아예 안 남는다(정상 동작 —
+   > "규칙으로 안 되는 것만 LLM에 맡긴다"는 설계 그대로). 실제로 호출되고
+   > 있는지 확실히 확인하려면, 규칙 기반이 절대 못 고칠 구어체 문장으로
+   > 직접 테스트한다:
+   > ```powershell
+   > .\uv.exe run --offline --no-sync python -c "
+   > from doc2report.ir import Document, Paragraph, Run
+   > from doc2report.profile import load_profile
+   > from doc2report.transform.llm_polish import polish_document
+   >
+   > doc = Document(blocks=[Paragraph(runs=[Run('아 그게 좀 애매한데 일단 진행하는 걸로 하죠 확인 부탁드립니다')])])
+   > profile = load_profile('default')
+   > doc2, changes = polish_document(doc, profile)
+   > print('최종 텍스트:', doc2.blocks[0].runs[0].text)
+   > print('changes:', changes)
+   > "
+   > ```
+   > `changes`에 `rule='LLM'`이 찍히고 문장이 개조식으로 자연스럽게 바뀌면
+   > 온프렘 연동이 실제로 동작하는 것 — thinkingcap 기준 검증 완료됨.
 2. `out/보고서.docx`를 Word로 열어 문구·서식을 육안 확인.
 3. 표 배치만 따로 보고 싶으면: `.\uv.exe run --offline --no-sync doc2report check 사내문서.md`
 4. (선택, 실측까지 하려면) Word COM으로 PDF 추출 → `pdfplumber`로 여백·정렬·표 폭

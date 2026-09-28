@@ -98,9 +98,14 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
   사내 인증 정보가 필요하다. 당장은 Confluence에서 md로 내보내 파일 경로로 쓰면 된다.
 - **병합 셀(rowspan/colspan)** 은 폭 계산·렌더 코드가 있으나 Markdown에 문법이 없어
   실제로 타본 적이 없다. Confluence 네이티브 파서를 붙일 때 확인해야 한다.
-- **LLM 다듬기**(`--polish llm`)는 구현만 되어 있고 키/엔드포인트 없이는 규칙 기반으로 폴백한다.
-  Anthropic API 외에 `DOC2REPORT_LLM_BASE_URL`(+`DOC2REPORT_MODEL`, 필요 시
-  `DOC2REPORT_LLM_API_KEY`)로 OpenAI 호환 온프렘 엔드포인트(vLLM/Ollama/TGI 등)도 붙을 수
-  있게 해 뒀다(사내 Qwen 서빙 대응). 실제 온프렘 서버로 호출해 본 적은 없다 — 사내 PC에서
-  검증 필요.
 - 글꼴 선택지는 사용자 요청에 따라 **바탕체·맑은 고딕 둘로 한정**했다.
+
+검증된 것:
+
+- **LLM 다듬기 온프렘 연동**(`--polish llm` + `DOC2REPORT_LLM_BASE_URL`)은 사내 PC에서
+  실제 온프렘 모델(`thinkingcap`, OpenAI 호환)로 끝까지 검증 완료됐다. 응답 문자열 정상,
+  `<think>` 블록 없음, `rule='LLM'`로 실제 다듬어짐 확인함(`docs/onprem-first-run.md` 참고).
+  다만 이 PC의 `HTTP_PROXY`가 사내 Squid로 요청을 우회시켜 목적지를 차단하는 문제가 있어
+  `NO_PROXY` 환경변수로 우회 중 — 네트워크팀에 정식 프록시 예외 등록 요청 필요(임시 조치임).
+  또한 규칙 기반이 LLM보다 먼저 실행되므로, 문장이 이미 완벽하면 `--report`에 "LLM" 행이
+  하나도 안 남을 수 있다(정상 동작, 오작동 아님).
