@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import httpx
 
@@ -34,6 +35,7 @@ _SYSTEM = (
     "입력은 한 줄에 하나의 문장이며, 같은 개수의 줄로만 답한다. 설명은 쓰지 않는다."
 )
 _MAX_DRIFT = 1.6  # 결과가 원문보다 이 배 이상 길어지면 무언가 잘못된 것으로 본다
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
 
 def polish_document(doc: Document, profile: Profile) -> tuple[Document, list[Change]]:
@@ -111,6 +113,8 @@ def _ask_openai_compatible(texts: list[str], base_url: str) -> list[str]:
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
+            # 추론(thinking) 모드 모델은 최종 답 앞에 <think>...</think>를 끼워 보낸다.
+            content = _THINK_BLOCK.sub("", content)
             lines = content.strip().splitlines()
             if len(lines) != len(chunk):
                 raise RuntimeError(f"응답 줄 수가 맞지 않음 ({len(lines)} ≠ {len(chunk)})")

@@ -67,6 +67,23 @@ def test_base_url_routes_to_openai_compatible_endpoint(monkeypatch, profile):
     assert changes == [llm_polish.Change("검토했습니다.", "검토함.", "LLM")]
 
 
+def test_think_block_is_stripped_before_line_matching(monkeypatch, profile):
+    """thinkingcap처럼 추론 모드 모델은 답 앞에 <think>...</think>를 끼워 보낸다."""
+    monkeypatch.setenv("DOC2REPORT_LLM_BASE_URL", "http://localhost:8000/v1")
+    monkeypatch.setenv("DOC2REPORT_MODEL", "thinkingcap")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raw = "<think>\n내부 추론 과정...\n여러 줄일 수 있음\n</think>\n검토함."
+        return httpx.Response(200, json={"choices": [{"message": {"content": raw}}]})
+
+    _install_mock_server(monkeypatch, handler)
+
+    doc, changes = polish_document(_doc("검토했습니다."), profile)
+
+    assert doc.blocks[0].runs[0].text == "검토함."
+    assert changes == [llm_polish.Change("검토했습니다.", "검토함.", "LLM")]
+
+
 def test_api_key_sent_as_bearer_token_when_set(monkeypatch, profile):
     monkeypatch.setenv("DOC2REPORT_LLM_BASE_URL", "http://localhost:8000/v1")
     monkeypatch.setenv("DOC2REPORT_MODEL", "qwen2.5-32b-instruct")
