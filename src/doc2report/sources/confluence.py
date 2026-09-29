@@ -111,6 +111,30 @@ def load_confluence(url_or_id: str) -> LoadedSource:
     )
 
 
+def confluence_status() -> dict:
+    """웹 화면 상단에 보여 줄 연결 설정 상태 (토큰 값은 절대 내보내지 않는다)."""
+    url = os.environ.get("CONFLUENCE_URL", "")
+    return {
+        "configured": bool(url and os.environ.get("CONFLUENCE_API_TOKEN")),
+        "url": url,
+        "auth": "Cloud(이메일+토큰)" if os.environ.get("CONFLUENCE_USERNAME") else "Server/DC(PAT)",
+        "transport": "PowerShell 강제" if _forced_powershell() else "자동",
+    }
+
+
+def fetch_page_title(url_or_id: str) -> tuple[str, str]:
+    """본문 없이 제목만 가볍게 확인 — 입력 목록에 페이지를 추가할 때 주소가 맞는지 보여 주려고.
+    (페이지 ID, 제목)"""
+    page_id = page_id_from_url(url_or_id)
+    if page_id is None:
+        raise RuntimeError("URL에서 페이지 ID를 못 찾았습니다 ('/pages/123456' 또는 '?pageId=123456' 형태)")
+    notes: list[str] = []
+    with _client(_normalize_base_url(_require("CONFLUENCE_URL")), notes) as client:
+        resp = _get(client, f"/rest/api/content/{page_id}", notes)
+        _raise_for_status(resp, page_id)
+        return page_id, resp.json().get("title") or page_id
+
+
 _REST_API_SUFFIX = re.compile(r"/rest/api/?$", re.IGNORECASE)
 
 

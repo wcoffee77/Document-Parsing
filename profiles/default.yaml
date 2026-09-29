@@ -215,6 +215,7 @@ text:
   keep_leading_markers: true
     # 2026-09-29 사용자 원칙: 문서에 이미 쓴 글머리 기호(1. 1) □ - · ① ※ 등)는 바꾸지 말고
     # 그대로 쓴다. 프로파일 말머리는 원문에 말머리가 없는 항목에만 붙는다.
+  plain_paragraph_level: 1  # 제목·말머리가 전혀 없는 메모는 문단마다 □ 말머리 (auto_markers가 켜져 있을 때)
   auto_markers: true        # 원문에 말머리가 없는 제목·문단에 1. □ - 를 붙임 (false면 안 붙임 — confluence)
   note_marks: ["※"]
   note_indent: 4mm          # ※ 문단은 윗줄 문단보다 0.4cm 더 들여씀
@@ -229,4 +230,5 @@ choices:
   font: [바탕체, 맑은 고딕]
   size: [14pt, 13pt, 12pt, 11pt]
   line_spacing: ["1.4", "1.45", "1.5", "1.6"]
+  title_size: [20pt, 18pt, 16pt]
   table_size: [12pt, 11pt, 10pt, 9pt]

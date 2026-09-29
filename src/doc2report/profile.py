@@ -280,6 +280,9 @@ class TextRules(_Base):
     #       정형 보고서로 새로 만들 때.
     # false: 원문에 말머리가 없으면 안 붙인다(단계별 들여쓰기만 유지) — 이미 말머리를 구분해 쓴
     #        문서용(2026-09-29 사용자: Confluence). 진짜 목록(<ul>/<ol>, -, 1.)의 항목은 대상이 아니다.
+    plain_paragraph_level: int | None = None
+    # 제목도 말머리도 전혀 없는 글(정리 안 된 메모)에서 auto_markers가 켜져 있으면 각 문단을 이 단계
+    # (numbering 인덱스, 1 = □)의 항목으로 만든다. 비우면 안 만든다.
     no_marker_openers: list[str] = Field(default_factory=list)
     # 이 꺾쇠·괄호로 시작하는 제목·문단·항목에는 프로파일 말머리(□, - 등)를 붙이지 않는다
     # (2026-09-29 사용자: "【사업현황】" 앞에 □가 붙음 — 모든 문서 공통). 문서 어디서나 적용.
@@ -303,6 +306,7 @@ class Choices(_Base):
     font: list[str] = Field(default_factory=list)
     size: list[str] = Field(default_factory=list)
     line_spacing: list[str] = Field(default_factory=list)
+    title_size: list[str] = Field(default_factory=list)
     table_size: list[str] = Field(default_factory=list)
 
 

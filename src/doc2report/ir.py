@@ -6,6 +6,7 @@ IR 자체에는 서식(pt, mm, 글꼴명)이 절대 들어가지 않는다. 서�
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -46,6 +47,10 @@ def invisible_codes(text: str) -> list[str]:
     return sorted({f"U+{ord(ch):04X}" for ch in text if _is_invisible(ch) and not ch.isspace()})
 
 
+# "2026. 10. 1" / "2026.10.1." 처럼 날짜만 있는 줄 (제목 아래 날짜 표기 판별용)
+DATE_LINE = re.compile(r"^\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?$")
+
+
 def plain(runs: list[Run]) -> str:
     """런 목록의 순수 텍스트."""
     return "".join(r.text for r in runs)
@@ -58,6 +63,7 @@ def plain(runs: list[Run]) -> str:
 class Heading:
     level: int  # 1-6
     runs: list[Run] = field(default_factory=list)
+    section_title: bool = False  # 여러 입력을 합칠 때 넣는 각 입력의 제목 — 그 아래 내용은 한 단계씩 들어간다
 
 
 @dataclass

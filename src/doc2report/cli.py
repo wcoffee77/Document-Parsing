@@ -36,7 +36,7 @@ app.add_typer(profile_app, name="profile")
 
 @app.command()
 def convert(
-    source: str = typer.Argument(..., help="입력 .md 파일, Confluence URL, 또는 '-'(표준입력)"),
+    source: str = typer.Argument(..., help="입력 .md/.docx/.txt 파일, Confluence URL, 또는 '-'(표준입력)"),
     output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로"),
     profile: str = typer.Option(None, "-p", "--profile",
                                 help="프로파일 이름 또는 .yaml 경로 (생략 시 Confluence URL은 "
@@ -112,6 +112,21 @@ def check(
         )
         for note in layout.notes:
             typer.echo(f"    · {note}")
+
+
+@app.command()
+def web(
+    port: int = typer.Option(8765, "--port", help="포트 (이미 쓰고 있으면 다른 번호로)"),
+    host: str = typer.Option("127.0.0.1", "--host",
+                             help="기본은 이 PC에서만 접속. 다른 PC에 열려면 0.0.0.0 (토큰 노출 주의)"),
+    output_dir: Path = typer.Option(None, "--output-dir",
+                                    help="결과 저장 폴더 (기본: DOC2REPORT_OUTPUT_DIR 또는 out/webapp)"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="브라우저를 자동으로 열지 않음"),
+) -> None:
+    """웹 화면으로 변환 — 여러 Confluence 페이지·Word·붙여넣은 글을 한 문서로, docx/pdf/md 출력."""
+    from .web.server import serve
+
+    serve(host=host, port=port, output_dir=output_dir, open_browser=not no_browser)
 
 
 @profile_app.command("show")
@@ -213,7 +228,10 @@ def _choice(label: str, options: list[str], default: str) -> str | None:
 def _default_output(source: str) -> str:
     if source.startswith(("http://", "https://")) or source == "-":
         return "report.docx"
-    return str(Path(source).with_suffix(".docx"))
+    path = Path(source)
+    if path.suffix.lower() == ".docx":  # 입력 Word 파일을 덮어쓰지 않게
+        return str(path.with_name(path.stem + "_보고서.docx"))
+    return str(path.with_suffix(".docx"))
 
 
 def _profile_path(profile: str) -> str:

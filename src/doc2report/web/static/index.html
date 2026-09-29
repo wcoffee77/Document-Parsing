@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>doc2report 보고서 변환</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>doc2report</h1>
+    <span class="sub">Confluence·Word·메모 → 사내 규격 보고서</span>
+  </div>
+  <div class="status" id="status">
+    <span class="chip" id="st-confluence">Confluence 확인 중…</span>
+    <span class="chip" id="st-llm">LLM 확인 중…</span>
+    <span class="chip" id="st-pdf">PDF 확인 중…</span>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- 1. 입력 -->
+  <section class="card" id="card-input">
+    <h2><span class="num">1</span>입력</h2>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="confluence" role="tab">Confluence 주소</button>
+      <button class="tab" data-tab="docx" role="tab">Word 파일</button>
+      <button class="tab" data-tab="text" role="tab">글 붙여넣기</button>
+    </div>
+
+    <div class="panel" data-panel="confluence">
+      <textarea id="cf-urls" rows="3" placeholder="페이지 주소를 붙여 넣으세요. 여러 페이지는 한 줄에 하나씩.&#10;예) https://confluence.회사/pages/viewpage.action?pageId=123456"></textarea>
+      <div class="row">
+        <button class="btn" id="cf-add">목록에 추가</button>
+        <span class="hint">추가하면 제목을 불러와 주소가 맞는지 확인합니다.</span>
+      </div>
+    </div>
+
+    <div class="panel hidden" data-panel="docx">
+      <label class="drop" id="drop">
+        <input type="file" id="file-input" accept=".docx" multiple hidden>
+        <strong>Word(.docx) 파일을 여기에 끌어 놓거나 눌러서 고르세요</strong>
+        <span class="hint">여러 개 가능 · 50MB 이하 · .doc은 Word에서 .docx로 저장 후</span>
+      </label>
+    </div>
+
+    <div class="panel hidden" data-panel="text">
+      <input type="text" id="tx-title" placeholder="이 글의 제목 (선택)">
+      <textarea id="tx-body" rows="8" placeholder="메일·메신저·메모 내용을 그대로 붙여 넣으세요.&#10;한 줄이 한 문단이 됩니다. 엑셀에서 복사한 표(탭으로 나뉜 칸)는 표로 바뀝니다."></textarea>
+      <div class="row"><button class="btn" id="tx-add">목록에 추가</button></div>
+    </div>
+
+    <h3>입력 목록 <span class="hint">위에서부터 차례로 합쳐 한 문서가 됩니다</span></h3>
+    <ol class="inputs" id="input-list"></ol>
+    <p class="empty" id="input-empty">아직 입력이 없습니다.</p>
+  </section>
+
+  <!-- 2. 옵션 -->
+  <section class="card" id="card-options">
+    <h2><span class="num">2</span>변환 옵션</h2>
+    <div class="segmented" role="radiogroup">
+      <label><input type="radio" name="mode" value="auto" checked><span>자동 판단</span></label>
+      <label><input type="radio" name="mode" value="manual"><span>직접 선택</span></label>
+    </div>
+
+    <div id="auto-panel">
+      <p class="explain">문서를 읽어 보고 정합니다.</p>
+      <ul class="explain-list">
+        <li><b>정리된 문서</b>(Confluence 페이지, 제목·말머리가 있는 글) → 원문 문장·말머리 유지</li>
+        <li><b>정리 안 된 글</b> → 말머리를 만들고 문장을 개조식으로 다듬음</li>
+        <li><b>내용이 많으면</b>(<span id="auto-heavy">…</span>) → 내용 많은 문서 서식(<span id="auto-size">…</span>)</li>
+      </ul>
+      <label class="check strong"><input type="checkbox" id="allow-llm"> 필요하면 LLM으로 문장 다듬기 허용
+        <span class="hint">정리 안 된 글일 때만 씀</span></label>
+    </div>
+
+    <div id="manual-panel" class="hidden">
+      <fieldset>
+        <legend>서식</legend>
+        <div class="grid2">
+          <label>기본 서식<select id="profile"></select></label>
+          <label>글꼴<select id="fmt-font"></select></label>
+          <label>본문 크기<select id="fmt-size"></select></label>
+          <label>줄 간격<select id="fmt-line_spacing"></select></label>
+          <label>제목 크기<select id="fmt-title_size"></select></label>
+          <label>표 글자 크기(최대)<select id="fmt-table_size"></select></label>
+        </div>
+        <p class="hint" id="profile-desc"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>문장 다듬기</legend>
+        <div class="segmented small" role="radiogroup">
+          <label><input type="radio" name="polish" value="none"><span>안 함</span></label>
+          <label><input type="radio" name="polish" value="rules"><span>파이썬 규칙</span></label>
+          <label><input type="radio" name="polish" value="llm"><span>규칙 + LLM</span></label>
+        </div>
+        <div id="polish-rules" class="checks"></div>
+        <div class="row">
+          <button class="btn ghost" id="llm-test">LLM 연결 시험</button>
+          <span class="hint" id="llm-test-out"></span>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>말머리·단계</legend>
+        <div id="marker-rules" class="checks"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>표</legend>
+        <div id="table-rules" class="checks"></div>
+        <label class="check"><input type="checkbox" id="tbl-landscape"> 넓은 표는 가로 페이지 허용</label>
+        <label class="inline">표 위치 <select id="tbl-align"></select></label>
+      </fieldset>
+    </div>
+
+    <fieldset>
+      <legend>여러 입력 합치기</legend>
+      <label class="check"><input type="checkbox" id="section-titles" checked> 입력마다 제목을 절 제목으로 넣기
+        <span class="hint">어느 페이지 내용인지 구분</span></label>
+      <label class="check"><input type="checkbox" id="page-breaks"> 입력마다 새 쪽에서 시작</label>
+    </fieldset>
+  </section>
+
+  <!-- 3. 출력 -->
+  <section class="card" id="card-output">
+    <h2><span class="num">3</span>출력</h2>
+    <label class="block">문서 제목
+      <input type="text" id="doc-title" placeholder="비우면 첫 번째 입력의 제목">
+    </label>
+
+    <div class="block">
+      <span class="label">날짜</span>
+      <div class="segmented small" role="radiogroup">
+        <label><input type="radio" name="date" value="" checked><span>넣지 않음</span></label>
+        <label><input type="radio" name="date" value="today"><span>오늘</span></label>
+        <label><input type="radio" name="date" value="pick"><span>직접 지정</span></label>
+      </div>
+      <input type="date" id="date-pick" class="hidden">
+    </div>
+
+    <div class="block">
+      <span class="label">파일 형식</span>
+      <label class="check"><input type="checkbox" checked disabled> Word(.docx)</label>
+      <label class="check"><input type="checkbox" id="out-pdf"> PDF</label>
+      <label class="check"><input type="checkbox" id="out-md"> Markdown(.md)</label>
+      <label class="check"><input type="checkbox" id="out-report" checked> 변경 내역(.md) 저장</label>
+    </div>
+
+    <p class="hint folder">저장 폴더: <code id="out-dir">…</code>
+      <button class="link" id="open-folder">폴더 열기</button></p>
+
+    <button class="btn primary big" id="convert">변환하기</button>
+
+    <div id="progress" class="progress hidden">
+      <div class="spinner"></div>
+      <ol id="progress-log"></ol>
+    </div>
+
+    <div id="result" class="result hidden"></div>
+  </section>
+
+  <!-- 최근 결과 -->
+  <section class="card" id="card-history">
+    <h2>최근 결과 <button class="link" id="history-refresh">새로 고침</button></h2>
+    <ul class="history" id="history"></ul>
+    <p class="empty" id="history-empty">아직 만든 문서가 없습니다.</p>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -68,6 +68,23 @@ def polish_document(doc: Document, profile: Profile) -> tuple[Document, list[Cha
     return doc, changes
 
 
+def llm_status() -> dict:
+    """어떤 LLM으로 다듬을지 (웹 화면 표시용 — 키 값은 내보내지 않는다)."""
+    base_url = os.environ.get("DOC2REPORT_LLM_BASE_URL")
+    if base_url:
+        return {"configured": bool(os.environ.get("DOC2REPORT_MODEL")), "backend": "온프렘(OpenAI 호환)",
+                "model": os.environ.get("DOC2REPORT_MODEL", ""), "endpoint": base_url}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return {"configured": True, "backend": "Anthropic API",
+                "model": os.environ.get("DOC2REPORT_MODEL", DEFAULT_ANTHROPIC_MODEL), "endpoint": ""}
+    return {"configured": False, "backend": "", "model": "", "endpoint": ""}
+
+
+def llm_try(sample: str) -> str:
+    """연결 확인용 — 문장 하나를 실제로 다듬어 돌려준다(실패하면 예외)."""
+    return _ask_llm([sample])[0]
+
+
 def _collect(blocks: list[Block], texts: list[str], targets: list) -> None:
     for block in blocks:
         if isinstance(block, (Paragraph, ListItem)):

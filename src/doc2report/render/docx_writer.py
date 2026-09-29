@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -37,8 +36,7 @@ from . import oxml
 from .base_template import open_base_template
 from .markers import format_marker
 
-# "2026. 10. 1" / "2026.10.1." 처럼 날짜만 있는 줄 (제목 아래 날짜 표기 판별용)
-DATE_LINE = re.compile(r"^\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?$")
+from ..ir import DATE_LINE  # noqa: F401  (pipeline이 여기서 가져다 쓴다)
 
 def _base_template(profile: Profile):
     """profile.template(사내 template.docx 경로)이 있으면 그 경로, 없으면 메모리에 든

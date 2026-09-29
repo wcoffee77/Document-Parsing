@@ -118,7 +118,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 210개
+uv run pytest                           # 237개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -509,47 +509,64 @@ HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 cert
 해석하다 "unexpected argument" 에러를 낸다(2026-09-28 실제로 겪음). `--report`,
 `--polish`, `--date` 등 doc2report 자체 옵션도 마찬가지로 하이픈 두 개.
 
-## 앞으로 계획: WebApp화 (사용자가 기록만 요청, 아직 시작 안 함 — 2026-09-28)
+## 웹 화면 (2026-09-29 구현 — `doc2report web`, `start_webapp.bat`)
 
-지금은 PowerShell에서 CLI 명령어로 쓰고 있지만, **성능이 어느 정도 안정화되면
-프론트엔드를 입혀 웹앱으로 만들 예정**이다. 이 전환 자체는 아직 시작 전이고,
-지금은 다음 세션에서 참고할 설계 메모만 남긴다.
+사용자 요청: 입력 3종(Confluence 여러 페이지·Word 첨부·글 붙여넣기)을 **한 문서로 합쳐** 변환,
+출력은 docx 기본 + pdf/md, 화면에서 눌러 열기, 저장 폴더에 이름 안 겹치게, 지금까지의 규칙을
+옵션으로(특히 LLM on/off·날짜·말머리 만들기), 자동 판단/직접 선택 두 모드.
 
-**왜 지금 이게 문제인가**: 지금 CLI 방식은 `CONFLUENCE_URL`/`CONFLUENCE_API_TOKEN`,
-`DOC2REPORT_LLM_BASE_URL`, `NO_PROXY` 등을 **PowerShell 프로세스 환경변수**로
-들고 있다. `. .\scripts\confluence_env.ps1` / `onprem_env.ps1`로 불러 쓰는데,
-이 값은 그 PowerShell 창에만 살아 있어서 **창을 닫았다 새로 열면 다시 불러와야
-한다**(사용자가 지난 세션에서 겪은 "매번 다시 설정해야 하는" 불편이 바로 이거다).
-CLI를 쓰는 동안은 이게 최선이었다 — 토큰을 코드나 파일에 영구히 박아 두지 않기
-위한 의도적 설계다.
+**설계 판단**
+- **웹 프레임워크 없이 표준 라이브러리(`http.server`)** — 사내 PC는 wheelhouse로 오프라인 설치라
+  패키지가 늘면 wheelhouse를 다시 만들어 옮겨야 한다. 화면도 CDN 없이 `web/static/`의 HTML/CSS/JS만
+  (사내망에서 CDN 차단). Python 3.13에서 `cgi`가 없어져 multipart 대신 **업로드는 파일 바이트를 그대로
+  POST**(`X-Filename` 헤더, URL 인코딩).
+- **정적 파일 Content-Type은 직접 지정**(`_STATIC_TYPES`) — Windows는 레지스트리에 따라 `.css`/`.js`를
+  `text/plain`으로 추측해 브라우저가 스타일을 버릴 수 있다.
+- **보안**: 127.0.0.1에만 연다(토큰이 서버 환경변수에 있음). POST는 `X-Doc2Report: 1` 헤더 필수 —
+  다른 사이트가 브라우저로 몰래 보내는 단순 요청을 막는다(사용자 정의 헤더는 CORS 사전 요청이 필요).
+  파일 열기·내려받기는 저장 폴더 **바로 아래** 파일만(`App.output_file`).
+- **옵션 = 프로파일 값**: 체크박스는 `web/options.py`의 목록(`MARKER_TOGGLES` 등)이 원본이고 화면은
+  `/api/profiles`로 받아 그린다. 값은 `model_copy`로 덮어쓸 뿐이라 옵션을 늘릴 때 변환 코드 분기가 없다.
+  글꼴·크기는 **프로파일 기본값과 다른 것만** `with_overrides`에 넘긴다(같은 값을 넘겨도 `font`가 모든
+  글꼴을 덮어쓰는 부작용이 있어서).
+- **자동 판단**(`auto_decide`): 두 축을 따로. 정리 정도(제목·말머리가 있는 문단 비율 ≥ 30%, 또는
+  Confluence 포함 → confluence의 text 규칙 = 원문 유지, 아니면 default 규칙 = 말머리 생성 + 다듬기,
+  LLM은 "허용" + 설정돼 있을 때만) × 분량(3,000자·표 3개·입력 2개 이상 → confluence 글자 크기).
+  두 프로파일을 `fonts 쪽.model_copy(text=text 쪽.text)`로 조합 — 서식 값을 코드에 안 쓰려고.
+- **작업은 백그라운드 스레드**(`web/jobs.py`) — Confluence(PowerShell 우회)·LLM·PDF가 수십 초. 화면이
+  0.6초마다 진행 메시지를 물어 간다. PDF 실패는 작업 실패가 아니다(docx는 남기고 메모).
+- **파일 이름**: `YYYYMMDD_제목`, docx·pdf·md·`_변경내역.md`·`_files/` 중 하나라도 있으면 `_2`…
+  (한 작업의 파일이 같은 줄기를 쓰게). 동시에 두 작업이 같은 이름을 고르지 않도록 잠금 + 예약.
+  "최근 결과"는 메타데이터 없이 폴더를 줄기별로 묶어 보여 준다.
+- **열기**: Windows는 `os.startfile`(docx→Word), 폴더는 `explorer /select,`.
 
-**웹앱으로 가면 이 전제 자체가 달라진다**: 웹앱은 서버 프로세스가 계속 떠 있고
-브라우저는 그냥 클라이언트다 — "PowerShell 창을 새로 연다"는 개념이 없어진다.
-그러니 지금처럼 매번 스크립트를 `. `으로 불러오는 방식이 아니라, **서버 프로세스가
-시작될 때 한 번만 인증 정보를 읽어 들이는 구조**가 맞다. 구체적으로 그때 정할 것:
+**입력 확장 (웹 화면용으로 파이프라인에 추가 — CLI도 같이 쓴다)**
+- `pipeline.load_document` / `merge_documents` / `convert_document`로 나눔. `convert()`는 그대로 둔
+  얇은 래퍼. 여러 입력은 **절 제목**(`Heading.section_title`, IR 새 필드)으로 이어 붙이고, 제목 접기가
+  그 아래 모든 단계를 한 칸 민다(`fold_headings_into_levels`의 `base`). 합칠 때 제목 수준을 직접
+  바꾸면(h2→h3) 원문 말머리(□ -)로 정하는 단계와 어긋나서 이렇게 했다. 부작용: 합친 문서에서는
+  프로파일 말머리도 한 단계 밀린다(□ 자리에 -). "절 제목 넣기"를 끄면 원래 단계.
+- **Word 입력**(`parsers/docx_reader.py`): 고수준 API 대신 XML을 본문 순서대로(문단·표·내용 컨트롤).
+  Word "제목(Title)" = 문서 제목, Heading N = IR N+1(Markdown ##와 맞춤). 자동 번호는 numbering.xml로
+  **화면에 보이던 말머리를 다시 만들어** `ListItem.marker`에(원문 말머리 유지). Symbol/Wingdings 글머리
+  (PUA 문자)는 버리고 프로파일 말머리. 병합 셀은 gridSpan/vMerge로. 머리행은 `tblHeader` 또는 첫 행
+  전체 음영. 제목 스타일이 없으면 가운데 정렬·굵은 첫 줄을 제목으로(우리 출력도 이 모양이라 되읽기 가능).
+  **DRM이 걸린 .docx는 zip이 아니라서 못 읽는다** — 업로드 때 `PK` 시그니처로 걸러 "Word에서 열어
+  붙여넣기"를 안내한다.
+- **붙여넣은 글**(`parsers/plaintext.py`): 한 줄 = 한 문단(Markdown은 빈 줄 없는 줄을 합쳐 버림).
+  줄 앞 `- ` `1. `은 **글쓴이가 친 말머리**라 Markdown 목록으로 안 읽히게 이스케이프(목록으로 읽히면
+  프로파일 말머리로 바뀜). `2026. 9. 29`도 Markdown에선 번호 목록(최대 9자리)이라 같이 이스케이프.
+  탭으로 나뉜 줄 2줄 이상 = 엑셀 표 → Markdown 표. `#`·`|---|`·``` 가 있으면 Markdown으로 보고 그대로.
+- **제목 없이 말머리만 있는 문단도 단계로**: 예전엔 제목 아래 문단만 접었다. 이제 제목 전이라도
+  원문 말머리(`1.`→0, `□`→1, `-`→2)가 있으면 그 단계 항목이 된다(붙여넣은 글·Confluence 모두).
+- **완전히 정리 안 된 메모**: 제목도 말머리도 전혀 없고 `auto_markers`가 켜져 있으면 문단마다
+  `text.plain_paragraph_level`(default 1 = □) 항목으로. 날짜 줄(`ir.DATE_LINE`, 렌더러에서 옮김)·꺾쇠·※는 제외.
+- **출력**: `render/markdown_writer.py`(말머리는 글자로, 단계는 전각 공백 — 보통 공백 4칸은 코드 블록이 됨),
+  `render/pdf.py`(docx를 Word COM(PowerShell)으로, 없으면 LibreOffice). PDF를 따로 그리지 않는 이유는
+  Word 결과와 똑같아야 해서. **Word COM 경로는 이 샌드박스에서 못 돌려 봤다**(LibreOffice 경로만 실측).
 
-- 인증 정보를 어디서 읽을지: 환경변수는 그대로 쓰되 **서비스 시작 스크립트
-  (Windows 서비스든, 작업 스케줄러든, 그냥 시작 프로그램에 등록한 배치 파일이든)가
-  `confluence_env.ps1`/`onprem_env.ps1`을 로드한 뒤 그 프로세스에서 서버를 띄우는
-  형태**로 하면 지금 스크립트 자산을 거의 그대로 재사용할 수 있다. 다만 토큰을
-  매번 사람이 타이핑해 넣는 지금 방식(`notepad`로 파일 열어 채우기)은 웹앱에서는
-  안 맞는다 — 최초 1회 설정 화면(또는 Windows 자격 증명 관리자/환경변수 영구
-  등록) 같은 게 필요할 것.
-- `Set-ExecutionPolicy -Scope Process`도 그 서비스/시작 스크립트를 등록할 때
-  한 번만 해결하면 되고, 사용자가 매번 신경 쓸 일이 없어진다.
-- 지금 `.gitignore`에 넣어 둔 `scripts/confluence_env.ps1`(실제 토큰 있는 파일)
-  전략이 웹앱에서도 "코드/저장소에 시크릿을 넣지 않는다"는 원칙 자체는 유지할
-  근거가 된다 — 다만 구현은 그때 웹앱 프레임워크(로컬 설정 파일? OS 자격 증명
-  저장소? .env + 서버 프로세스 전용?)에 맞춰 다시 설계해야 한다.
+**아직 확인 못 한 것(사내 PC에서 볼 것)**: Word COM PDF 변환, `os.startfile` 열기, `start_webapp.bat`
+(UTF-8 BOM ps1 + `-ExecutionPolicy Bypass`), 사내 DRM이 출력 docx를 잠근 뒤 Word COM이 열 수 있는지.
 
-**변환 옵션 화면 (2026-09-29 사용자 계획)**: 웹앱에서는 문서 생성 시 변환 옵션을
-고르게 하되 **"자동 판단" 모드와 "사용자가 적용할 규칙을 체크" 모드를 나눈다**.
-지금 구조가 이미 그 밑바탕이다 — 규칙 하나하나가 프로파일의 `text.*`/`tables.*` 값
-(예: `polish`, `keep_leading_markers`, `merge_short_items`, `table_captions`,
-`max_font_spread`)이라, 체크박스는 이 값을 `with_overrides`/`model_copy`로 덮어쓰기만
-하면 된다(코드 분기 추가 없이). "자동 판단"은 지금의 `auto_profile()`(소스 종류로
-default/confluence 선택)을 확장하는 자리 — 예: 글자 수·표 개수로 "내용 많은 문서"를
-판정해 confluence 계열 서식을 고르는 것.
-
-**지금 할 일은 없음** — 이 절은 구현 시작할 때 "왜 지금 이렇게 되어 있는지"와
-"그때 뭘 다시 설계해야 하는지"를 빨리 떠올리기 위한 메모다.
+**다음 후보(사용자에게 제안만 함)**: 옵션 조합을 이름 붙여 저장(프리셋 → 프로파일 yaml), 결과 미리보기
+(HTML), 변환 전 표 배치 미리보기(`check`), 여러 사람이 쓰는 서버로 확장 시 로그인·작업 격리.

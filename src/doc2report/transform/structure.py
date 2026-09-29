@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 
-from ..ir import (Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table,
+from ..ir import (DATE_LINE, Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table,
                   invisible_codes, is_blank, plain)
 from .stylize_ko import Change
 
@@ -43,6 +43,8 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                               normalize: bool = False,
                               no_marker_openers: list[str] | None = None,
                               auto_markers: bool = True,
+                              plain_level: int | None = None,
+                              note_marks: list[str] | None = None,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -51,6 +53,15 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     marker_re = _marker_pattern(markers or [])
     depths = marker_depths or {}
     openers = tuple(no_marker_openers or ())
+
+    def _marked_depth(runs: list[Run]) -> int | None:
+        found = _find_marker(runs, marker_re)
+        if found is None:
+            return None
+        own = found[0]
+        if own in depths:
+            return depths[own]
+        return 0 if own[:1].isdigit() else None  # "1." "1)" = 첫 단계, 그 밖("※", "가.")은 문단 그대로
 
     def item(depth: int, runs: list[Run], own: str | None = None, *, derived: bool = False,
              **extra) -> ListItem:
@@ -71,9 +82,13 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
             own = None
         return ListItem(depth=depth, runs=runs, marker=own, **extra)
 
+    base = 0  # 합친 문서의 절 제목(section_title) 아래에선 모든 단계가 한 칸씩 들어간다
     for block in doc.blocks:
-        if isinstance(block, Heading):
-            depth = max(0, block.level - HEADING_BASE)
+        if isinstance(block, Heading) and block.section_title:
+            heading_depth, base = 0, 1
+            blocks.append(item(0, block.runs, derived=True, from_heading=True))
+        elif isinstance(block, Heading):
+            depth = max(0, block.level - HEADING_BASE) + base
             heading_depth = depth
             blocks.append(item(depth, block.runs, derived=True, from_heading=True))
         elif isinstance(block, ListItem):
@@ -82,10 +97,15 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         elif isinstance(block, Paragraph) and heading_depth >= 0:
             # 제목 아래 본문 문단도 그 단계의 항목으로 붙인다. 원문 말머리를 살리는 경우엔
             # 그 말머리가 가리키는 단계("-"면 - 단계)로 둔다 — 제목보다 얕아지지는 않게.
+            level = _marked_depth(block.runs)
             new = item(heading_depth + 1, block.runs, derived=True)
-            if new.marker in depths:
-                new.depth = max(heading_depth + 1, depths[new.marker])
+            if level is not None:
+                new.depth = max(heading_depth + 1, level + base)
             blocks.append(new)
+        elif isinstance(block, Paragraph) and (top := _marked_depth(block.runs)) is not None:
+            # 제목이 나오기 전이라도 원문 말머리("1." "□" "-")가 있는 문단은 그 말머리의 단계로
+            # 둔다 — 붙여넣은 글처럼 제목 없이 말머리로만 구분한 글도 들여쓰기가 맞도록.
+            blocks.append(item(top, block.runs, derived=True))
         else:
             blocks.append(block)
 
@@ -94,6 +114,16 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         shift = min((b.depth for b in items), default=0)
         for b in items:
             b.depth -= shift  # 접는 단계에서 새로 만든 객체라 바꿔도 원본 IR은 그대로다
+
+    if auto_markers and plain_level is not None and not any(
+            isinstance(b, (ListItem, Heading)) for b in blocks):
+        # 제목도 말머리도 없는 메모 — 문단마다 말머리를 달아 개조식으로 구분한다. 날짜 줄·꺾쇠 표기·
+        # ※ 참고는 문단 그대로 둔다.
+        skip = tuple(openers) + tuple(note_marks or ())
+        blocks = [ListItem(depth=plain_level, runs=b.runs)
+                  if isinstance(b, Paragraph) and not DATE_LINE.match(plain(b.runs).strip())
+                  and not plain(b.runs).lstrip().startswith(skip or ("\0",)) else b
+                  for b in blocks]
 
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
@@ -112,6 +142,11 @@ def drop_blank_blocks(doc: Document) -> tuple[Document, list[Change]]:
             continue
         blocks.append(block)
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def has_leading_marker(runs: list[Run], markers: list[str]) -> bool:
+    """원문에 말머리("1." "□" "-" "가." 등)를 쳐 둔 문단인가 — 자동 판단에서 정리 정도를 잴 때."""
+    return _find_marker(runs, _marker_pattern(markers)) is not None
 
 
 def _marker_pattern(markers: list[str]) -> re.Pattern | None:

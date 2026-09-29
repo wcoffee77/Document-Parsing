@@ -16,12 +16,37 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꿔 주는 �
 uv sync
 ```
 
-## 사용
+## 웹 화면 (권장)
+
+Windows에서는 저장소 맨 위의 **`start_webapp.bat`을 더블클릭**한다. `scripts\confluence_env.ps1`
+(Confluence 토큰)과 `scripts\onprem_env.ps1`(온프렘 LLM)이 있으면 먼저 불러온 뒤 서버를 띄우고
+브라우저가 `http://127.0.0.1:8765/`로 열린다. 창을 닫거나 Ctrl+C로 끈다. 새 패키지가 필요 없다
+(파이썬 표준 라이브러리 서버) — wheelhouse를 다시 만들 필요 없음.
+
+```bash
+doc2report web                       # macOS/Linux: scripts/start_webapp.sh
+doc2report web --port 8800 --output-dir D:\보고서   # 포트·저장 폴더 바꾸기
+```
+
+| 구분 | 내용 |
+|---|---|
+| 입력 | Confluence 주소(여러 개, 한 줄에 하나), Word(.docx) 파일(끌어 놓기·여러 개), 글 붙여넣기(메일·메신저·메모 — 한 줄이 한 문단, 엑셀에서 복사한 표는 표로). **입력 목록의 순서대로 한 문서로 합친다**(↑↓로 순서 변경) |
+| 옵션 | **자동 판단**: 제목·말머리가 있는 문단 비율로 원문 유지/새로 정리를, 글자 수·표 수·입력 수로 서식 크기를 정한다(Confluence는 항상 원문 유지). "LLM 허용"을 켜면 정리 안 된 글일 때만 LLM을 쓴다. **직접 선택**: 기본 서식·글꼴·크기, 문장 다듬기(안 함/파이썬 규칙/규칙+LLM)와 세부 규칙, 말머리(원문 유지·말머리 만들기·단계 접기·굵게), 표(표 제목·가로 페이지·위치) |
+| 공통 | 문서 제목, 날짜(넣지 않음/오늘/직접 지정), 입력마다 절 제목·새 쪽 |
+| 출력 | Word(.docx) 항상 + PDF(Word로 변환) + Markdown(.md) 선택, 변경 내역(.md). 저장 폴더(기본 `out\webapp`)에 `YYYYMMDD_제목.docx`로 저장하고 이름이 겹치면 `_2`, `_3`… |
+| 결과 | "열기"를 누르면 이 PC의 Word/PDF 뷰어로 바로 열림, 브라우저로 보기·내려받기·폴더 열기, 자동 판단 이유·레이아웃 메모·문구 수정 내역 표시, 최근 결과 목록 |
+| 상태 표시 | 화면 위에 Confluence 연결 설정·LLM(모델명)·PDF 변환기 유무. LLM은 "연결 시험"으로 문장 하나를 실제로 다듬어 볼 수 있다 |
+
+서버는 이 PC(127.0.0.1)에서만 접속된다 — Confluence 토큰이 서버 환경변수에 있으므로
+`--host 0.0.0.0`으로 다른 PC에 여는 것은 권하지 않는다.
+
+## 명령줄 사용
 
 ```bash
 doc2report convert 보고서.md -o 보고서.docx
 doc2report convert 보고서.md -o 보고서.docx --date today --report 변경내역.md
 doc2report check 보고서.md              # 표가 어떻게 배치될지만 미리 확인
+doc2report convert 기존보고서.docx      # Word 입력 → 기존보고서_보고서.docx
 ```
 
 ### 변환 전에 서식 고르기
@@ -157,7 +182,7 @@ uv run python tools/score_corpus.py    # 대표 문서를 모두 변환해 점�
 ## 구조
 
 ```
-입력(.md / Confluence) → 파서 → IR → 문구 정규화 → 레이아웃 계산 → docx 렌더
+입력(.md / Confluence / .docx / 붙여넣은 글) → 파서 → IR(여러 입력은 합침) → 문구 정규화 → 레이아웃 계산 → docx 렌더 (→ PDF / Markdown)
 ```
 
 `src/doc2report/` 아래에서 `ir.py`가 단계 사이의 유일한 계약이다.
