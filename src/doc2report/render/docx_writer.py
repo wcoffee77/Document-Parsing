@@ -39,6 +39,20 @@ from .markers import format_marker
 # "2026. 10. 1" / "2026.10.1." 처럼 날짜만 있는 줄 (제목 아래 날짜 표기 판별용)
 DATE_LINE = re.compile(r"^\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?$")
 
+# python-docx가 내부적으로 쓰는 기본 템플릿(docx/templates/default.docx)이 오프라인
+# 설치·백신 격리 등으로 사라지면 "Package not found"로 죽는다. profiles/, rules/와
+# 같은 방식(__file__ 기준 저장소 루트)으로 우리 저장소에도 사본을 두고 우선 쓴다 —
+# 이게 없을 때만(예: 이 파일이 빠진 패키징) python-docx 자체 기본값으로 되돌아간다.
+_FALLBACK_TEMPLATE = Path(__file__).resolve().parents[3] / "assets" / "default_template.docx"
+
+
+def _base_template(profile: Profile) -> str | None:
+    if profile.template:
+        return profile.template
+    if _FALLBACK_TEMPLATE.exists():
+        return str(_FALLBACK_TEMPLATE)
+    return None
+
 
 @dataclass
 class RenderResult:
@@ -64,8 +78,7 @@ class DocxRenderer:
         if not self.layouts:
             self.layouts = plan_tables(doc, self.profile)
 
-        self.docx = (DocxDocument(self.profile.template) if self.profile.template
-                     else DocxDocument())
+        self.docx = DocxDocument(_base_template(self.profile))
         self._apply_document_defaults()
         oxml.apply_page_setup(self.docx.sections[0], self.profile.page)
 

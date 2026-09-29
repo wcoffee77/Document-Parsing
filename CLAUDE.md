@@ -101,11 +101,20 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
   (`CT_Tc._span_to_width`가 `_move_content_to`로 그렇게 동작). 병합 *먼저*, 내용 채우기는
   *그 다음*이어야 한다 — 순서를 바꾸면 먼저 써 둔 내용이 사라진다.
   (`render/docx_writer.py::_fill_cells`는 이미 그 순서를 지킨다.)
+- **`python-docx`가 내부에 갖고 있는 기본 템플릿(`docx/templates/default.docx`)이
+  사라지면 `Package not found at '...\default.docx'`로 죽는다** — 실제 사내 PC에서
+  겪음(2026-09-29). `profile.template`을 안 쓰면(사내 기본값) `Document()`를 인자
+  없이 불러 python-docx 설치 안의 이 파일을 쓰는데, 오프라인 wheelhouse 설치나
+  백신/DLP의 격리(.docx 확장자라 오탐 가능성)로 이 파일만 없어져도 변환 자체가
+  실패한다. 대응: `rules/`·`profiles/`와 같은 방식으로 저장소에 사본을
+  `assets/default_template.docx`로 두고 `docx_writer.py::_base_template()`이
+  `profile.template` → 이 사본 → (그마저 없으면) python-docx 자체 기본값 순으로
+  고른다 — 설치 환경이 얼마나 깨져도 저장소 자체 사본은 git으로 항상 같이 온다.
 
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 155개
+uv run pytest                           # 156개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 

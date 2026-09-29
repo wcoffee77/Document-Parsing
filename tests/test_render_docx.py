@@ -10,6 +10,7 @@ from docx.oxml.ns import qn
 
 from doc2report.pipeline import convert
 from doc2report.profile import load_profile
+from doc2report.render.docx_writer import _FALLBACK_TEMPLATE, _base_template
 from doc2report.units import emu_to_dxa, emu_to_pt
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_report.md"
@@ -26,6 +27,15 @@ def test_document_opens_and_has_content(built):
     _, docx = built
     assert len(docx.paragraphs) > 5
     assert len(docx.tables) == 1
+
+
+def test_bundled_template_exists_and_is_used_by_default():
+    # python-docx가 내부에 갖고 있는 default.docx가 오프라인 설치·백신 격리 등으로
+    # 사라져도(사내 PC에서 실제로 "Package not found" 로 겪음) 우리 사본이 쓰이는지.
+    assert _FALLBACK_TEMPLATE.exists()
+    profile = load_profile("default")
+    assert profile.template is None
+    assert _base_template(profile) == str(_FALLBACK_TEMPLATE)
 
 
 def test_page_setup_matches_profile(built):
