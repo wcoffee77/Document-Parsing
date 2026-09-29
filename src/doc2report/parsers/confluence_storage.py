@@ -19,6 +19,7 @@ PageRef는 IR 블록이 아니다 — 채우지 않을 거면(keep_refs=False) �
 
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass, field
 
@@ -128,6 +129,42 @@ def _is_ac(el, name: str) -> bool:
     return el.tag == f"{{{AC_NS}}}{name}"
 
 
+_LINK_MACROS = {"include", "excerpt-include", "children", "pagetree"} | _VIEW_FILE_MACROS
+
+
+def _is_block_macro(el) -> bool:
+    """문단 안에 있어도 따로 떼어 블록으로 다뤄야 하는 매크로 — 다른 페이지를 끌어오는 것,
+    패널·펼치기·코드처럼 본문이 있는 것. 앵커(책갈피)·상태 표시처럼 글자 사이에 끼는 것은 아니다."""
+    if not _is_ac(el, "structured-macro"):
+        return False
+    name = _macro_name(el)
+    return (name in _LINK_MACROS or name in _KIND_BY_MACRO or name in ("code", "expand")
+            or _macro_child(el, "rich-text-body") is not None)
+
+
+def _inline_macro_label(el) -> str:
+    """글자 사이에 낀 매크로가 화면에 보이는 글자. 상태(status)는 제목, 앵커(책갈피)는 없음.
+    매개변수(색·앵커 이름 등)는 화면에 안 보이므로 본문으로 새어 나오면 안 된다
+    (실제로 "sec1제목", "Green완료"처럼 새어 나왔다)."""
+    if _macro_name(el) == "status":
+        title = _param(el, "title")
+        return (title.text or "").strip() if title is not None else ""
+    return ""
+
+
+def _bare_link_label(el) -> str | None:
+    """<ac:link>에 보이는 글자(link-body)가 없으면 Confluence는 대상 이름을 보여 준다."""
+    if any(_local(c).endswith("link-body") for c in el):
+        return None
+    title, _ = _page_link(el)
+    if title:
+        return title
+    attachment = next(el.iter(f"{{{RI_NS}}}attachment"), None)
+    if attachment is not None:
+        return attachment.get(f"{{{RI_NS}}}filename") or attachment.get("ri:filename")
+    return el.get(f"{{{AC_NS}}}anchor") or el.get("ac:anchor")
+
+
 # ── 블록 ────────────────────────────────────────────────────────────────
 
 
@@ -152,6 +189,8 @@ def _block(el) -> tuple[list[Block], list[str]]:
         return [Heading(level=int(tag[1]), runs=runs), *images], []
 
     if tag == "p":
+        if any(_is_block_macro(c) for c in el):
+            return _split_paragraph(el)
         lines, images = _inline_lines(el)
         return _paragraphs_from_lines(lines, images, align=_align_of(el)), []
 
@@ -196,6 +235,34 @@ def drop_page_refs(blocks: list, notes: list[str], *, reason: str = "연결 페�
                     cell.blocks = drop_page_refs(cell.blocks, notes, reason=reason)
         out.append(block)
     return out
+
+
+def _split_paragraph(el) -> tuple[list[Block], list[str]]:
+    """<p>글 <include …/> 글</p>처럼 문단 안에 블록 매크로가 든 경우. 편집기가 매크로를 문단 안에
+    넣는 일이 흔한데, 그대로 인라인으로 읽으면 매크로가 통째로 사라진다(페이지 포함이 조용히 빠짐).
+    매크로 앞뒤 글은 각각 문단으로, 매크로는 블록으로 나눈다."""
+    blocks: list[Block] = []
+    notes: list[str] = []
+    align = _align_of(el)
+
+    def flush(segment) -> None:
+        lines, images = _inline_lines(segment)
+        blocks.extend(_paragraphs_from_lines(lines, images, align=align))
+
+    segment = etree.Element(el.tag)
+    segment.text = el.text
+    for child in el:
+        if _is_block_macro(child):
+            flush(segment)
+            inner, inner_notes = _macro(child)
+            blocks.extend(inner)
+            notes.extend(inner_notes)
+            segment = etree.Element(el.tag)
+            segment.text = child.tail
+        else:
+            segment.append(copy.deepcopy(child))
+    flush(segment)
+    return blocks, notes
 
 
 def _macro_name(el) -> str:
@@ -257,6 +324,9 @@ def _macro(el) -> tuple[list[Block], list[str]]:
     if linked is not None:
         return linked
 
+    if name == "anchor":
+        return [], []  # 책갈피(앵커)는 위치 표시일 뿐 보이는 내용이 없다
+
     if name == "expand" and body is not None:
         # 펼치기(+) 매크로: 접힌 제목도 살린다 — 없으면 무엇을 펼친 내용인지 모른다.
         inner, notes = _children_blocks(body)
@@ -300,7 +370,8 @@ def _list(el, depth: int, ordered: bool) -> list[Block]:
     for li in el:
         if _local(li) != "li":
             continue
-        block_children = [c for c in li if _local(c) in ("p", "ul", "ol", "table")]
+        block_children = [c for c in li
+                          if _local(c) in ("p", "ul", "ol", "table") or _is_block_macro(c)]
         para = next((c for c in block_children if _local(c) == "p"), None)
         if para is not None:
             runs, images = _inline(para)
@@ -313,9 +384,13 @@ def _list(el, depth: int, ordered: bool) -> list[Block]:
         # else: Confluence는 들여쓰기용으로 글자 없는 <li><ol>…</ol></li> 껍데기를 만든다 —
         # 항목으로 만들면 "□"만 덜렁 찍힌 줄이 생긴다. 안쪽 목록의 깊이는 그대로 둔다.
         out.extend(images)
+        if para is not None:  # 항목 문단 안에 든 페이지 포함·펼치기 등은 항목 바로 뒤에
+            out.extend(b for c in para if _is_block_macro(c) for b in _macro(c)[0])
         for child in block_children:
             tag = _local(child)
-            if tag in ("ul", "ol"):
+            if _is_block_macro(child):
+                out.extend(_macro(child)[0])
+            elif tag in ("ul", "ol"):
                 out.extend(_list(child, depth + 1, ordered=(tag == "ol")))
             elif tag == "table":
                 out.append(_table(child))
@@ -370,7 +445,7 @@ def _cell_blocks(el) -> list[Block]:
     텍스트를 넣기도 한다. 후자를 _children_blocks에 그대로 넘기면 자식 요소가 없어
     아무것도 못 건지고 빈 문단이 된다 — 리스트 항목과 같은 문제라 같은 방식으로 푼다."""
     has_block = any(
-        _local(c) in _BLOCK_TAGS or _is_ac(c, "structured-macro") or _is_ac(c, "image")
+        _local(c) in _BLOCK_TAGS or _is_block_macro(c) or _is_ac(c, "image")
         for c in el
     )
     if has_block:
@@ -453,6 +528,19 @@ def _inline(el) -> tuple[list[Run], list[Image]]:
                     runs.append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
                 continue
 
+            if _is_ac(child, "structured-macro") or _is_ac(child, "link"):
+                label = (_inline_macro_label(child) if _is_ac(child, "structured-macro")
+                         else _bare_link_label(child))
+                if label:
+                    runs.append(Run(label, bold=bold, italic=italic, code=code, href=href))
+                else:
+                    for part in child:
+                        if not _is_ac(part, "parameter"):
+                            walk(part, bold, italic, code, href)
+                if child.tail:
+                    runs.append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
+                continue
+
             tag = _local(child)
             if tag == "br":
                 runs.append(Run(" ", bold=bold, italic=italic, code=code, href=href))
@@ -495,6 +583,19 @@ def _inline_lines(el) -> tuple[list[list[Run]], list[Image]]:
                 image = _image(child)
                 if image:
                     images.append(image)
+                if child.tail:
+                    lines[-1].append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
+                continue
+
+            if _is_ac(child, "structured-macro") or _is_ac(child, "link"):
+                label = (_inline_macro_label(child) if _is_ac(child, "structured-macro")
+                         else _bare_link_label(child))
+                if label:
+                    lines[-1].append(Run(label, bold=bold, italic=italic, code=code, href=href))
+                else:
+                    for part in child:
+                        if not _is_ac(part, "parameter"):
+                            walk(part, bold, italic, code, href)
                 if child.tail:
                     lines[-1].append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
                 continue

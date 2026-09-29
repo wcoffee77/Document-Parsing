@@ -154,3 +154,36 @@ def test_pagetree_of_whole_space_is_not_loaded():
     parsed = parse_confluence_storage(macro, keep_refs=True)
     assert parsed.document.blocks == []
     assert any("스페이스 전체" in n for n in parsed.notes)
+
+
+INCLUDE = ('<ac:structured-macro ac:name="include"><ac:parameter ac:name="">'
+           '<ac:link><ri:page ri:content-title="세부 계획"/></ac:link></ac:parameter></ac:structured-macro>')
+
+
+@pytest.mark.parametrize("xhtml", [
+    f"<p>앞 문장 {INCLUDE} 뒤 문장</p>",           # 편집기가 매크로를 문단 안에 넣은 경우
+    f"<ul><li>항목 {INCLUDE}</li></ul>",           # 목록 항목 안
+    f"<ul><li><p>항목</p>{INCLUDE}</li></ul>",
+])
+def test_include_nested_in_paragraph_or_list_is_not_lost(xhtml):
+    blocks = parse_confluence_storage(xhtml, keep_refs=True).document.blocks
+    refs = [b for b in blocks if isinstance(b, PageRef)]
+    assert [r.title for r in refs] == ["세부 계획"]
+
+
+def test_anchor_bookmark_and_status_do_not_leak_parameters():
+    """책갈피(anchor)의 이름·상태(status)의 색 같은 매개변수가 본문 글자로 새어 나오면 안 된다."""
+    xhtml = ('<h2><ac:structured-macro ac:name="anchor"><ac:parameter ac:name="">sec1</ac:parameter>'
+             '</ac:structured-macro>1. 추진 배경</h2>'
+             '<ac:structured-macro ac:name="anchor"><ac:parameter ac:name="">x</ac:parameter></ac:structured-macro>'
+             '<p><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter>'
+             '<ac:parameter ac:name="title">완료</ac:parameter></ac:structured-macro> 상태</p>'
+             '<table><tbody><tr><td>진행 <ac:structured-macro ac:name="status">'
+             '<ac:parameter ac:name="title">지연</ac:parameter></ac:structured-macro></td></tr></tbody></table>'
+             '<p><ac:link><ri:page ri:content-title="세부 계획"/></ac:link></p>')
+    parsed = parse_confluence_storage(xhtml)
+    texts = _texts(parsed.document.blocks)
+    assert texts == ["1. 추진 배경", "완료 상태", "세부 계획"]
+    table = next(b for b in parsed.document.blocks if isinstance(b, Table))
+    assert plain(table.rows[0].cells[0].blocks[0].runs) == "진행 지연"   # 예전엔 칸이 통째로 비었다
+    assert parsed.notes == []   # 책갈피는 "지원하지 않는 매크로"가 아니다
