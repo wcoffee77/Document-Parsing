@@ -107,6 +107,13 @@ def test_date_is_not_a_sentence_boundary(engine):
     assert engine.split_long(text, 60) == [text]
 
 
+def test_leading_punctuation_only_fragment_is_not_split_off(engine):
+    """"." 로 시작하는 항목(Confluence 원문의 말머리 관행)을 문장 경계로 오인해
+    ["."," 입사예정시기"]처럼 빈 항목을 따로 만들면 안 된다."""
+    text = ". 입사예정시기"
+    assert engine.split_long(text, 60) == [text]
+
+
 def test_long_sentence_splits_at_connective(engine):
     text = ("인덱스를 재설계하고, 캐시 계층을 도입하여 응답 시간을 크게 줄였으며 "
             "추가 과제를 다음 분기로 이관하였습니다.")

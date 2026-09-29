@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from docx import Document as DocxDocument
 
-from doc2report.ir import Document, Heading, Run
+from doc2report.ir import Document, Heading, ListItem, Run
 from doc2report.pipeline import convert
 from doc2report.profile import load_profile
 from doc2report.transform.structure import fold_headings_into_levels, merge_short_list_items
@@ -63,6 +63,37 @@ def test_headings_that_merely_start_with_a_number_are_kept(text):
     doc = Document(blocks=[Heading(level=2, runs=[Run(text)])])
     folded, changes = fold_headings_into_levels(doc)
     assert folded.blocks[0].runs[0].text == text
+    assert changes == []
+
+
+def test_existing_bullet_marker_in_heading_is_not_duplicated():
+    """Confluence 원문 제목에 이미 "□ "가 박혀 있으면(사내 관행) 접을 때 프로파일이
+    매기는 말머리와 겹쳐 "ㅁㅁ 채용진행현황"처럼 보이면 안 된다 (2026-09-29 실제 변환)."""
+    doc = Document(blocks=[Heading(level=2, runs=[Run("□ 채용진행현황")])])
+    folded, changes = fold_headings_into_levels(doc, ["□", "-", "·", "."])
+    assert folded.blocks[0].runs[0].text == "채용진행현황"
+    assert len(changes) == 1
+
+
+def test_existing_bullet_marker_in_list_item_is_not_duplicated():
+    doc = Document(blocks=[ListItem(depth=0, runs=[Run("- 입사확정")])])
+    folded, changes = fold_headings_into_levels(doc, ["□", "-", "·", "."])
+    assert folded.blocks[0].runs[0].text == "입사확정"
+    assert len(changes) == 1
+
+
+def test_leading_negative_number_is_not_mistaken_for_a_dash_marker():
+    """"-5%" 처럼 마커 뒤에 공백이 없으면 음수로 보고 그대로 둔다."""
+    doc = Document(blocks=[ListItem(depth=0, runs=[Run("-5%p 개선")])])
+    folded, changes = fold_headings_into_levels(doc, ["□", "-", "·", "."])
+    assert folded.blocks[0].runs[0].text == "-5%p 개선"
+    assert changes == []
+
+
+def test_without_strip_markers_configured_nothing_is_stripped():
+    doc = Document(blocks=[Heading(level=2, runs=[Run("□ 채용진행현황")])])
+    folded, changes = fold_headings_into_levels(doc)
+    assert folded.blocks[0].runs[0].text == "□ 채용진행현황"
     assert changes == []
 
 

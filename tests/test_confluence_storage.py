@@ -82,6 +82,24 @@ def test_table_with_colspan_and_rowspan_is_preserved():
     assert table.col_count == 3
 
 
+def test_cell_with_br_becomes_separate_paragraphs_not_merged():
+    """<br>만으로 줄을 나눈 셀(<p> 없이)이 한 줄로 뭉개지면 안 된다 —
+    실제 사내 Confluence 문서 변환에서 "ㅇㅇㅇㅁㅁㅁㄷㄷㄷ"처럼 겹쳐 나온 버그."""
+    xhtml = "<table><tbody><tr><td>ㅇㅇㅇ<br/>ㅁㅁㅁ<br/>ㄷㄷㄷ</td></tr></tbody></table>"
+    parsed = parse_confluence_storage(xhtml)
+    table = next(b for b in parsed.document.blocks if isinstance(b, Table))
+    cell = table.rows[0].cells[0]
+    paragraphs = [b for b in cell.blocks if isinstance(b, Paragraph)]
+    assert [plain(p.runs) for p in paragraphs] == ["ㅇㅇㅇ", "ㅁㅁㅁ", "ㄷㄷㄷ"]
+
+
+def test_paragraph_with_br_splits_into_separate_paragraphs():
+    xhtml = "<p>ㅇㅇㅇ<br/>ㅁㅁㅁ</p>"
+    parsed = parse_confluence_storage(xhtml)
+    paragraphs = [b for b in parsed.document.blocks if isinstance(b, Paragraph)]
+    assert [plain(p.runs) for p in paragraphs] == ["ㅇㅇㅇ", "ㅁㅁㅁ"]
+
+
 def test_table_without_header_row_has_zero_header_rows():
     xhtml = "<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>"
     parsed = parse_confluence_storage(xhtml)

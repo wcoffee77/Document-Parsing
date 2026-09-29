@@ -95,7 +95,7 @@ def convert(
         changes.extend(merge_changes)
     if prof.text.headings_as_levels:
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
-        doc, fold_changes = fold_headings_into_levels(doc)
+        doc, fold_changes = fold_headings_into_levels(doc, prof.text.strip_leading_markers)
         changes.extend(fold_changes)
     if polish == "llm":
         from .transform.llm_polish import polish_document

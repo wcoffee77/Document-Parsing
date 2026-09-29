@@ -25,6 +25,29 @@ _JONG_RM = 10  # ㄻ
 
 # 문장 경계. 숫자 뒤의 마침표는 날짜·항목번호("2026. 9. 1.")라 자르지 않는다.
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])(?<![0-9][.!?])\s+")
+_HAS_CONTENT = re.compile(r"[0-9A-Za-z가-힣]")
+
+
+def _merge_punct_only_parts(parts) -> list[str]:
+    """_SENTENCE_SPLIT은 글자 없이 문장부호만 있는 조각도 "문장"으로 센다 —
+    예를 들어 항목이 ". 입사예정시기"처럼 마침표로 시작하면(Confluence 원문에
+    "."을 말머리로 쓴 경우) [".", "입사예정시기"]로 쪼개져 빈 항목("□\t.")이
+    따로 생긴다. 글자·숫자가 없는 조각은 독립된 문장으로 보지 않고 옆 조각에
+    붙인다."""
+    out: list[str] = []
+    pending = ""
+    for part in parts:
+        if not _HAS_CONTENT.search(part):
+            pending = f"{pending} {part}".strip() if pending else part
+            continue
+        out.append(f"{pending} {part}".strip() if pending else part)
+        pending = ""
+    if pending:
+        if out:
+            out[-1] = f"{out[-1]} {pending}".strip()
+        else:
+            out.append(pending)
+    return out
 
 
 @dataclass
@@ -188,7 +211,7 @@ class Gaechosik:
 
     def split_long(self, text: str, max_chars: int) -> list[str]:
         """긴 문장을 문장 부호와 연결어미에서 끊어 여러 항목으로."""
-        parts = [s for s in _SENTENCE_SPLIT.split(text) if s.strip()]
+        parts = _merge_punct_only_parts([s for s in _SENTENCE_SPLIT.split(text) if s.strip()])
         if max_chars <= 0:
             return parts
         out: list[str] = []

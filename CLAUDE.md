@@ -114,7 +114,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 156개
+uv run pytest                           # 163개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -166,8 +166,32 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 
 **2026-09-29 사내 PC 실측으로 확인 완료**: `main`을 pull해서 `doc2report convert`
 정상 동작, Confluence REST API로 실제 페이지를 불러와 처리하는 것까지 확인됨.
-문구 다듬기(`stylize_ko`/`llm_polish`) 결과가 실제 Confluence 문서에 잘 맞는지는
-**사용자가 계속 테스트 중** — 아직 구체적 이슈 보고는 없음.
+문구 다듬기(`stylize_ko`/`llm_polish`) 결과를 실제 Confluence 문서로 테스트하다가
+아래 두 가지 실제 버그를 발견·수정함.
+
+**버그 1 — 원문에 이미 있는 말머리와 프로파일 말머리가 겹침**: 이 조직 Confluence는
+제목·항목 앞에 `1.→□→-` 체계를 **문자로 직접 타이핑**해 둔 경우가 흔하다(Word에서
+넘어온 습관으로 보임). 접을 때 프로파일이 그 단계의 말머리를 또 매기면 "ㅁㅁ
+채용진행현황"(□+□), "- - 입사확정"(-+-)처럼 겹쳐 나왔다. `profiles/default.yaml`의
+`text.strip_leading_markers`(기본 `["□", "-", "·", "."]`)에 적힌 문자가 (뒤에
+공백을 두고) 제목·항목 맨 앞에 있으면 접기 전에 뗀다(`structure.py::
+fold_headings_into_levels`). "-5%p 개선"처럼 공백 없이 바로 숫자가 오면 음수로
+보고 손대지 않는다 — 말머리는 항상 뒤에 공백이 있다는 전제.
+그 김에 딸려 나온 두 번째 버그: `split_long()`(문장 길이 초과 시 항목을 나누는
+로직)이 `_SENTENCE_SPLIT`으로 ". 입사예정시기"를 [".", "입사예정시기"]로 쪼개
+빈 항목("□\t.")을 따로 만들고 있었다 — 글자 없이 문장부호만 있는 조각은 문장으로
+안 보고 옆 조각에 붙이게 고침(`_merge_punct_only_parts`). "." 를 말머리로 쓰는
+케이스를 테스트하다가 발견함 — 겪은 함정 절의 "날짜 마침표" 버그와 사촌 격.
+
+**버그 2 — 표 셀 안 여러 줄이 한 줄로 뭉개짐**: Confluence 표 셀은 `<p>` 없이
+`텍스트<br/>텍스트<br/>텍스트`처럼 `<br>`만으로 줄을 나누는 경우가 흔한데,
+`confluence_storage.py`의 `_inline()`이 `<br>`를 공백 하나로 접어서 세 줄이
+"사진1사진2사진3"처럼 한 문단으로 합쳐졌다. `<br>`를 줄 경계로 보는
+`_inline_lines()`를 새로 만들어 `<p>`/셀의 bare-text 경로 모두 줄마다 별도
+`Paragraph`를 만들게 바꿨다 — 표 셀은 이미 여러 `Paragraph`를 여러 줄로 렌더링하는
+경로가 있어서(병합 셀 버그 수정 때 만든 것) 안전하게 재사용됨. (top-level 문단의
+`<br>`는 그대로 공백 처리 — 흔치 않고, Markdown 쪽 `softbreak`/`hardbreak`도 아직
+공백 처리라 굳이 이번에 같이 안 건드림.)
 
 ## Confluence 연동 (2026-09-28 재작업)
 

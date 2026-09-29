@@ -241,6 +241,10 @@ class TextRules(_Base):
     keep_original_in_tables: bool = True
     date_format: str = ""  # 비우면 rules/notation.yaml 의 형식을 쓴다
     headings_as_levels: bool = False  # ##/### 제목을 1./□ 단락 체계로 접어 넣을지
+    strip_leading_markers: list[str] = Field(default_factory=list)
+    # Confluence 등 원본에 이미 "□ ", "- " 처럼 말머리가 문자로 박혀 있으면, 제목/항목을
+    # 단계별 말머리(numbering)로 접을 때 프로파일이 또 자기 말머리를 붙여 "ㅁ□"/"- -"처럼
+    # 겹친다. 여기 적은 문자가 (뒤에 공백을 두고) 앞에 있으면 접기 전에 떼어 낸다.
 
 
 class Choices(_Base):

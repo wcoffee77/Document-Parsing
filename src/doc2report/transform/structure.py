@@ -10,7 +10,9 @@
 
 Confluence에서 내려받은 문서는 제목에 이미 "1. 추진 배경"처럼 번호가 박혀 있는 경우가
 흔하다. 그대로 접으면 프로파일이 매기는 말머리와 겹쳐 "1.<TAB>1. 추진 배경"으로
-두 번 나오므로, 접기 전에 그 번호를 떼어 낸다.
+두 번 나오므로, 접기 전에 그 번호를 떼어 낸다. 같은 이유로 원문이 "□ "/"- " 같은
+말머리 문자를 이미 직접 쳐 넣은 경우도 있다(사내 Confluence 관행) — 이건 숫자가
+아니라 `profiles`의 `text.strip_leading_markers`에 적힌 문자를 보고 뗀다.
 """
 
 from __future__ import annotations
@@ -27,43 +29,67 @@ HEADING_BASE = 2  # H1은 문서 제목이므로 H2가 첫 단계(1.)가 된다
 _EXISTING_NUMBER = re.compile(r"^\s*(?:\(\d+\)|\d+(?:\.\d+)*[.)])(?!\d)\s*")
 
 
-def fold_headings_into_levels(doc: Document) -> tuple[Document, list[Change]]:
+def fold_headings_into_levels(doc: Document,
+                              strip_markers: list[str] | None = None
+                              ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
     changes: list[Change] = []
     heading_depth = -1
+    marker_re = _marker_pattern(strip_markers or [])
 
     for block in doc.blocks:
         if isinstance(block, Heading):
             depth = max(0, block.level - HEADING_BASE)
             heading_depth = depth
-            runs, change = _strip_existing_number(block.runs)
+            runs, change = _strip_existing_marker(block.runs, marker_re)
             if change:
                 changes.append(change)
             blocks.append(ListItem(depth=depth, runs=runs))
         elif isinstance(block, ListItem):
-            blocks.append(ListItem(depth=heading_depth + 1 + block.depth, runs=block.runs,
+            runs, change = _strip_existing_marker(block.runs, marker_re)
+            if change:
+                changes.append(change)
+            blocks.append(ListItem(depth=heading_depth + 1 + block.depth, runs=runs,
                                    ordered=block.ordered, number=block.number))
         elif isinstance(block, Paragraph) and heading_depth >= 0:
             # 제목 아래 본문 문단도 그 단계의 항목으로 붙인다.
-            blocks.append(ListItem(depth=heading_depth + 1, runs=block.runs))
+            runs, change = _strip_existing_marker(block.runs, marker_re)
+            if change:
+                changes.append(change)
+            blocks.append(ListItem(depth=heading_depth + 1, runs=runs))
         else:
             blocks.append(block)
 
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
 
-def _strip_existing_number(runs: list[Run]) -> tuple[list[Run], Change | None]:
+def _marker_pattern(markers: list[str]) -> re.Pattern | None:
+    """원본에 이미 박혀 있는 말머리 문자(profiles의 text.strip_leading_markers)를
+    잡는 패턴. 뒤에 공백이 와야만 매치한다 — "-5%"(음수), "1.5배"(소수)처럼
+    말머리가 아닌 문자를 실수로 떼지 않기 위해서다."""
+    if not markers:
+        return None
+    escaped = "|".join(re.escape(m) for m in sorted(markers, key=len, reverse=True))
+    return re.compile(rf"^\s*(?:{escaped})\s+")
+
+
+def _strip_existing_marker(runs: list[Run],
+                           marker_re: re.Pattern | None) -> tuple[list[Run], Change | None]:
     if not runs:
         return runs, None
     first = runs[0]
     match = _EXISTING_NUMBER.match(first.text)
+    label = "제목 중복 번호 제거"
+    if not match and marker_re is not None:
+        match = marker_re.match(first.text)
+        label = "중복 말머리 제거"
     if not match or match.end() >= len(first.text.rstrip()) and len(runs) == 1:
-        return runs, None  # 번호만 있는 제목("1.")은 그대로 둔다
+        return runs, None  # 말머리만 있는 항목("1.", "-")은 그대로 둔다
     before = plain(runs)
     stripped = first.copy_with(first.text[match.end():])
     new_runs = [stripped, *runs[1:]] if stripped.text else list(runs[1:])
-    return new_runs, Change(before, plain(new_runs), "제목 중복 번호 제거")
+    return new_runs, Change(before, plain(new_runs), label)
 
 
 # ── 표 주석 ─────────────────────────────────────────────────────────────

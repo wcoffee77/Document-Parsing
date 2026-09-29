@@ -111,12 +111,8 @@ def _block(el) -> tuple[list[Block], list[str]]:
         return [Heading(level=int(tag[1]), runs=runs), *images], []
 
     if tag == "p":
-        runs, images = _inline(el)
-        blocks: list[Block] = []
-        if any(r.text.strip() for r in runs):
-            blocks.append(Paragraph(runs=runs))
-        blocks.extend(images)
-        return blocks, []
+        lines, images = _inline_lines(el)
+        return _paragraphs_from_lines(lines, images), []
 
     if tag in {"ul", "ol"}:
         return _list(el, depth=0, ordered=(tag == "ol")), []
@@ -256,10 +252,12 @@ def _cell_blocks(el) -> list[Block]:
     if has_block:
         blocks, _ = _children_blocks(el)
         return blocks
-    runs, images = _inline(el)
-    blocks: list[Block] = []
-    if any(r.text.strip() for r in runs):
-        blocks.append(Paragraph(runs=runs))
+    lines, images = _inline_lines(el)
+    return _paragraphs_from_lines(lines, images)
+
+
+def _paragraphs_from_lines(lines: list[list[Run]], images: list[Image]) -> list[Block]:
+    blocks: list[Block] = [Paragraph(runs=line) for line in lines if any(r.text.strip() for r in line)]
     blocks.extend(images)
     return blocks
 
@@ -332,6 +330,52 @@ def _inline(el) -> tuple[list[Run], list[Image]]:
 
     walk(el, False, False, False, None)
     return _trim(_merge_runs(runs)), images
+
+
+def _inline_lines(el) -> tuple[list[list[Run]], list[Image]]:
+    """_inline()과 같지만 <br>를 (공백이 아니라) 줄 경계로 취급한다.
+
+    표 셀은 <p> 없이 텍스트 사이사이에 <br>만 넣어 여러 줄을 표현하는 경우가
+    흔한데, 이를 _inline()으로 읽으면 <br>가 공백 하나로 접혀 여러 줄이 한
+    문장으로 뭉개진다(실제로 겪음: "ㅇㅇㅇ<br>ㅁㅁㅁ<br>ㄷㄷㄷ" → 한 줄).
+    <p> 블록 하나에서 이 함수가 돌려주는 줄마다 별도 Paragraph를 만들면
+    셀 안에 여러 문단이 되어 원래 줄 구분이 살아난다."""
+    lines: list[list[Run]] = [[]]
+    images: list[Image] = []
+
+    def walk(node, bold: bool, italic: bool, code: bool, href: str | None) -> None:
+        if node.text:
+            lines[-1].append(Run(_ws(node.text), bold=bold, italic=italic, code=code, href=href))
+        for child in node:
+            if _is_ac(child, "image"):
+                image = _image(child)
+                if image:
+                    images.append(image)
+                if child.tail:
+                    lines[-1].append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
+                continue
+
+            tag = _local(child)
+            if tag == "br":
+                lines.append([])
+                if child.tail:
+                    lines[-1].append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
+                continue
+
+            child_bold = bold or tag in ("strong", "b")
+            child_italic = italic or tag in ("em", "i")
+            child_code = code or tag == "code"
+            child_href = href
+            if tag == "a":
+                child_href = child.get("href") or href
+
+            if tag in _INLINE_TAGS or tag not in ("ul", "ol", "table", "p", "blockquote"):
+                walk(child, child_bold, child_italic, child_code, child_href)
+            if child.tail:
+                lines[-1].append(Run(_ws(child.tail), bold=bold, italic=italic, code=code, href=href))
+
+    walk(el, False, False, False, None)
+    return [_trim(_merge_runs(line)) for line in lines], images
 
 
 def _ws(text: str) -> str:
