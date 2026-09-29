@@ -111,3 +111,27 @@ def test_bracket_table_caption_keeps_brackets_alignment_and_drops_prefix(tmp_pat
     caption = next(p for p in document.paragraphs if "사업현황" in p.text)
     assert caption.text == "【사업현황】"
     assert caption.alignment == WD_ALIGN_PARAGRAPH.LEFT
+
+
+def test_confluence_url_gets_confluence_profile_and_keeps_text(tmp_path, monkeypatch):
+    """Confluence URL은 -p 없이도 confluence 프로파일: 문장을 다듬지 않고(규칙 2),
+    원문 말머리를 그대로 쓰고(규칙 1), 본문 12pt·제목 16pt(규칙 3)."""
+    import doc2report.pipeline as pipeline
+    from doc2report.sources import LoadedSource
+    from doc2report.units import emu_to_pt
+
+    xhtml = ("<h2>1. 추진 배경</h2><p>응답 지연이 지속적으로 발생하였습니다.</p>"
+             "<p>ㆍ입사예정시기는 10월입니다</p>")
+    monkeypatch.setattr(pipeline, "load_source", lambda source: LoadedSource(
+        text=xhtml, name=source, format="confluence_storage", title="보고"))
+    assert pipeline.auto_profile("https://wiki/pages/1") == "confluence"
+
+    out = tmp_path / "c.docx"
+    result = pipeline.convert("https://wiki/pages/1", out)
+    assert result.changes == []  # 문구 수정 없음
+    texts = {p.text: p for p in DocxDocument(str(out)).paragraphs if p.text}
+    assert "1.\t추진 배경" in texts
+    assert any(t.endswith("응답 지연이 지속적으로 발생하였습니다.") for t in texts)
+    assert "ㆍ\t입사예정시기는 10월입니다" in texts
+    assert emu_to_pt(texts["보고"].runs[0].font.size) == 16
+    assert emu_to_pt(texts["1.\t추진 배경"].runs[0].font.size) == 12

@@ -93,3 +93,27 @@ def test_profile_init_round_trips(tmp_path):
     assert extracted.page.margin.left == pytest.approx(
         original.page.margin.left, abs=parse_length("0.5mm")
     )
+
+
+def test_confluence_profile_extends_default_with_dense_sizes():
+    """Confluence·내용 많은 문서: 제목 16pt, 본문 12pt, 표 11~9pt, 문장 다듬기 없음
+    (2026-09-29 사용자 규칙). 나머지(글꼴·여백·말머리 체계)는 default에서 물려받는다."""
+    conf, default = load_profile("confluence"), load_profile("default")
+    assert emu_to_pt(conf.font("title").size) == 16
+    assert emu_to_pt(conf.font("body").size) == 12
+    assert emu_to_pt(conf.font("table").size) == 11
+    assert [emu_to_pt(s) for s in conf.table_font_ladder()] == [11, 10, 9]
+    assert conf.text.polish == "none"
+    assert conf.text.keep_leading_markers
+    # 덮어쓰지 않은 값은 부모 그대로 — 단위가 두 번 변환되지도 않는다
+    assert conf.font("body").east_asia == default.font("body").east_asia
+    assert conf.page.margin.left == default.page.margin.left
+    assert conf.numbering == default.numbering
+
+
+def test_extends_cycle_is_reported(tmp_path):
+    a, b = tmp_path / "a.yaml", tmp_path / "b.yaml"
+    a.write_text("extends: b.yaml\n", encoding="utf-8")
+    b.write_text("extends: a.yaml\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="순환"):
+        load_profile(a)

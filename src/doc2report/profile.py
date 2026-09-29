@@ -144,6 +144,9 @@ class NumberingLevel(_Base):
 
     marker: str = ""
     ordered_marker: str | None = None  # 번호 있는 목록일 때만 쓰는 형식
+    aliases: list[str] = Field(default_factory=list)
+    # 원문에서 이 단계를 뜻하는 다른 문자(예: "□" 단계의 "■", "·" 단계의 "ㆍ"). 원문 말머리를
+    # 그대로 쓸 때(text.keep_leading_markers) 그 문단을 몇 단계에 둘지 이걸로 정한다.
     indent: int = 0
     hanging: int | None = None
     space_before: int | None = None  # 이 단계가 새로 시작될 때 앞에 주는 간격
@@ -245,10 +248,16 @@ class TextRules(_Base):
     keep_original_in_tables: bool = True
     date_format: str = ""  # 비우면 rules/notation.yaml 의 형식을 쓴다
     headings_as_levels: bool = False  # ##/### 제목을 1./□ 단락 체계로 접어 넣을지
-    strip_leading_markers: list[str] = Field(default_factory=list)
-    # Confluence 등 원본에 이미 "□ ", "- " 처럼 말머리가 문자로 박혀 있으면, 제목/항목을
-    # 단계별 말머리(numbering)로 접을 때 프로파일이 또 자기 말머리를 붙여 "ㅁ□"/"- -"처럼
-    # 겹친다. 여기 적은 문자가 (뒤에 공백을 두고) 앞에 있으면 접기 전에 떼어 낸다.
+    leading_markers: list[str] = Field(default_factory=list)
+    # 원문에 이미 문자로 쳐 둔 말머리("□ ", "- ", "ㆍ", "①", "※"). "1." "1)" "(1)" "가."
+    # 같은 번호는 목록에 안 적어도 알아본다. 이게 있는 제목·항목에 프로파일이 또
+    # 말머리를 붙이면 "ㅁ□"/"- -"처럼 겹친다.
+    keep_leading_markers: bool = False
+    # true: 원문 말머리를 그대로 쓰고 프로파일 말머리를 붙이지 않는다(2026-09-29 사용자
+    #       원칙 — "이미 쓴 글머리 기호는 바꾸지 말 것").
+    # false: 원문 말머리를 떼고 프로파일 말머리로 통일한다.
+    polish: str | None = None
+    # 문구 다듬기 기본값(rules | llm | none). CLI --polish를 주면 그쪽이 이긴다.
     table_captions: bool = False
     # 표 바로 위에 "[사업현황]"처럼 꺾쇠로 감싼 문단이 있으면 Table.caption으로 옮긴다.
     # 안 옮기면 제목 접기에서 ListItem이 되어 "- [사업현황]"처럼 말머리가 붙는다 —
@@ -313,6 +322,15 @@ class Profile(_Base):
         if not self.numbering:
             return NumberingLevel()
         return self.numbering[min(depth, len(self.numbering) - 1)]
+
+    def marker_depths(self) -> dict[str, int]:
+        """말머리 문자 → 단계. 번호 자리표시자({n} 등)가 있는 단계는 문자로 못 가리키므로 뺀다."""
+        depths: dict[str, int] = {}
+        for depth, level in enumerate(self.numbering):
+            for marker in [level.marker, *level.aliases]:
+                if marker and "{" not in marker:
+                    depths.setdefault(marker, depth)
+        return depths
 
     def with_overrides(
         self,
@@ -387,12 +405,8 @@ class Profile(_Base):
 
 def load_profile(name_or_path: str | Path) -> Profile:
     """이름('default') 또는 경로('./my.yaml') 로 프로파일을 읽는다."""
-    path = Path(name_or_path)
-    if not path.suffix:
-        path = PROFILE_DIR / f"{name_or_path}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"프로파일을 찾을 수 없음: {path}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    path = _profile_file(name_or_path)
+    data = _read_profile_data(path, seen=set())
     profile = Profile.model_validate(data)
     if profile.template:
         tpl = Path(profile.template)
@@ -400,6 +414,41 @@ def load_profile(name_or_path: str | Path) -> Profile:
             tpl = path.parent / tpl
         profile = profile.model_copy(update={"template": str(tpl)})
     return profile
+
+
+def _profile_file(name_or_path: str | Path) -> Path:
+    path = Path(name_or_path)
+    if not path.suffix:
+        path = PROFILE_DIR / f"{name_or_path}.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"프로파일을 찾을 수 없음: {path}")
+    return path
+
+
+def _read_profile_data(path: Path, seen: set[Path]) -> dict:
+    """`extends: default`가 있으면 부모 YAML 위에 덮어쓴다. 검증(단위 변환) **전의**
+    원본 dict끼리 합쳐야 한다 — 검증된 모델을 합치면 EMU 값이 다시 변환된다(겪은 함정)."""
+    resolved = path.resolve()
+    if resolved in seen:
+        raise ValueError(f"프로파일 extends가 순환함: {path}")
+    seen.add(resolved)
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    parent = data.pop("extends", None)
+    if parent is None:
+        return data
+    parent_path = _profile_file(parent if Path(parent).suffix == "" else path.parent / parent)
+    return _deep_merge(_read_profile_data(parent_path, seen), data)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """dict는 키별로 합치고, 목록·값은 통째로 덮어쓴다(numbering 목록을 섞으면 단계가 꼬인다)."""
+    out = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
 
 
 def dump_profile(profile: Profile) -> str:

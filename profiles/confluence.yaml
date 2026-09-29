@@ -1,0 +1,39 @@
+# Confluence·내용 많은 문서용 서식 — default를 물려받고 아래 값만 바꾼다.
+#
+# Confluence URL을 변환하면 -p 없이도 이 프로파일이 자동으로 쓰인다.
+# 마크다운이라도 글이 많은 문서면 -p confluence 로 고를 수 있다.
+#
+# 2026-09-29 사용자 규칙:
+#   1) 원문에 이미 쓴 글머리 기호(1. 1) □ - · ① ※ 등)는 바꾸지 않는다 — default에서 물려받음
+#   2) Confluence 문장은 이미 정리돼 있으니 문장을 따로 다듬지 않는다 — text.polish: none
+#   3) 내용 많은 문서는 제목 16pt, 본문 12pt, 표 11~9pt
+
+extends: default
+name: confluence
+description: Confluence·내용 많은 문서 (원문 말머리·문장 유지, 제목 16pt·본문 12pt·표 11~9pt)
+
+fonts:
+  body:
+    size: 12pt
+  title:
+    size: 16pt
+  date:
+    size: 12pt
+  table:
+    size: 11pt
+  caption:
+    size: 12pt
+
+tables:
+  font_ladder: [11pt, 10pt, 9pt]   # 11pt에서 시작해 필요하면 9pt까지
+
+text:
+  polish: none               # 문장 다듬기(개조식·명사 종결·LLM) 안 함. --polish를 주면 그쪽이 이긴다
+  gaechosik: false
+  noun_ending: false
+  split_long_sentences: false
+  merge_short_items: false   # "및" 병합도 문장을 바꾸는 일이라 끈다
+
+choices:
+  size: [12pt, 11pt, 13pt]
+  table_size: [11pt, 10pt, 9pt]

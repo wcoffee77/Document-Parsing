@@ -55,6 +55,7 @@ class ListItem:
     runs: list[Run] = field(default_factory=list)
     ordered: bool = False
     number: int | None = None  # ordered일 때 원본 번호
+    marker: str | None = None  # 원문에 문자로 쳐 둔 말머리("ㆍ", "①", "1.") — 있으면 그대로 쓴다
 
 
 @dataclass

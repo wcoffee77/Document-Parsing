@@ -8,11 +8,15 @@
     - 응답 지연 지속    →     □ 응답 지연 지속
       - 상세 내용       →        - 상세 내용
 
-Confluence에서 내려받은 문서는 제목에 이미 "1. 추진 배경"처럼 번호가 박혀 있는 경우가
-흔하다. 그대로 접으면 프로파일이 매기는 말머리와 겹쳐 "1.<TAB>1. 추진 배경"으로
-두 번 나오므로, 접기 전에 그 번호를 떼어 낸다. 같은 이유로 원문이 "□ "/"- " 같은
-말머리 문자를 이미 직접 쳐 넣은 경우도 있다(사내 Confluence 관행) — 이건 숫자가
-아니라 `profiles`의 `text.strip_leading_markers`에 적힌 문자를 보고 뗀다.
+Confluence에서 내려받은 문서는 제목·항목에 이미 "1. 추진 배경", "□ 채용현황", "ㆍ 입사예정"처럼
+말머리가 문자로 박혀 있는 경우가 흔하다(사내 관행). 그대로 접으면 프로파일이 매기는
+말머리와 겹쳐 "1.<TAB>1. 추진 배경"처럼 두 번 나온다. 처리는 두 가지 중 하나다
+(`profiles`의 `text.keep_leading_markers`):
+
+- keep(기본, 2026-09-29 사용자 원칙 "이미 쓴 글머리 기호는 바꾸지 말 것"):
+  원문 말머리를 `ListItem.marker`로 옮겨 그대로 쓰고 프로파일 말머리는 붙이지 않는다.
+  제목 아래 일반 문단이면 그 말머리가 가리키는 단계(`numbering[].marker/aliases`)에 둔다.
+- strip: 원문 말머리를 떼고 프로파일 말머리로 통일한다(뗀 것은 Change로 남긴다).
 """
 
 from __future__ import annotations
@@ -24,40 +28,52 @@ from .stylize_ko import Change
 
 HEADING_BASE = 2  # H1은 문서 제목이므로 H2가 첫 단계(1.)가 된다
 
-# 제목 앞 수동 번호: "1. ", "1.추진", "1.1. ", "2) ", "(3) ".
-# 끝의 (?!\d) 가 "1.5배 향상"처럼 숫자로 시작하는 제목을 번호로 오인하지 않게 한다.
-_EXISTING_NUMBER = re.compile(r"^\s*(?:\(\d+\)|\d+(?:\.\d+)*[.)])(?!\d)\s*")
+# 수동 번호: "1. ", "1.추진", "1.1. ", "2) ", "(3) ".
+# 끝의 (?!\d) 가 "1.5배 향상"처럼 숫자로 시작하는 제목을, 두 자리 제한이 "2026. 9. 1. 기준"
+# 같은 날짜로 시작하는 문단을 번호로 오인하지 않게 한다.
+_EXISTING_NUMBER = re.compile(r"^\s*(?:\(\d{1,2}\)|\d{1,2}(?:\.\d{1,2})*[.)])(?!\d)\s*")
+# 한글 번호: "가. ", "나) ", "(다) " — "가.격" 같은 오인을 막으려고 뒤에 공백을 요구한다.
+_HANGUL_ENUM = re.compile(r"^\s*(?:\([가나다라마바사아자차카타파하]\)|[가나다라마바사아자차카타파하][.)])\s+")
 
 
-def fold_headings_into_levels(doc: Document,
-                              strip_markers: list[str] | None = None
+def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *,
+                              keep: bool = False,
+                              marker_depths: dict[str, int] | None = None,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
     changes: list[Change] = []
     heading_depth = -1
-    marker_re = _marker_pattern(strip_markers or [])
+    marker_re = _marker_pattern(markers or [])
+    depths = marker_depths or {}
+
+    def item(depth: int, runs: list[Run], own: str | None = None, **extra) -> ListItem:
+        if own is None:
+            found = _find_marker(runs, marker_re)
+            if found is not None:
+                own, rest, label = found
+                if keep:
+                    runs = rest
+                else:
+                    changes.append(Change(plain(runs), plain(rest), label))
+                    runs, own = rest, None
+        return ListItem(depth=depth, runs=runs, marker=own if keep else None, **extra)
 
     for block in doc.blocks:
         if isinstance(block, Heading):
             depth = max(0, block.level - HEADING_BASE)
             heading_depth = depth
-            runs, change = _strip_existing_marker(block.runs, marker_re)
-            if change:
-                changes.append(change)
-            blocks.append(ListItem(depth=depth, runs=runs))
+            blocks.append(item(depth, block.runs))
         elif isinstance(block, ListItem):
-            runs, change = _strip_existing_marker(block.runs, marker_re)
-            if change:
-                changes.append(change)
-            blocks.append(ListItem(depth=heading_depth + 1 + block.depth, runs=runs,
-                                   ordered=block.ordered, number=block.number))
+            blocks.append(item(heading_depth + 1 + block.depth, block.runs, block.marker,
+                               ordered=block.ordered, number=block.number))
         elif isinstance(block, Paragraph) and heading_depth >= 0:
-            # 제목 아래 본문 문단도 그 단계의 항목으로 붙인다.
-            runs, change = _strip_existing_marker(block.runs, marker_re)
-            if change:
-                changes.append(change)
-            blocks.append(ListItem(depth=heading_depth + 1, runs=runs))
+            # 제목 아래 본문 문단도 그 단계의 항목으로 붙인다. 원문 말머리를 살리는 경우엔
+            # 그 말머리가 가리키는 단계("-"면 - 단계)로 둔다 — 제목보다 얕아지지는 않게.
+            new = item(heading_depth + 1, block.runs)
+            if new.marker in depths:
+                new.depth = max(heading_depth + 1, depths[new.marker])
+            blocks.append(new)
         else:
             blocks.append(block)
 
@@ -65,31 +81,45 @@ def fold_headings_into_levels(doc: Document,
 
 
 def _marker_pattern(markers: list[str]) -> re.Pattern | None:
-    """원본에 이미 박혀 있는 말머리 문자(profiles의 text.strip_leading_markers)를
-    잡는 패턴. 뒤에 공백이 와야만 매치한다 — "-5%"(음수), "1.5배"(소수)처럼
-    말머리가 아닌 문자를 실수로 떼지 않기 위해서다."""
+    """원문에 문자로 쳐 둔 말머리(profiles의 text.leading_markers)를 잡는 패턴.
+
+    "-", "." 같은 ASCII 기호는 뒤에 공백이 와야만 말머리로 본다 — "-5%"(음수),
+    ".5초"를 말머리로 오인하지 않게. "ㆍ", "□", "①" 같은 기호는 한국어 문서에서
+    "ㆍ입사예정"처럼 붙여 쓰는 일이 많아 공백이 없어도 잡는다(같은 기호가 연달아
+    오는 "○○팀" 같은 자리표시자는 제외).
+    """
     if not markers:
         return None
-    escaped = "|".join(re.escape(m) for m in sorted(markers, key=len, reverse=True))
-    return re.compile(rf"^\s*(?:{escaped})\s+")
+    ordered = sorted(markers, key=len, reverse=True)
+    spaced = [re.escape(m) for m in ordered if m.isascii()]
+    glued = [f"{re.escape(m)}(?!{re.escape(m)})" for m in ordered if not m.isascii()]
+    parts = []
+    if glued:
+        parts.append(rf"(?:{'|'.join(glued)})\s*")
+    if spaced:
+        parts.append(rf"(?:{'|'.join(spaced)})\s+")
+    return re.compile(rf"^\s*(?:{'|'.join(parts)})")
 
 
-def _strip_existing_marker(runs: list[Run],
-                           marker_re: re.Pattern | None) -> tuple[list[Run], Change | None]:
-    """runs[0]만 보지 않고 전체 텍스트를 이어 붙여 판단한다 — 앞에 빈 run이나
-    말머리와 공백이 서로 다른 run에 걸쳐 있어도 놓치지 않기 위해서다."""
+def _find_marker(runs: list[Run], marker_re: re.Pattern | None
+                 ) -> tuple[str, list[Run], str] | None:
+    """(원문 말머리, 말머리를 뗀 runs, Change 규칙명). 없으면 None.
+
+    runs[0]만 보지 않고 전체 텍스트를 이어 붙여 판단한다 — 앞에 빈 run이나
+    말머리와 공백이 서로 다른 run에 걸쳐 있어도 놓치지 않기 위해서다.
+    """
     if not runs:
-        return runs, None
+        return None
     text = plain(runs)
-    match = _EXISTING_NUMBER.match(text)
-    label = "제목 중복 번호 제거"
-    if not match and marker_re is not None:
-        match = marker_re.match(text)
-        label = "중복 말머리 제거"
-    if not match or match.end() >= len(text.rstrip()):
-        return runs, None  # 말머리만 있는 항목("1.", "-")은 그대로 둔다
-    new_runs = _drop_prefix(runs, match.end())
-    return new_runs, Change(text, plain(new_runs), label)
+    for pattern, label in ((_EXISTING_NUMBER, "제목 중복 번호 제거"),
+                           (_HANGUL_ENUM, "제목 중복 번호 제거"),
+                           (marker_re, "중복 말머리 제거")):
+        match = pattern.match(text) if pattern is not None else None
+        if match:
+            if match.end() >= len(text.rstrip()):
+                return None  # 말머리만 있는 항목("1.", "-")은 그대로 둔다
+            return text[:match.end()].strip(), _drop_prefix(runs, match.end()), label
+    return None
 
 
 def _drop_prefix(runs: list[Run], count: int) -> list[Run]:
@@ -263,4 +293,4 @@ def _merge_items(group: list[ListItem]) -> ListItem:
     template = first.runs[0] if first.runs else Run("")
     merged_text = " 및 ".join(plain(g.runs) for g in group)
     return ListItem(depth=first.depth, runs=[template.copy_with(merged_text)],
-                    ordered=first.ordered, number=first.number)
+                    ordered=first.ordered, number=first.number, marker=first.marker)

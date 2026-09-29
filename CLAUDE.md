@@ -73,8 +73,10 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
   주석 다음 블록이 가져간다.
 - `transform/structure.py` — 사내 보고서는 제목/본문이 따로 없고 `1.→□→-` 한 체계라
   마크다운 `##`/`###`를 이 체계로 접어 넣는다(`text.headings_as_levels`). Confluence
-  제목은 이미 "1. 추진 배경"처럼 번호가 박혀 있는 경우가 흔해, 접기 전에 그 번호를
-  떼어 낸다(안 그러면 "1.\t1. 추진 배경"처럼 겹친다) — 뗀 것도 Change로 남겨 --report에 보인다.
+  제목·항목은 이미 "1. 추진 배경", "ㆍ입사예정"처럼 말머리가 박혀 있는 경우가 흔해, 접을 때
+  그 말머리를 `ListItem.marker`로 옮겨 **원문 그대로** 쓰고 프로파일 말머리는 안 붙인다
+  (`text.keep_leading_markers`, 2026-09-29 사용자 원칙). keep을 끄면 예전처럼 떼고 프로파일
+  말머리로 통일하며 뗀 것은 Change로 남는다. 안 하면 "1.\t1. 추진 배경"처럼 겹친다.
 - `parsers/confluence_storage.py` — Confluence REST API가 주는 storage format(XHTML)을
   마크다운을 거치지 않고 곧장 IR로 읽는다. 마크다운 표 문법에는 병합 셀 표현이 없어서,
   한번이라도 마크다운을 거치면 rowspan/colspan이 사라진다 — Confluence는 표 폭 제약이
@@ -114,7 +116,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 177개
+uv run pytest                           # 185개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -173,7 +175,7 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 제목·항목 앞에 `1.→□→-` 체계를 **문자로 직접 타이핑**해 둔 경우가 흔하다(Word에서
 넘어온 습관으로 보임). 접을 때 프로파일이 그 단계의 말머리를 또 매기면 "ㅁㅁ
 채용진행현황"(□+□), "- - 입사확정"(-+-)처럼 겹쳐 나왔다. `profiles/default.yaml`의
-`text.strip_leading_markers`(기본 `["□", "-", "·", "."]`)에 적힌 문자가 (뒤에
+`text.leading_markers`(당시 이름 `strip_leading_markers`)에 적힌 문자가 (뒤에
 공백을 두고) 제목·항목 맨 앞에 있으면 접기 전에 뗀다(`structure.py::
 fold_headings_into_levels`). "-5%p 개선"처럼 공백 없이 바로 숫자가 오면 음수로
 보고 손대지 않는다 — 말머리는 항상 뒤에 공백이 있다는 전제.
@@ -214,7 +216,7 @@ fold_headings_into_levels`). "-5%p 개선"처럼 공백 없이 바로 숫자가 
   넣었지만 사용자가 실측한 문자는 **U+318D(ㆍ, 호환용 자모) 또는 U+119E(ᆞ, 옛
   아래아 입력기가 넣는 자모 영역 글자)** — 둘 다 화면엔 거의 똑같이 보이지만
   다른 코드다. U+318D는 이미 있었지만 **U+119E는 빠져 있어서 추가함**
-  (`profiles/default.yaml::text.strip_leading_markers`). `fold_headings_into_levels`에
+  (`profiles/default.yaml::text.leading_markers`). `fold_headings_into_levels`에
   직접 두 문자를 넣고 확인한 단위 테스트와, 마크다운 전체 파이프라인(`convert()`)
   으로 두 문자 각각 실제로 떨어지는 것까지 확인함(`tests/test_structure.py::
   test_all_middle_dot_lookalikes_are_stripped`). **그래도 여전히 안 떨어지면
@@ -273,6 +275,36 @@ water-filling 쪽을 구체적 수치와 함께 다시 요청할 것.
 - **표 머리행 음영을 옅은 회색(R242,G242,B242 = `F2F2F2`)으로 확정** —
   기존 `D9D9D9`보다 밝다. `tables.header_shading`만 바꾸면 되는 순수 프로파일
   값이라 코드 변경 없음.
+
+**2026-09-29 다섯 번째 라운드 — Confluence는 규칙이 다르다 (사용자 규칙 3가지):**
+
+1. **원문 글머리 기호는 바꾸지 않는다**(모든 문서 공통 원칙). 지금까지는 원문 말머리를
+   **떼고** 프로파일 말머리로 통일했는데(strip), 이제 기본이 **keep**이다
+   (`text.keep_leading_markers: true`). `fold_headings_into_levels`가 원문 말머리를
+   `ListItem.marker`(IR 새 필드)로 옮기고, 렌더러는 이 값이 있으면 프로파일 말머리 대신
+   그대로 쓴다(`"ㆍ\t입사예정"` — 탭·들여쓰기는 단계 서식 그대로라 줄이 맞는다). 제목
+   아래 일반 문단이면 그 말머리가 가리키는 단계(`numbering[].marker` + 새 `aliases`)로
+   둔다 — "-"는 - 단계, "ㆍ"는 · 단계. 번호 단계({n})의 카운터는 원문 번호가 있어도 세어
+   둬서 뒤의 자동 번호가 어긋나지 않는다.
+   **가운뎃점 미해결 건의 유력한 원인도 여기서 나옴**: 예전 패턴은 말머리 **뒤에 공백**을
+   요구했는데 한국어 문서는 `ㆍ입사예정`처럼 붙여 쓰는 경우가 흔하다. 이제 ASCII 기호
+   ("-", ".")만 공백을 요구하고(음수·소수 오인 방지), 그 밖의 기호는 붙여 써도 잡는다
+   ("○○팀" 같은 자리표시자는 같은 기호가 연달아 오면 제외). 번호 패턴도 두 자리로
+   제한해 "2026. 9. 1. 기준"을 번호로 오인하지 않게 했고, "가." "나)" "(다)"도 번호로 본다.
+2. **Confluence 문장은 다듬지 않는다** — `profiles/confluence.yaml`의 `text.polish: none`
+   (`TextRules.polish` 새 필드, CLI `--polish`를 안 주면 이 값을 씀). 개조식·명사 종결·
+   문장 분리·"및" 병합·LLM 모두 꺼진다.
+3. **내용 많은 문서는 제목 16pt·본문 12pt·표 11~9pt** — `confluence.yaml`.
+
+`confluence.yaml`은 `extends: default`로 **바뀌는 값만** 적는다(프로파일 상속을 새로 만듦 —
+`profile.py::_read_profile_data`). **검증 전의 YAML dict끼리** 합쳐야 한다 — 검증된
+모델을 합치면 EMU 값이 다시 변환되는 "겪은 함정"을 또 밟는다. dict는 키별로 합치고
+목록(numbering, font_ladder)은 통째로 덮어쓴다. Confluence URL이면 `-p` 없이도 이
+프로파일이 자동 선택된다(`pipeline.py::auto_profile`).
+
+**아직 판단 안 한 것**: 원문 말머리가 **없는** 제목 아래 일반 문단은 여전히 프로파일
+말머리("□"/"-")를 받는다(예전부터의 `headings_as_levels` 동작). Confluence에서 "잘 정리된
+문장"을 그대로 두려면 이것도 끄는 게 맞을 수 있다 — 사용자 실측 피드백 대기.
 
 ## Confluence 연동 (2026-09-28 재작업)
 
@@ -425,6 +457,15 @@ CLI를 쓰는 동안은 이게 최선이었다 — 토큰을 코드나 파일에
   전략이 웹앱에서도 "코드/저장소에 시크릿을 넣지 않는다"는 원칙 자체는 유지할
   근거가 된다 — 다만 구현은 그때 웹앱 프레임워크(로컬 설정 파일? OS 자격 증명
   저장소? .env + 서버 프로세스 전용?)에 맞춰 다시 설계해야 한다.
+
+**변환 옵션 화면 (2026-09-29 사용자 계획)**: 웹앱에서는 문서 생성 시 변환 옵션을
+고르게 하되 **"자동 판단" 모드와 "사용자가 적용할 규칙을 체크" 모드를 나눈다**.
+지금 구조가 이미 그 밑바탕이다 — 규칙 하나하나가 프로파일의 `text.*`/`tables.*` 값
+(예: `polish`, `keep_leading_markers`, `merge_short_items`, `table_captions`,
+`max_font_spread`)이라, 체크박스는 이 값을 `with_overrides`/`model_copy`로 덮어쓰기만
+하면 된다(코드 분기 추가 없이). "자동 판단"은 지금의 `auto_profile()`(소스 종류로
+default/confluence 선택)을 확장하는 자리 — 예: 글자 수·표 개수로 "내용 많은 문서"를
+판정해 confluence 계열 서식을 고르는 것.
 
 **지금 할 일은 없음** — 이 절은 구현 시작할 때 "왜 지금 이렇게 되어 있는지"와
 "그때 뭘 다시 설계해야 하는지"를 빨리 떠올리기 위한 메모다.

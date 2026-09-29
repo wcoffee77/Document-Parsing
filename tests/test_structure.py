@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from docx import Document as DocxDocument
 
-from doc2report.ir import Document, Heading, ListItem, Paragraph, Run, Table
+from doc2report.ir import Document, Heading, ListItem, Paragraph, Run, Table, plain
 from doc2report.pipeline import convert
 from doc2report.profile import load_profile
 from doc2report.transform.structure import (
@@ -232,3 +232,37 @@ def test_star_paragraph_under_table_is_a_note():
     assert [len(b.notes) if isinstance(b, Table) else None for b in attached.blocks] == [1, None]
     assert table.notes[0][0].text == "단위: 천원"
     assert changes[0].after == "* 단위: 천원"
+
+
+_KEEP = ["□", "-", "ㆍ", "ᆞ", "·", ".", "○", "①", "※"]
+_DEPTHS = {"□": 1, "-": 2, "ㆍ": 3, "ᆞ": 3, "·": 3, ".": 3}
+
+
+def test_keep_mode_uses_source_marker_instead_of_profile_marker():
+    """원문에 이미 쓴 말머리는 바꾸지 않는다(2026-09-29 사용자 원칙) — 떼어 낸 뒤
+    ListItem.marker로 옮겨 렌더러가 프로파일 말머리 대신 그대로 쓴다."""
+    doc = Document(blocks=[Heading(level=2, runs=[Run("3. 추진 배경")])])
+    folded, changes = fold_headings_into_levels(doc, _KEEP, keep=True)
+    item = folded.blocks[0]
+    assert item.marker == "3." and plain(item.runs) == "추진 배경"
+    assert changes == []  # 글자는 바뀐 게 없으니 리포트할 것도 없다
+
+
+def test_keep_mode_catches_glued_arae_a_and_places_it_by_marker():
+    """"ㆍ입사예정"처럼 붙여 쓴 아래아도 말머리로 보고, 그 말머리의 단계(·)에 둔다."""
+    doc = Document(blocks=[Heading(level=3, runs=[Run("□ 채용진행현황")]),
+                           Paragraph(runs=[Run("- 입사확정")]),
+                           Paragraph(runs=[Run("ㆍ입사예정시기")])])
+    folded, _ = fold_headings_into_levels(doc, _KEEP, keep=True, marker_depths=_DEPTHS)
+    heading, dash, dot = folded.blocks
+    assert (heading.marker, heading.depth) == ("□", 1)
+    assert (dash.marker, dash.depth, plain(dash.runs)) == ("-", 2, "입사확정")
+    assert (dot.marker, dot.depth, plain(dot.runs)) == ("ㆍ", 3, "입사예정시기")
+
+
+@pytest.mark.parametrize("text", ["○○팀 협조 요청", "2026. 9. 1. 기준 현황", "-5%p 개선"])
+def test_things_that_only_look_like_markers_are_left_alone(text):
+    doc = Document(blocks=[Heading(level=2, runs=[Run("제목")]), Paragraph(runs=[Run(text)])])
+    folded, _ = fold_headings_into_levels(doc, _KEEP, keep=True, marker_depths=_DEPTHS)
+    assert folded.blocks[1].marker is None
+    assert plain(folded.blocks[1].runs) == text

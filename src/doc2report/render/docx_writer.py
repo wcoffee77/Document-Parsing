@@ -215,6 +215,11 @@ class DocxRenderer:
         """말머리 문자열. {n} 같은 자리표시자가 있으면 깊이별 번호를 매긴다."""
         template = (level.ordered_marker if block.ordered and level.ordered_marker
                     else level.marker)
+        if block.marker is not None:
+            # 원문 말머리를 그대로 쓴다. 번호 단계면 번호는 세어 둬야 다음 자동 번호가 맞는다.
+            if template and "{" in template:
+                self._next_number(block.depth)
+            return block.marker
         if not template:
             return ""
         if "{" not in template:

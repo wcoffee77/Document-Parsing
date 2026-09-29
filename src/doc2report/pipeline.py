@@ -57,19 +57,30 @@ def _escape(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
+def auto_profile(source: str) -> str:
+    """프로파일을 안 골랐을 때의 기본값. Confluence는 글이 많고 이미 다듬어진 문장이라
+    규칙이 다르다(2026-09-29 사용자): 원문 말머리 유지·문장 다듬기 없음·12pt 본문."""
+    return "confluence" if source.startswith(("http://", "https://")) else "default"
+
+
 def convert(
     source: str,
     output: str | Path | None = None,
-    profile: str | Profile = "default",
+    profile: str | Profile | None = None,
     *,
-    polish: str = "rules",
+    polish: str | None = None,
     date: str | None = None,
 ) -> ConvertResult:
     """source(파일 경로 / Confluence URL / '-') → output(.docx).
 
+    profile: 안 주면 소스 종류로 고른다(auto_profile).
+    polish: 안 주면 프로파일의 text.polish(없으면 "rules").
     date: 제목 아래에 넣을 날짜. "today"(또는 "오늘")면 오늘 날짜를 프로파일 형식으로 넣는다.
     """
+    if profile is None:
+        profile = auto_profile(source)
     prof = profile if isinstance(profile, Profile) else load_profile(profile)
+    polish = polish or prof.text.polish or "rules"
 
     loaded = load_source(source)
     if loaded.format == "confluence_storage":
@@ -104,7 +115,9 @@ def convert(
         changes.extend(merge_changes)
     if prof.text.headings_as_levels:
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
-        doc, fold_changes = fold_headings_into_levels(doc, prof.text.strip_leading_markers)
+        doc, fold_changes = fold_headings_into_levels(
+            doc, prof.text.leading_markers, keep=prof.text.keep_leading_markers,
+            marker_depths=prof.marker_depths())
         changes.extend(fold_changes)
     if polish == "llm":
         from .transform.llm_polish import polish_document

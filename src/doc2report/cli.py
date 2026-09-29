@@ -17,7 +17,7 @@ from pathlib import Path
 
 import typer
 
-from .pipeline import convert as run_convert
+from .pipeline import auto_profile, convert as run_convert
 from .profile import PROFILE_DIR, dump_profile, load_profile
 from .units import emu_to_mm, emu_to_pt, fmt_pt
 
@@ -38,7 +38,9 @@ app.add_typer(profile_app, name="profile")
 def convert(
     source: str = typer.Argument(..., help="입력 .md 파일, Confluence URL, 또는 '-'(표준입력)"),
     output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로"),
-    profile: str = typer.Option("default", "-p", "--profile", help="프로파일 이름 또는 .yaml 경로"),
+    profile: str = typer.Option(None, "-p", "--profile",
+                                help="프로파일 이름 또는 .yaml 경로 (생략 시 Confluence URL은 "
+                                     "confluence, 그 밖은 default)"),
     ask: bool = typer.Option(False, "--ask", "-i", help="변환 전에 글꼴·크기·줄간격을 골라서 진행"),
     font: str = typer.Option(None, "--font", help="글꼴 (프로파일의 choices.font 참고)"),
     size: str = typer.Option(None, "--size", help="본문 글자 크기 (예: 14pt)"),
@@ -47,13 +49,15 @@ def convert(
     table_size: str = typer.Option(None, "--table-size", help="표 글자 크기 (예: 12pt)"),
     margin: str = typer.Option(None, "--margin", help="여백 '25mm' 또는 '위,아래,좌,우'"),
     date: str = typer.Option(None, "--date", help="제목 아래 날짜 ('today' 또는 '2026. 10. 1')"),
-    polish: str = typer.Option("rules", "--polish", help="rules | llm | none"),
+    polish: str = typer.Option(None, "--polish",
+                               help="rules | llm | none (생략 시 프로파일의 text.polish)"),
     report: Path = typer.Option(None, "--report", help="변경 내역을 저장할 .md 경로"),
     save_profile: Path = typer.Option(None, "--save-profile", help="고른 서식을 .yaml로 저장"),
     open_after: bool = typer.Option(False, "--open", help="변환 후 결과 문서 열기"),
     watch: bool = typer.Option(False, "--watch", help="입력·프로파일이 바뀌면 자동 재변환"),
 ) -> None:
     out = output or Path(_default_output(source))
+    profile = profile or auto_profile(source)
     base = load_profile(profile)
 
     chosen = dict(font=font, size=size, line_spacing=line_spacing,
@@ -85,12 +89,12 @@ def convert(
 @app.command()
 def check(
     source: str = typer.Argument(...),
-    profile: str = typer.Option("default", "-p", "--profile"),
+    profile: str = typer.Option(None, "-p", "--profile"),
 ) -> None:
     """변환하지 않고 표가 어떻게 배치될지만 확인한다."""
     from .layout.measure import get_metrics
 
-    prof = load_profile(profile)
+    prof = load_profile(profile or auto_profile(source))
     result = run_convert(source, None, prof)
     usable = prof.page.usable_width
     typer.echo(f"사용가능폭 {emu_to_mm(usable):.1f}mm")

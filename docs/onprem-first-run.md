@@ -215,6 +215,10 @@ source scripts/onprem_env.sh          # bash/zsh
 .\uv.exe run --offline --no-sync doc2report convert 사내문서.md -o out\보고서.docx --polish llm --report out\변경내역.md --date today
 ```
 
+> Confluence URL을 변환할 때는 `--polish llm`을 **빼고** 실행한다(2026-09-29 사용자 규칙 —
+> Confluence 문장은 다듬지 않음). URL이면 `confluence` 프로파일이 자동으로 쓰이고, 그
+> 프로파일은 다듬기를 끈 상태지만 `--polish`를 직접 주면 그쪽이 이긴다.
+
 ## 5. 결과 확인 (이 순서로)
 
 1. `out/변경내역.md`를 **가장 먼저** 연다 — "LLM" 규칙으로 다듬어진 줄이 있는지,
