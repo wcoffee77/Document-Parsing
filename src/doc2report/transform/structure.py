@@ -76,20 +76,68 @@ def _marker_pattern(markers: list[str]) -> re.Pattern | None:
 
 def _strip_existing_marker(runs: list[Run],
                            marker_re: re.Pattern | None) -> tuple[list[Run], Change | None]:
+    """runs[0]만 보지 않고 전체 텍스트를 이어 붙여 판단한다 — 앞에 빈 run이나
+    말머리와 공백이 서로 다른 run에 걸쳐 있어도 놓치지 않기 위해서다."""
     if not runs:
         return runs, None
-    first = runs[0]
-    match = _EXISTING_NUMBER.match(first.text)
+    text = plain(runs)
+    match = _EXISTING_NUMBER.match(text)
     label = "제목 중복 번호 제거"
     if not match and marker_re is not None:
-        match = marker_re.match(first.text)
+        match = marker_re.match(text)
         label = "중복 말머리 제거"
-    if not match or match.end() >= len(first.text.rstrip()) and len(runs) == 1:
+    if not match or match.end() >= len(text.rstrip()):
         return runs, None  # 말머리만 있는 항목("1.", "-")은 그대로 둔다
-    before = plain(runs)
-    stripped = first.copy_with(first.text[match.end():])
-    new_runs = [stripped, *runs[1:]] if stripped.text else list(runs[1:])
-    return new_runs, Change(before, plain(new_runs), label)
+    new_runs = _drop_prefix(runs, match.end())
+    return new_runs, Change(text, plain(new_runs), label)
+
+
+def _drop_prefix(runs: list[Run], count: int) -> list[Run]:
+    """runs 맨 앞에서 글자 count개를 뗀다 — 여러 run에 걸쳐 있어도 맞게 처리한다."""
+    out: list[Run] = []
+    remaining = count
+    for run in runs:
+        if remaining <= 0:
+            out.append(run)
+        elif remaining >= len(run.text):
+            remaining -= len(run.text)
+        else:
+            out.append(run.copy_with(run.text[remaining:]))
+            remaining = 0
+    return out
+
+
+# ── 표 제목 ─────────────────────────────────────────────────────────────
+
+_BRACKET_PAIRS = [("[", "]"), ("［", "］"), ("【", "】"), ("〔", "〕"), ("〈", "〉"), ("《", "》")]
+
+
+def attach_table_captions(doc: Document) -> tuple[Document, list[Change]]:
+    """표 바로 위, "[사업현황]"처럼 꺾쇠로 감싼 문단을 Table.caption으로 옮긴다.
+
+    옮기지 않으면 제목 접기에서 그 단계의 ListItem이 되어 "- [사업현황]"처럼
+    프로파일 말머리(-)가 또 붙는다 — 표 제목이지 항목이 아니므로 attach_table_notes와
+    같은 이유로 접기 **전에** 빼 둔다(표 뒤 대신 표 앞이라는 점만 다르다).
+    """
+    blocks: list[Block] = []
+    changes: list[Change] = []
+    for block in doc.blocks:
+        if isinstance(block, Table) and blocks and isinstance(blocks[-1], Paragraph) and not block.caption:
+            text = plain(blocks[-1].runs).strip()
+            caption = _bracket_caption(text)
+            if caption is not None:
+                blocks.pop()
+                block.caption = caption
+                changes.append(Change(text, caption, "표 제목"))
+        blocks.append(block)
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def _bracket_caption(text: str) -> str | None:
+    for open_c, close_c in _BRACKET_PAIRS:
+        if text.startswith(open_c) and text.endswith(close_c) and len(text) > len(open_c) + len(close_c):
+            return text[len(open_c):-len(close_c)].strip()
+    return None
 
 
 # ── 표 주석 ─────────────────────────────────────────────────────────────

@@ -38,6 +38,8 @@ class TableLayout:
     notes: list[str] = field(default_factory=list)
     # (행 번호, 행 안의 칸 번호) → (원래 머리, 축약한 머리)
     header_text: dict[tuple[int, int], tuple[str, str]] = field(default_factory=dict)
+    # (행 번호, 행 안의 칸 번호) → 정렬 재지정 (내용이 많아 여러 줄인 셀은 왼쪽 맞춤이 낫다)
+    cell_align: dict[tuple[int, int], str] = field(default_factory=dict)
 
     @property
     def total_width(self) -> int:
@@ -56,7 +58,26 @@ def plan_tables(doc: Document, profile: Profile) -> dict[int, TableLayout]:
 def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayout:
     layout = _fit_widths(table, profile, available_width)
     _abbreviate_headers(table, profile, layout)
+    _left_align_long_cells(table, profile, layout)
     return layout
+
+
+def _left_align_long_cells(table: Table, profile: Profile, layout: TableLayout) -> None:
+    """내용이 여러 줄인 셀은 가운데 정렬이면 줄마다 들쭉날쭉해 읽기 불편하다 —
+    max_cell_lines(기본 3)줄 이상이면 왼쪽 맞춤으로 바꾼다(2026-09-29 사용자 요청).
+    이미 저자가 정렬을 지정한 셀(cell.align)은 존중해 건드리지 않는다."""
+    limit = profile.tables.max_cell_lines
+    if not limit:
+        return
+    content = [w - layout.cell_margin_x * 2 for w in layout.col_widths]
+    for row_index, cell_index, cell, col, span in _iter_grid_indexed(table):
+        if cell.align or col >= len(content):
+            continue
+        width = sum(content[col: min(col + span, len(content))])
+        measurer = _measurer(cell, profile, layout.font_size, layout.char_scale)
+        total_lines = sum(measurer.wrap_count(line, width) for line in cell_lines(cell))
+        if total_lines >= limit:
+            layout.cell_align[(row_index, cell_index)] = "left"
 
 
 def _fit_widths(table: Table, profile: Profile, available_width: int) -> TableLayout:

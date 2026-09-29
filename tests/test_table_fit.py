@@ -83,6 +83,28 @@ def test_short_columns_are_levelled_to_similar_widths(profile):
     assert max(layout.col_widths) - min(layout.col_widths) <= 2 * 635  # twips 반올림 오차
 
 
+def test_cell_with_many_lines_is_left_aligned(profile):
+    """내용이 max_cell_lines(기본 3)줄 이상인 셀은 가운데 정렬 대신 왼쪽 맞춤이
+    낫다 — 가운데 정렬은 줄마다 들쭉날쭉해 보인다 (2026-09-29 사용자 요청)."""
+    many_lines = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄입니다")]) for i in range(5)])
+    one_line = cell("한 줄짜리 짧은 내용")
+    table = Table(rows=[Row(cells=[cell("항목", header=True), cell("설명", header=True)]),
+                        Row(cells=[one_line, many_lines])],
+                  header_rows=1)
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert layout.cell_align.get((1, 0)) is None
+    assert layout.cell_align.get((1, 1)) == "left"
+
+
+def test_cell_align_does_not_override_explicit_alignment(profile):
+    right_cell = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄입니다")]) for i in range(5)],
+                      align="right")
+    table = Table(rows=[Row(cells=[cell("항목", header=True)]), Row(cells=[right_cell])],
+                  header_rows=1)
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert (1, 0) not in layout.cell_align
+
+
 def test_crowded_table_uses_char_scale_within_font_range(profile):
     """글자가 많으면 11~12pt 안에서 크기와 장평(90%)을 줄인다."""
     long = "가나다라마바사아자차카타파하 " * 3

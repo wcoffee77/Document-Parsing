@@ -16,7 +16,12 @@ from .profile import Profile, load_profile
 from .render.docx_writer import DATE_LINE, DocxRenderer
 from .sources import load_source
 from .transform import Change, apply_text_rules
-from .transform.structure import attach_table_notes, fold_headings_into_levels, merge_short_list_items
+from .transform.structure import (
+    attach_table_captions,
+    attach_table_notes,
+    fold_headings_into_levels,
+    merge_short_list_items,
+)
 
 
 @dataclass
@@ -89,6 +94,10 @@ def convert(
         doc, note_changes = attach_table_notes(doc, prof.tables.note_markers,
                                                prof.tables.note_marker)
         changes.extend(note_changes)
+    if prof.text.table_captions:
+        # 마찬가지로 제목 접기보다 먼저 — 안 그러면 표 제목도 "-" 항목이 되어 버린다.
+        doc, caption_changes = attach_table_captions(doc)
+        changes.extend(caption_changes)
     if prof.text.merge_short_items:
         # 제목 접기보다 먼저 — 접은 뒤에는 제목도 ListItem이라 소제목과 섞여 합쳐질 수 있다.
         doc, merge_changes = merge_short_list_items(doc, prof.text.max_sentence_chars)

@@ -380,6 +380,9 @@ class DocxRenderer:
                 override = layout.header_text.get((r, index))
                 if override:
                     cell = _with_text(cell, override[1])
+                align_override = layout.cell_align.get((r, index))
+                if align_override and not cell.align:
+                    cell = replace(cell, align=align_override)
                 while (r, col) in occupied:
                     col += 1
                 if col >= len(layout.col_widths):

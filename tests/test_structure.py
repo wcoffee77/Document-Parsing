@@ -9,10 +9,14 @@ from pathlib import Path
 import pytest
 from docx import Document as DocxDocument
 
-from doc2report.ir import Document, Heading, ListItem, Run
+from doc2report.ir import Document, Heading, ListItem, Paragraph, Run, Table
 from doc2report.pipeline import convert
 from doc2report.profile import load_profile
-from doc2report.transform.structure import fold_headings_into_levels, merge_short_list_items
+from doc2report.transform.structure import (
+    attach_table_captions,
+    fold_headings_into_levels,
+    merge_short_list_items,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_report.md"
 
@@ -94,6 +98,25 @@ def test_without_strip_markers_configured_nothing_is_stripped():
     doc = Document(blocks=[Heading(level=2, runs=[Run("□ 채용진행현황")])])
     folded, changes = fold_headings_into_levels(doc)
     assert folded.blocks[0].runs[0].text == "□ 채용진행현황"
+    assert changes == []
+
+
+def test_bracket_caption_above_table_is_moved_to_table_caption():
+    """표 위 "[사업현황]" 같은 꺾쇠 문단은 Table.caption으로 옮겨 제목 접기에서
+    "- [사업현황]"처럼 말머리가 붙지 않게 한다 (2026-09-29 사용자 요청)."""
+    doc = Document(blocks=[Paragraph(runs=[Run("[사업현황]")]), Table(rows=[])])
+    result, changes = attach_table_captions(doc)
+    assert len(result.blocks) == 1
+    assert isinstance(result.blocks[0], Table)
+    assert result.blocks[0].caption == "사업현황"
+    assert len(changes) == 1
+
+
+def test_paragraph_without_brackets_is_not_treated_as_caption():
+    doc = Document(blocks=[Paragraph(runs=[Run("평범한 문단")]), Table(rows=[])])
+    result, changes = attach_table_captions(doc)
+    assert len(result.blocks) == 2
+    assert result.blocks[1].caption is None
     assert changes == []
 
 
