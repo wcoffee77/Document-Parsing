@@ -78,7 +78,7 @@ class _Engine:
         if isinstance(block, Heading):
             # 제목은 개조식(~함/~음) 대상이 아니라 표기 정리 + 명사 종결만 한다.
             return [Heading(level=block.level, runs=self.heading_runs(block.runs),
-                            section_title=block.section_title)]
+                            section_title=block.section_title, page_title=block.page_title)]
 
         if isinstance(block, (Paragraph, ListItem)):
             return self.sentence_block(block, in_table=in_table)

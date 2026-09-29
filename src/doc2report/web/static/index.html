@@ -69,49 +69,53 @@
       <p class="explain">문서를 읽어 보고 정합니다.</p>
       <ul class="explain-list">
         <li><b>정리된 문서</b>(Confluence 페이지, 제목·말머리가 있는 글) → 원문 문장·말머리 유지</li>
-        <li><b>정리 안 된 글</b> → 말머리를 만들고 문장을 개조식으로 다듬음</li>
+        <li><b>정리 안 된 글</b> → 말머리를 만들고 파이썬 규칙으로 문장을 개조식으로 다듬음</li>
         <li><b>내용이 많은데</b>(<span id="auto-heavy">…</span>) 보고서 서식이면 → Confluence 변환 서식을 권함(서식은 고른 그대로)</li>
       </ul>
-      <label class="check strong"><input type="checkbox" id="allow-llm"> 필요하면 LLM으로 문장 다듬기 허용
-        <span class="hint">정리 안 된 글일 때만 씀</span></label>
     </div>
 
     <div id="manual-panel" class="hidden">
-      <label class="inline">규칙 기본값 불러오기 <select id="rules-base"></select></label>
-      <p class="hint">고른 서식의 기본 규칙으로 아래 체크를 채웁니다. 서식(글꼴·크기·여백)은 오른쪽 "출력"에서 고릅니다.</p>
+      <label class="inline">규칙 기본값 <select id="rules-base"></select></label>
+      <p class="hint">고른 서식의 기본 규칙으로 아래를 채웁니다. 글꼴·크기·여백은 오른쪽 "출력"의 서식에서 고릅니다.</p>
 
       <fieldset>
-        <legend>문장 다듬기</legend>
+        <legend>문장 다듬기 (파이썬 규칙)</legend>
         <div class="segmented small" role="radiogroup">
           <label><input type="radio" name="polish" value="none"><span>안 함</span></label>
-          <label><input type="radio" name="polish" value="rules"><span>파이썬 규칙</span></label>
-          <label><input type="radio" name="polish" value="llm"><span>규칙 + LLM</span></label>
+          <label><input type="radio" name="polish" value="rules"><span>파이썬 규칙 적용</span></label>
         </div>
         <div id="polish-rules" class="checks"></div>
-        <div class="row">
-          <button class="btn ghost" id="llm-test">LLM 연결 시험</button>
-          <span class="hint" id="llm-test-out"></span>
-        </div>
       </fieldset>
 
       <fieldset>
-        <legend>말머리·단계</legend>
+        <legend>말머리</legend>
         <div id="marker-rules" class="checks"></div>
       </fieldset>
 
       <fieldset>
         <legend>표</legend>
-        <div id="table-rules" class="checks"></div>
         <label class="check"><input type="checkbox" id="tbl-landscape"> 넓은 표는 가로 페이지 허용</label>
         <label class="inline">표 위치 <select id="tbl-align"></select></label>
       </fieldset>
     </div>
 
     <fieldset>
+      <legend>LLM 다듬기</legend>
+      <label class="check strong"><input type="checkbox" id="use-llm"> LLM으로 맞춤법·표현·어조 다듬기
+        <span class="hint">맞춤법·띄어쓰기를 고치고, 정식 보고서 어조로 바꾸고, 모호한 표현을 분명하게 합니다.
+          사실·수치와 문장 끝 형태는 그대로 두고, 제목과 표 안은 건드리지 않습니다.</span></label>
+      <div class="row">
+        <button class="btn ghost" id="llm-test">LLM 연결 시험</button>
+        <span class="hint" id="llm-test-out"></span>
+      </div>
+    </fieldset>
+
+    <fieldset id="merge-box">
       <legend>여러 입력 합치기</legend>
-      <label class="check"><input type="checkbox" id="section-titles" checked> 입력마다 제목을 절 제목으로 넣기
-        <span class="hint">어느 페이지 내용인지 구분</span></label>
-      <label class="check"><input type="checkbox" id="page-breaks"> 입력마다 새 쪽에서 시작</label>
+      <label class="check"><input type="radio" name="merge" value="continuous" checked> 쪽 구분 없이 이어 붙이기
+        <span class="hint">각 입력은 제목을 절 제목으로 넣어 구분</span></label>
+      <label class="check"><input type="radio" name="merge" value="pages"> 입력마다 새 쪽에서 시작
+        <span class="hint">쪽마다 그 입력의 제목을 큰 제목(가운데·밑줄)으로. 위 "문서 제목"은 파일 이름에 씀</span></label>
     </fieldset>
   </section>
 
@@ -126,11 +130,11 @@
       <div id="custom-panel" class="custom hidden">
         <div class="grid2">
           <label>출발 서식<select id="cu-base"></select></label>
-          <label>글꼴<input id="cu-font" list="dl-font"></label>
-          <label>제목 크기<input id="cu-title_size" list="dl-title_size" placeholder="예: 18pt"></label>
-          <label>본문 크기<input id="cu-size" list="dl-size" placeholder="예: 13pt"></label>
-          <label>줄 간격(배)<input id="cu-line_spacing" list="dl-line_spacing" placeholder="예: 1.3"></label>
-          <label>표 글자 크기(최대)<input id="cu-table_size" list="dl-table_size" placeholder="예: 11pt"></label>
+          <label>글꼴<span class="combo" data-key="font"></span></label>
+          <label>제목 크기<span class="combo" data-key="title_size"></span></label>
+          <label>본문 크기<span class="combo" data-key="size"></span></label>
+          <label>줄 간격(배)<span class="combo" data-key="line_spacing"></span></label>
+          <label>표 글자 크기(최대)<span class="combo" data-key="table_size"></span></label>
         </div>
         <span class="label small">여백(cm)</span>
         <div class="grid4">
@@ -139,9 +143,6 @@
           <label>왼쪽<input id="cu-margin_left" type="number" step="0.1" min="0"></label>
           <label>오른쪽<input id="cu-margin_right" type="number" step="0.1" min="0"></label>
         </div>
-        <datalist id="dl-font"></datalist><datalist id="dl-title_size"></datalist>
-        <datalist id="dl-size"></datalist><datalist id="dl-line_spacing"></datalist>
-        <datalist id="dl-table_size"></datalist>
       </div>
     </div>
 

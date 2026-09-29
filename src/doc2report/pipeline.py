@@ -104,14 +104,25 @@ def merge_documents(docs: list[Document], *, title: str | None = None,
     들인다(`Heading.section_title` — 제목 접기가 그 아래 단계를 한 칸씩 민다). 안 그러면 페이지마다
     같은 "1."부터 시작해 어느 페이지 내용인지 구분이 안 된다.
     문서 제목은 title, 없으면 첫 입력의 제목.
+
+    page_breaks: 입력마다 새 쪽에서 시작하고, 쪽마다 그 입력의 제목을 문서 제목 서식(큰 글씨·가운데·
+    밑줄)으로 쓴다(`Heading.page_title`). 각 쪽이 독립된 보고서처럼 보이게 하려는 것이라 문서 전체
+    제목은 따로 쓰지 않는다 — title은 제목이 없는 첫 입력의 쪽 제목으로만 쓴다.
     """
     if len(docs) == 1:
         doc = docs[0]
         return Document(blocks=list(doc.blocks), title=title or doc.title, source=doc.source)
     blocks: list = []
+    if page_breaks:
+        for index, doc in enumerate(docs):
+            if index:
+                blocks.append(PageBreak())
+            page_title = doc.title or (title if index == 0 else None)
+            if page_title:
+                blocks.append(Heading(level=1, runs=[Run(page_title)], page_title=True))
+            blocks.extend(doc.blocks)
+        return Document(blocks=blocks, title=None, source=", ".join(d.source or "" for d in docs))
     for index, doc in enumerate(docs):
-        if index and page_breaks:
-            blocks.append(PageBreak())
         if section_titles and doc.title:
             blocks.append(Heading(level=1, runs=[Run(doc.title)], section_title=True))
             blocks.extend(doc.blocks)
@@ -181,9 +192,13 @@ def convert_document(
     date: str | None = None,
     notes: list[str] | None = None,
     progress=None,
+    llm: bool | None = None,
 ) -> ConvertResult:
+    """polish: none(안 다듬음) | rules(파이썬 규칙) | llm(규칙 + LLM, CLI 호환).
+    llm: 주면 LLM을 규칙과 따로 켜고 끈다(웹 화면 — "규칙은 안 함 + LLM만"도 가능)."""
     say = progress or (lambda message: None)
     polish = polish or prof.text.polish or "rules"
+    use_llm = polish == "llm" if llm is None else llm
     if date:
         _insert_dateline(doc, date, prof)
 
@@ -214,7 +229,7 @@ def convert_document(
             auto_markers=prof.text.auto_markers, plain_level=prof.text.plain_paragraph_level,
             note_marks=prof.text.note_marks)
         changes.extend(fold_changes)
-    if polish == "llm":
+    if use_llm:
         from .transform.llm_polish import polish_document
 
         say("LLM으로 문장 다듬는 중")
@@ -257,11 +272,14 @@ def _insert_dateline(doc: Document, date: str, profile: Profile) -> None:
         today = _date.today()
         text = fmt.format(y=today.year, m=today.month, d=today.day)
 
-    first = doc.blocks[0] if doc.blocks else None
-    if isinstance(first, Paragraph) and DATE_LINE.match(plain(first.runs).strip()):
-        doc.blocks[0] = Paragraph(runs=[Run(text)])
-    else:
-        doc.blocks.insert(0, Paragraph(runs=[Run(text)]))
+    # 입력마다 새 쪽이면 쪽 제목마다 그 아래에, 아니면 문서 맨 앞(문서 제목 아래)에.
+    anchors = [i + 1 for i, b in enumerate(doc.blocks) if isinstance(b, Heading) and b.page_title] or [0]
+    for at in reversed(anchors):
+        nxt = doc.blocks[at] if at < len(doc.blocks) else None
+        if isinstance(nxt, Paragraph) and DATE_LINE.match(plain(nxt.runs).strip()):
+            doc.blocks[at] = Paragraph(runs=[Run(text)])
+        else:
+            doc.blocks.insert(at, Paragraph(runs=[Run(text)]))
 
 
 def _resolve_image_paths(doc: Document, base: Path) -> None:

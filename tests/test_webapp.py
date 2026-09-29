@@ -49,13 +49,16 @@ def test_custom_preset_overrides_only_changed_values():
 
 
 def test_manual_rules_are_put_into_the_chosen_preset():
-    prof, polish, _ = opts.build_profile({
-        "mode": "manual", "preset": "confluence", "polish": "llm",
-        "text": {"auto_markers": True, "level_bold": True, "unknown": True},
+    prof, polish, llm, _ = opts.build_profile({
+        "mode": "manual", "preset": "confluence", "rules_base": "default",
+        "polish": "rules", "llm": True,
+        "text": {"auto_markers": True, "endings": False, "unknown": True},
         "tables": {"allow_landscape": True, "align": "center"},
     }, [], [], llm_ready=False)
-    assert polish == "llm"
-    assert prof.text.auto_markers and prof.text.level_bold
+    assert (polish, llm) == ("rules", True)
+    assert prof.text.auto_markers
+    assert not prof.text.gaechosik and not prof.text.noun_ending  # 한 체크박스가 두 규칙을 함께
+    assert prof.text.level_bold  # 화면에 없는 규칙은 "규칙 기본값"(보고서) 값
     assert prof.tables.allow_landscape and prof.tables.align == "center"
     assert prof.font("body").east_asia == "맑은 고딕"  # 서식은 preset 그대로
     assert opts.profile_info("confluence")["text"]["auto_markers"] is False  # 프로파일 파일은 그대로
@@ -65,8 +68,27 @@ def test_manual_rules_are_put_into_the_chosen_preset():
 
 def test_every_toggle_is_a_real_profile_field():
     fields = set(opts.load_profile("default").text.model_dump())
-    for key, _, _ in opts.MARKER_TOGGLES + opts.POLISH_TOGGLES + opts.TABLE_TOGGLES:
-        assert key in fields
+    for _, _, _, targets in opts.MARKER_TOGGLES + opts.POLISH_TOGGLES + opts.TABLE_TOGGLES:
+        assert set(targets) <= fields
+
+
+def test_rules_that_are_not_on_screen_come_from_rules_base():
+    """제목 접기·0cm·단계 굵게·표 제목은 화면에서 뺐다(2026-09-29 사용자) — 규칙 기본값을 따른다."""
+    keys = {k for k, _, _, _ in opts.MARKER_TOGGLES + opts.POLISH_TOGGLES + opts.TABLE_TOGGLES}
+    assert not keys & {"headings_as_levels", "normalize_levels", "level_bold", "table_captions",
+                       "gaechosik", "noun_ending"}
+    conf, _, _, _ = opts.build_profile({"mode": "manual", "rules_base": "confluence"}, [], [],
+                                       llm_ready=False)
+    assert conf.text.headings_as_levels and conf.text.table_captions and not conf.text.level_bold
+
+
+def test_polish_none_can_still_use_llm():
+    _, polish, llm, _ = opts.build_profile({"mode": "manual", "polish": "none", "llm": True},
+                                           [], [], llm_ready=True)
+    assert (polish, llm) == ("none", True)
+    _, polish, llm, _ = opts.build_profile({"mode": "manual", "polish": "llm"}, [], [],
+                                           llm_ready=True)
+    assert (polish, llm) == ("rules", True)  # 예전 값(규칙+LLM)도 받아 준다
 
 
 def test_auto_decides_structured_confluence_vs_unstructured_memo():
@@ -80,12 +102,13 @@ def test_auto_decides_structured_confluence_vs_unstructured_memo():
     assert keep.polish == "none" and keep.profile.text.auto_markers is False
 
     tidy = opts.auto_decide([memo], ["text"], allow_llm=True, llm_ready=True)
-    assert tidy.polish == "llm" and tidy.profile.text.auto_markers is True
-    assert opts.auto_decide([memo], ["text"], allow_llm=True, llm_ready=False).polish == "rules"
-    assert opts.auto_decide([memo], ["text"], allow_llm=False, llm_ready=True).polish == "rules"
+    assert (tidy.polish, tidy.llm) == ("rules", True) and tidy.profile.text.auto_markers is True
+    assert opts.auto_decide([memo], ["text"], allow_llm=True, llm_ready=False).llm is False
+    assert opts.auto_decide([memo], ["text"], allow_llm=False, llm_ready=True).llm is False
 
     confluence = opts.auto_decide([memo], ["confluence"], allow_llm=True, llm_ready=True)
-    assert confluence.polish == "none"  # Confluence는 항상 원문 유지(사용자 규칙)
+    assert confluence.polish == "none"  # Confluence는 파이썬 규칙으로 다듬지 않음(사용자 규칙)
+    assert confluence.llm is True       # LLM 맞춤법·어조는 사용자가 켜면 적용
     two = opts.auto_decide([memo, memo], ["text", "text"], allow_llm=False, llm_ready=False)
     assert two.summary["heavy"]
     assert two.profile.font("body").size == opts.load_profile("default").font("body").size  # 서식은 그대로
@@ -97,8 +120,8 @@ def test_auto_rules_keep_the_chosen_preset_format():
     from doc2report.sources import load_text
 
     memo, _ = load_document(load_text("회의 메모입니다"))
-    prof, polish, decision = opts.build_profile({"preset": "confluence"}, [memo], ["text"],
-                                                llm_ready=False)
+    prof, polish, _, decision = opts.build_profile({"preset": "confluence"}, [memo], ["text"],
+                                                   llm_ready=False)
     assert prof.font("body").east_asia == "맑은 고딕" and prof.text.auto_markers is True
     assert decision is not None and polish == "rules"
 

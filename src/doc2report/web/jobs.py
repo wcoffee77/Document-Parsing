@@ -96,20 +96,23 @@ class JobRunner:
             docs.append(doc)
             notes.extend(source_notes)
 
-        merged = merge_documents(docs, title=(options.get("title") or "").strip() or None,
-                                 section_titles=options.get("section_titles", True),
-                                 page_breaks=bool(options.get("page_breaks")))
+        # 여러 입력 합치기: continuous = 이어 붙이기(입력 제목을 절 제목으로), pages = 입력마다 새 쪽
+        merge = options.get("merge") or ("pages" if options.get("page_breaks") else "continuous")
+        title = (options.get("title") or "").strip() or None
+        merged = merge_documents(docs, title=title, section_titles=True,
+                                 page_breaks=merge == "pages")
+        name = title or merged.title or next((d.title for d in docs if d.title), None)
 
-        profile, polish, decision = opts.build_profile(options, docs, kinds,
-                                                       llm_ready=llm_status()["configured"])
+        profile, polish, llm, decision = opts.build_profile(options, docs, kinds,
+                                                            llm_ready=llm_status()["configured"])
         if decision:
             notes = [f"자동 판단: {reason}" for reason in decision.reasons] + notes
 
-        stem = self._reserve(merged.title or "보고서")
+        stem = self._reserve(name or "보고서")
         try:
             docx_path = self.output_dir / f"{stem}.docx"
             job.say("문구·구조 규칙 적용 중")
-            result = convert_document(merged, docx_path, profile, polish=polish,
+            result = convert_document(merged, docx_path, profile, polish=polish, llm=llm,
                                       date=opts.date_text(options.get("date"), profile),
                                       notes=notes, progress=job.say)
             files = [docx_path.name]
@@ -138,7 +141,7 @@ class JobRunner:
 
         return {
             "stem": stem,
-            "title": merged.title,
+            "title": name,
             "files": [{"name": name, "kind": _kind(name)} for name in files],
             "notes": result.notes,
             "changes": [{"before": c.before, "after": c.after, "rule": c.rule}
@@ -146,6 +149,7 @@ class JobRunner:
             "change_count": len(result.changes),
             "tables": len(result.layouts),
             "polish": polish,
+            "llm": llm,
             "profile": (f"사용자 설정(출발: {profile.label or profile.name})"
                         if options.get("preset") == "custom" else profile.label or profile.name),
             "preset": options.get("preset") or "default",

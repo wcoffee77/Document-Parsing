@@ -188,3 +188,26 @@ def test_pdf_reports_missing_converter(monkeypatch, tmp_path):
     monkeypatch.setattr(pdf.shutil, "which", lambda name: None)
     with pytest.raises(RuntimeError, match="Word 또는 LibreOffice"):
         pdf.docx_to_pdf(tmp_path / "a.docx", tmp_path / "a.pdf")
+
+
+def test_page_mode_puts_each_input_on_new_page_with_big_title(tmp_path):
+    """입력마다 새 쪽: 쪽마다 그 입력 제목을 문서 제목 서식(큰 글씨·가운데·밑줄)으로, 날짜도 쪽마다
+    제목 아래에(2026-09-29 사용자). 새 쪽 맨 위에 빈 줄이 생기지 않게 '쪽 나눔 앞'으로 나눈다."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    a, b = load_text("□ 가 항목"), load_text("□ 나 항목")
+    a.title, b.title = "첫 보고", "둘째 보고"
+    prof = load_profile("confluence")
+    out = tmp_path / "p.docx"
+    convert_many([a, b], out, prof, page_breaks=True, date="2026. 10. 1")
+    paras = [p for p in DocxDocument(str(out)).paragraphs if p.text]
+    texts = [p.text for p in paras]
+    assert texts == ["첫 보고", "2026. 10. 1", "□\t가 항목", "둘째 보고", "2026. 10. 1", "□\t나 항목"]
+    title_size = prof.font("title").size
+    for p in (paras[0], paras[3]):
+        run = p.runs[0]
+        assert run.font.size == title_size and run.bold and run.underline
+        assert p.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert paras[3].paragraph_format.page_break_before
+    assert not any(p.text == "" and "w:br" in p._p.xml for p in DocxDocument(str(out)).paragraphs)
+    assert paras[1].alignment == paras[4].alignment == WD_ALIGN_PARAGRAPH.RIGHT  # 날짜 서식

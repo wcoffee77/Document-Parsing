@@ -84,7 +84,10 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
 
     base = 0  # 합친 문서의 절 제목(section_title) 아래에선 모든 단계가 한 칸씩 들어간다
     for block in doc.blocks:
-        if isinstance(block, Heading) and block.section_title:
+        if isinstance(block, Heading) and block.page_title:
+            heading_depth, base = -1, 0  # 새 쪽의 큰 제목 — 단계에 넣지 않고 그 쪽은 처음부터
+            blocks.append(block)
+        elif isinstance(block, Heading) and block.section_title:
             heading_depth, base = 0, 1
             blocks.append(item(0, block.runs, derived=True, from_heading=True))
         elif isinstance(block, Heading):

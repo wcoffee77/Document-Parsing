@@ -65,7 +65,7 @@ async function loadStatus() {
   $("#out-pdf").disabled = !st.pdf.available;
   $("#out-dir").textContent = st.output_dir;
   if (!st.llm.configured) {
-    $("#allow-llm").closest("label").classList.add("disabled");
+    $("#use-llm").closest("label").classList.add("disabled");
   }
 }
 
@@ -87,7 +87,6 @@ async function loadProfiles() {
 
   renderChecks("#polish-rules", data.schema.polish);
   renderChecks("#marker-rules", data.schema.markers);
-  renderChecks("#table-rules", data.schema.tables);
   $("#tbl-align").innerHTML = data.schema.table_align.map((o) =>
     `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
   const auto = data.schema.auto;
@@ -111,20 +110,63 @@ function applyRules(name) {
   $("#tbl-align").value = p.tables.align;
 }
 
-const CUSTOM_KEYS = ["font", "title_size", "size", "line_spacing", "table_size",
-  "margin_top", "margin_bottom", "margin_left", "margin_right"];
+const COMBO_KEYS = ["font", "title_size", "size", "line_spacing", "table_size"];
+const MARGIN_KEYS = ["margin_top", "margin_bottom", "margin_left", "margin_right"];
+const CUSTOM_KEYS = COMBO_KEYS.concat(MARGIN_KEYS);
+const FREE = "__free__";
+const FREE_HINT = { font: "예: 나눔고딕", title_size: "예: 18pt", size: "예: 13pt",
+  line_spacing: "예: 1.3", table_size: "예: 10pt" };
+
+// 선택 목록 + 맨 끝 "직접 입력…"(고르면 옆에 입력칸이 나온다). datalist는 값이 들어 있으면
+// 그 값으로 걸러져 목록이 안 펼쳐졌다(2026-09-29 사용자) — 그래서 select로 바꿨다.
+function renderCombo(key, values, current) {
+  const list = Array.from(new Set([current, ...(values || [])].filter(Boolean)));
+  $(`.combo[data-key="${key}"]`).innerHTML =
+    `<select id="cu-${key}">${list.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}` +
+    `<option value="${FREE}">직접 입력…</option></select>` +
+    `<input id="cu-${key}-free" class="hidden free" placeholder="${esc(FREE_HINT[key] || "")}">`;
+  $(`#cu-${key}`).value = current || list[0] || FREE;
+  syncCombo(key);
+}
+
+function syncCombo(key) {
+  const free = $(`#cu-${key}`).value === FREE;
+  $(`#cu-${key}-free`).classList.toggle("hidden", !free);
+}
+
+function getCustom(key) {
+  if (MARGIN_KEYS.includes(key)) return $(`#cu-${key}`).value.trim();
+  const sel = $(`#cu-${key}`);
+  return sel.value === FREE ? $(`#cu-${key}-free`).value.trim() : sel.value;
+}
+
+function setCustom(key, value) {
+  if (!value) return;
+  if (MARGIN_KEYS.includes(key)) { $(`#cu-${key}`).value = value; return; }
+  const sel = $(`#cu-${key}`);
+  if (![...sel.options].some((o) => o.value === value)) {
+    sel.insertBefore(new Option(value, value), sel.querySelector(`option[value="${FREE}"]`));
+  }
+  sel.value = value;
+  syncCombo(key);
+}
 
 // 사용자 설정 칸을 출발 서식의 값으로 채운다(자유롭게 고쳐 쓰는 출발점).
 function fillCustom(base) {
   const p = state.profiles[base];
   if (!p) return;
   $("#cu-base").value = base;
-  for (const k of CUSTOM_KEYS) $(`#cu-${k}`).value = p.format[k] || "";
-  for (const k of ["font", "title_size", "size", "line_spacing", "table_size"]) {
-    const values = Array.from(new Set([p.format[k], ...((p.choices || {})[k] || [])].filter(Boolean)));
-    $(`#dl-${k}`).innerHTML = values.map((v) => `<option value="${esc(v)}">`).join("");
-  }
+  for (const k of COMBO_KEYS) renderCombo(k, (p.choices || {})[k], p.format[k]);
+  for (const k of MARGIN_KEYS) $(`#cu-${k}`).value = p.format[k] || "";
 }
+
+$("#custom-panel").addEventListener("change", (ev) => {
+  const key = (ev.target.id || "").replace(/^cu-/, "");
+  if (COMBO_KEYS.includes(key)) {
+    syncCombo(key);
+    if (ev.target.value === FREE) $(`#cu-${key}-free`).focus();
+  }
+});
 
 function syncPreset() {
   const preset = radio("preset");
@@ -162,18 +204,18 @@ function collectOptions() {
   if ($("#out-pdf").checked && !$("#out-pdf").disabled) formats.push("pdf");
   if ($("#out-md").checked) formats.push("md");
   const custom = { base: $("#cu-base").value };
-  for (const k of CUSTOM_KEYS) custom[k] = $(`#cu-${k}`).value.trim();
+  for (const k of CUSTOM_KEYS) custom[k] = getCustom(k);
   return {
     mode,
-    allow_llm: $("#allow-llm").checked,
+    llm: $("#use-llm").checked,
+    allow_llm: $("#use-llm").checked,
     preset: radio("preset") || "default",
     custom,
     rules_base: $("#rules-base").value,
     polish: radio("polish"),
     text,
     tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
-    section_titles: $("#section-titles").checked,
-    page_breaks: $("#page-breaks").checked,
+    merge: radio("merge") || "continuous",
     title: $("#doc-title").value.trim(),
     date: dateMode === "pick" ? $("#date-pick").value : dateMode,
     date_mode: dateMode,
@@ -200,14 +242,13 @@ function restoreOptions() {
   fillCustom(o && o.custom && known(o.custom.base) ? o.custom.base : first);
   applyRules(o && known(o.rules_base) ? o.rules_base : first);
   if (!o) { syncPreset(); return syncMode(); }
-  if (o.custom) for (const k of CUSTOM_KEYS) if (o.custom[k]) $(`#cu-${k}`).value = o.custom[k];
+  if (o.custom) for (const k of CUSTOM_KEYS) setCustom(k, o.custom[k]);
   setRadio("mode", o.mode || "auto");
-  $("#allow-llm").checked = !!o.allow_llm;
-  if (o.polish) setRadio("polish", o.polish);
+  $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
+  if (o.polish) setRadio("polish", o.polish === "llm" ? "rules" : o.polish);  // 예전 "규칙 + LLM"
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
-  $("#section-titles").checked = o.section_titles !== false;
-  $("#page-breaks").checked = !!o.page_breaks;
+  setRadio("merge", o.merge || (o.page_breaks ? "pages" : "continuous"));
   setRadio("date", o.date_mode ?? "");
   if (o.date_mode === "pick" && o.date) $("#date-pick").value = o.date;
   $("#out-pdf").checked = (o.formats || []).includes("pdf");
@@ -221,9 +262,9 @@ function syncMode() {
   const manual = radio("mode") === "manual";
   $("#auto-panel").classList.toggle("hidden", manual);
   $("#manual-panel").classList.toggle("hidden", !manual);
-  const polish = radio("polish");
-  $("#polish-rules").classList.toggle("disabled", polish === "none");
-  for (const box of $$("#polish-rules input")) box.disabled = polish === "none";
+  // 문장 다듬기 "안 함"이면 세부 규칙은 아예 보이지 않게(2026-09-29 사용자)
+  $("#polish-rules").classList.toggle("hidden", radio("polish") === "none");
+  $("#merge-box").classList.toggle("hidden", state.inputs.length < 2);
   $("#date-pick").classList.toggle("hidden", radio("date") !== "pick");
 }
 
@@ -232,7 +273,7 @@ function syncMode() {
 const KIND_LABEL = { confluence: "Confluence", docx: "Word", text: "글" };
 
 function renderInputs() {
-  if (state.schema) syncPreset();
+  if (state.schema) { syncPreset(); syncMode(); }
   const list = $("#input-list");
   $("#input-empty").classList.toggle("hidden", state.inputs.length > 0);
   list.innerHTML = state.inputs.map((item, i) => {
@@ -374,7 +415,7 @@ function finish(job) {
   const decision = r.decision ? `<div class="decision"><b>자동 판단 결과</b><ul>${
     r.decision.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
   const notes = r.notes.filter((n) => !n.startsWith("자동 판단:"));
-  const polishName = { none: "안 함", rules: "파이썬 규칙", llm: "규칙 + LLM" }[r.polish] || r.polish;
+  const polishName = ({ none: "안 함", rules: "파이썬 규칙" }[r.polish] || r.polish) + (r.llm ? " + LLM" : "");
   box.innerHTML = `
     <h3>완료 — ${esc(r.title || r.stem)} <span class="hint">(${job.elapsed}초)</span></h3>
     <p class="hint">서식 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건</p>

@@ -61,6 +61,7 @@ class DocxRenderer:
         self._figure_seq = 0
         self._counters: dict[int, int] = {}
         self._previous: Block | None = None  # 바로 앞에 무엇이 왔는지 (표 뒤 간격 판단용)
+        self._break_before = False  # 다음 본문 문단을 새 쪽에서 시작 (PageBreak)
         self._base_indent = 0  # 마지막 (※가 아닌) 문단의 왼쪽 들여쓰기 — ※ 문단은 이보다 더 들여쓴다
 
     # ── 진입점 ──────────────────────────────────────────────────────────
@@ -136,6 +137,9 @@ class DocxRenderer:
         elif isinstance(block, Paragraph):
             text = plain(block.runs).lstrip()
             spec = self._noted(self.profile.font("body"), text)
+            if (container is None and isinstance(self._previous, Heading) and self._previous.page_title
+                    and self.profile.has_font("date") and DATE_LINE.match(text.strip())):
+                spec = self.profile.font("date")  # 쪽 제목 바로 아래 날짜
             paragraph = self._paragraph(block.runs, spec, container)
             if container is None:
                 if self._is_note(text):
@@ -156,6 +160,11 @@ class DocxRenderer:
         elif isinstance(block, HorizontalRule):
             self._after_table_gap(self._rule(container), container)
         elif isinstance(block, PageBreak):
+            if container is None and next_block is not None and not isinstance(next_block, Table):
+                # 다음 문단에 "쪽 나눔 앞"을 건다 — 나눔 문자를 넣은 빈 문단을 쓰면 새 쪽 맨 위에
+                # 빈 줄이 한 줄 생긴다(쪽 제목이 맨 위에 붙지 않음).
+                self._break_before = True
+                return
             from docx.enum.text import WD_BREAK
 
             self._new_paragraph(container).add_run().add_break(WD_BREAK.PAGE)
@@ -165,6 +174,9 @@ class DocxRenderer:
     def _heading(self, block: Heading, container=None) -> None:
         self._counters.clear()  # 제목이 나오면 항목 번호를 다시 1부터
         self._base_indent = 0
+        if block.page_title and self.profile.has_font("title"):
+            # 입력마다 새 쪽 — 쪽 제목은 문서 제목 서식(큰 글씨·가운데·밑줄)
+            return self._paragraph(block.runs, self.profile.font("title"), container)
         key = f"heading{block.level}"
         if not self.profile.has_font(key):
             for level in range(block.level - 1, 0, -1):
@@ -507,7 +519,11 @@ class DocxRenderer:
 
     def _new_paragraph(self, container=None):
         target = container if container is not None else self.docx
-        return target.add_paragraph()
+        paragraph = target.add_paragraph()
+        if container is None and self._break_before:
+            paragraph.paragraph_format.page_break_before = True
+            self._break_before = False
+        return paragraph
 
     def _paragraphs(self, container=None):
         target = container if container is not None else self.docx

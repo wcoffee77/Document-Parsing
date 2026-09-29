@@ -28,26 +28,24 @@ from ..profile import PROFILE_DIR, Profile, load_profile
 from ..transform.structure import has_leading_marker
 from ..units import emu_to_mm, fmt_pt
 
-# (키, 화면 이름, 설명)
+# (화면 키, 화면 이름, 설명, 바꾸는 프로파일 text 값들)
+# 화면에 없는 규칙(제목을 1.→□→- 단계로 접기, 맨 바깥 단계 0cm, 1.·□ 문장 굵게, 표 위 【…】를 표 제목으로)은
+# "규칙 기본값"으로 고른 프로파일의 값을 그대로 쓴다(2026-09-29 사용자: 따로 고를 필요 없음).
 MARKER_TOGGLES = [
     ("keep_leading_markers", "원문 말머리 그대로 쓰기",
-     "원문에 이미 친 1. □ - ㆍ ① ※ 등을 바꾸지 않음"),
+     "원문에 이미 친 1. □ - ㆍ ① ※ 등을 바꾸지 않음", ("keep_leading_markers",)),
     ("auto_markers", "말머리 없는 문단에 말머리 만들기",
-     "끄면 말머리 없는 제목·문단은 들여쓰기만 맞춤. 정리 안 된 글을 새 보고서로 만들 때 켬"),
-    ("headings_as_levels", "제목을 1.→□→- 단계로 접기",
-     "## / ### 제목을 별도 제목 서식 대신 보고서 단계로"),
-    ("normalize_levels", "맨 바깥 단계는 들여쓰기 없이(0cm)", "문서가 작은 제목부터 시작해도 첫 문장을 0cm로"),
-    ("level_bold", "1.·□ 단계 문장 전체 굵게", "끄면 원문에서 굵던 글씨와 제목만 굵게"),
+     "정리 안 된 글을 새 보고서로 만들 때 켬. 끄면 들여쓰기만 맞춤", ("auto_markers",)),
 ]
 POLISH_TOGGLES = [
-    ("gaechosik", "개조식 어미로", "~합니다 → ~함"),
-    ("noun_ending", "명사로 끝내기", "인덱스를 재설계하였습니다 → 인덱스 재설계"),
-    ("split_long_sentences", "긴 문장 나누기", ""),
-    ("merge_short_items", "짧은 항목 \"및\"으로 합치기", "같은 단계의 짧은 항목 둘씩"),
+    ("endings", "어미를 개조식 또는 명사로 끝내기",
+     "~합니다 → ~함, 인덱스를 재설계하였습니다 → 인덱스 재설계", ("gaechosik", "noun_ending")),
+    ("split_long_sentences", "긴 문장 나누기", "", ("split_long_sentences",)),
+    ("merge_short_items", "짧은 항목 \"및\"으로 합치기", "같은 단계의 짧은 항목 둘씩",
+     ("merge_short_items",)),
 ]
-TABLE_TOGGLES = [
-    ("table_captions", "표 위 【…】 문단을 표 제목으로", "꺾쇠·정렬 그대로, 말머리 없이"),
-]
+TABLE_TOGGLES: list = []
+_TOGGLES = {key: fields for key, _, _, fields in MARKER_TOGGLES + POLISH_TOGGLES + TABLE_TOGGLES}
 TABLE_CHOICES = {"align": [("right", "오른쪽"), ("center", "가운데"), ("left", "왼쪽")]}
 FORMAT_KEYS = ("font", "size", "line_spacing", "title_size", "table_size")
 MARGIN_SIDES = ("top", "bottom", "left", "right")
@@ -62,6 +60,7 @@ _HEAVY_TABLES = 3        # 표가 이 개수 이상이어도
 class Decision:
     profile: Profile
     polish: str
+    llm: bool = False
     reasons: list[str] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
 
@@ -84,9 +83,9 @@ def profile_info(name: str) -> dict:
                     f"좌·우 {_pair(fmt['margin_left'], fmt['margin_right'])}cm · {fmt['font']} · "
                     f"제목 {fmt['title_size']}·본문 {fmt['size']}·표 {fmt['table_size']}부터 · "
                     f"줄간격 {fmt['line_spacing']}"),
-        "text": {key: bool(getattr(text, key)) for key, _, _ in
-                 MARKER_TOGGLES + POLISH_TOGGLES + TABLE_TOGGLES},
-        "polish": text.polish or "rules",
+        "text": {key: all(bool(getattr(text, f)) for f in fields) for key, fields in _TOGGLES.items()},
+        "polish": "none" if text.polish == "none" else "rules",
+        "llm": text.polish == "llm",
         "tables": {"allow_landscape": prof.tables.allow_landscape, "align": prof.tables.align},
         "format": fmt,
         "choices": {k: [str(v) for v in values] for k, values in prof.choices.model_dump().items()},
@@ -119,7 +118,7 @@ def presets() -> list[str]:
 
 def schema() -> dict:
     def rows(items):
-        return [{"key": k, "label": label, "help": help_} for k, label, help_ in items]
+        return [{"key": k, "label": label, "help": help_} for k, label, help_, _ in items]
 
     return {"markers": rows(MARKER_TOGGLES), "polish": rows(POLISH_TOGGLES),
             "tables": rows(TABLE_TOGGLES), "presets": presets(),
@@ -153,33 +152,38 @@ def format_profile(options: dict) -> Profile:
                          "여백은 cm 숫자로 적어 주세요") from exc
 
 
-def manual_rules(prof: Profile, options: dict) -> tuple[Profile, str]:
-    """직접 선택 모드: 체크박스 값(규칙)을 서식 프로파일에 끼운다."""
-    known = {k for k, _, _ in MARKER_TOGGLES + POLISH_TOGGLES + TABLE_TOGGLES}
-    text_updates = {k: bool(v) for k, v in (options.get("text") or {}).items() if k in known}
+def manual_rules(prof: Profile, options: dict) -> tuple[Profile, str, bool]:
+    """직접 선택 모드: "규칙 기본값" 프로파일의 규칙(text)에 체크박스 값을 덮어써 서식 프로파일에 끼운다.
+    문장 다듬기: polish = none | rules(파이썬 규칙), llm = LLM 맞춤법·어조 다듬기(따로 켬)."""
+    base = options.get("rules_base")
+    text = load_profile(base).text if base in presets() else prof.text
+    text_updates = {field: bool(v) for key, v in (options.get("text") or {}).items()
+                    for field in _TOGGLES.get(key, ())}
     table_opts = options.get("tables") or {}
     table_updates = {}
     if "allow_landscape" in table_opts:
         table_updates["allow_landscape"] = bool(table_opts["allow_landscape"])
     if table_opts.get("align") in dict(TABLE_CHOICES["align"]):
         table_updates["align"] = table_opts["align"]
-    prof = prof.model_copy(update={"text": prof.text.model_copy(update=text_updates),
+    prof = prof.model_copy(update={"text": text.model_copy(update=text_updates),
                                    "tables": prof.tables.model_copy(update=table_updates)})
-    polish = options.get("polish") or prof.text.polish or "rules"
+    polish = options.get("polish") or ("none" if text.polish == "none" else "rules")
     if polish not in ("none", "rules", "llm"):
         raise ValueError(f"알 수 없는 문장 다듬기 방식: {polish}")
-    return prof, polish
+    llm = bool(options.get("llm")) or polish == "llm"
+    return prof, ("rules" if polish == "llm" else polish), llm
 
 
 def build_profile(options: dict, docs: list[Document], kinds: list[str], *,
-                  llm_ready: bool) -> tuple[Profile, str, Decision | None]:
+                  llm_ready: bool) -> tuple[Profile, str, bool, Decision | None]:
+    """(최종 프로파일, 파이썬 규칙 polish none|rules, LLM 켬 여부, 자동 판단 내용)"""
     fmt = format_profile(options)
     if options.get("mode") == "manual":
-        prof, polish = manual_rules(fmt, options)
-        return prof, polish, None
+        prof, polish, llm = manual_rules(fmt, options)
+        return prof, polish, llm, None
     decision = auto_decide(docs, kinds, allow_llm=bool(options.get("allow_llm")),
                            llm_ready=llm_ready, preset=fmt)
-    return decision.profile, decision.polish, decision
+    return decision.profile, decision.polish, decision.llm, decision
 
 
 def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,
@@ -217,16 +221,13 @@ def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,
 
     text_profile = load_profile("confluence" if structured else "default")
     prof = preset.model_copy(update={"text": text_profile.text})
-    if structured:
-        polish = "none"
-    elif allow_llm and llm_ready:
-        polish = "llm"
-        reasons.append("LLM 사용을 허용해 규칙 적용 뒤 LLM으로 한 번 더 다듬음")
-    else:
-        polish = "rules"
-        if allow_llm:
-            reasons.append("LLM이 설정되지 않아 파이썬 규칙으로만 다듬음")
-    return Decision(profile=prof, polish=polish, reasons=reasons,
+    polish = "none" if structured else "rules"
+    llm = allow_llm and llm_ready
+    if llm:
+        reasons.append("LLM으로 맞춤법·띄어쓰기·어조·모호한 표현을 다듬음(문장 끝 형태는 그대로)")
+    elif allow_llm:
+        reasons.append("LLM이 설정되지 않아 LLM 다듬기는 건너뜀")
+    return Decision(profile=prof, polish=polish, llm=llm, reasons=reasons,
                     summary={"structured": structured, "heavy": heavy, "ratio": round(ratio, 2),
                              "chars": chars, "tables": tables, "polish": polish})
 

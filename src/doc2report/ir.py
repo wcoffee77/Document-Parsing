@@ -64,6 +64,7 @@ class Heading:
     level: int  # 1-6
     runs: list[Run] = field(default_factory=list)
     section_title: bool = False  # 여러 입력을 합칠 때 넣는 각 입력의 제목 — 그 아래 내용은 한 단계씩 들어간다
+    page_title: bool = False     # 입력마다 새 쪽으로 합칠 때 그 쪽의 큰 제목(문서 제목 서식)
 
 
 @dataclass
