@@ -33,6 +33,7 @@ text:
   noun_ending: false
   split_long_sentences: false
   merge_short_items: false   # "및" 병합도 문장을 바꾸는 일이라 끈다
+  auto_markers: false        # 말머리 없는 제목·문단에 □/- 를 새로 만들지 않음(이미 구분해 쓴 문서)
   level_bold: false          # 1.·□ 단계 문장 전체 굵게 안 함 — 원문에서 굵던 글씨와 제목만 굵게
 
 choices:

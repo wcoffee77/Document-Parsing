@@ -54,6 +54,7 @@ import httpx
 from . import LoadedSource
 
 _TIMEOUT = 30.0
+_FALLBACK_ATTR = "_doc2report_use_powershell"  # httpx.Client에 붙이는 표식: 이 변환은 PowerShell로
 _TRANSPORT_ENV = "DOC2REPORT_CONFLUENCE_TRANSPORT"  # 비어 있으면 자동, "powershell"이면 강제
 
 # Cloud: https://x.atlassian.net/wiki/spaces/TEAM/pages/123456/제목
@@ -256,7 +257,9 @@ def _get(client: httpx.Client, path: str, notes: list[str], *, params: dict | No
     """httpx로 GET하되, SSL/연결 실패나 403을 받으면(또는 강제 설정이면) PowerShell로
     다시 시도한다. SSL 인증서 검증 실패는 응답 자체를 못 받고 예외로 터지므로 403과
     따로 잡아야 한다."""
-    if _forced_powershell():
+    if _forced_powershell() or getattr(client, _FALLBACK_ATTR, False):
+        # 한 번 httpx가 막힌 사내망이면 이번 변환의 나머지 요청(첨부 이미지 등)은 처음부터
+        # PowerShell로 — 요청마다 실패를 기다리지 않고, 리포트에도 같은 안내가 반복되지 않는다.
         return _fetch_via_powershell(client, path, params, notes, forced=True)
 
     try:
@@ -306,6 +309,7 @@ def _fetch_via_powershell(
         raise RuntimeError(f"PowerShell 요청 실패: {exc}") from exc
 
     if not forced:
+        setattr(client, _FALLBACK_ATTR, True)  # 이후 요청은 httpx를 건너뛴다(안내는 이번 한 번만)
         reason = "SSL/연결 오류" if httpx_error is not None else "403"
         notes.append(
             f"httpx 요청이 {reason}로 실패해 PowerShell(Invoke-WebRequest)로 재시도해 성공함 "

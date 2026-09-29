@@ -120,7 +120,8 @@ def convert(
         doc, fold_changes = fold_headings_into_levels(
             doc, prof.text.leading_markers, keep=prof.text.keep_leading_markers,
             marker_depths=prof.marker_depths(), normalize=prof.text.normalize_levels,
-            no_marker_openers=prof.text.no_marker_openers)
+            no_marker_openers=prof.text.no_marker_openers,
+            auto_markers=prof.text.auto_markers)
         changes.extend(fold_changes)
     if polish == "llm":
         from .transform.llm_polish import polish_document

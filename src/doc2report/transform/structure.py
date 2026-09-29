@@ -42,6 +42,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                               marker_depths: dict[str, int] | None = None,
                               normalize: bool = False,
                               no_marker_openers: list[str] | None = None,
+                              auto_markers: bool = True,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -51,7 +52,8 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     depths = marker_depths or {}
     openers = tuple(no_marker_openers or ())
 
-    def item(depth: int, runs: list[Run], own: str | None = None, **extra) -> ListItem:
+    def item(depth: int, runs: list[Run], own: str | None = None, *, derived: bool = False,
+             **extra) -> ListItem:
         if own is None:
             found = _find_marker(runs, marker_re)
             if found is not None:
@@ -63,6 +65,8 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                     runs, own = rest, None
         if own is None and openers and plain(runs).lstrip().startswith(openers):
             own = ""  # 꺾쇠 표기는 말머리 없이 — 빈 문자열이면 렌더러가 프로파일 말머리를 안 붙인다
+        elif own is None and derived and not auto_markers:
+            own = ""  # 제목·문단에서 온 항목인데 원문 말머리가 없으면 새로 만들지 않는다
         elif not keep:
             own = None
         return ListItem(depth=depth, runs=runs, marker=own, **extra)
@@ -71,14 +75,14 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         if isinstance(block, Heading):
             depth = max(0, block.level - HEADING_BASE)
             heading_depth = depth
-            blocks.append(item(depth, block.runs, from_heading=True))
+            blocks.append(item(depth, block.runs, derived=True, from_heading=True))
         elif isinstance(block, ListItem):
             blocks.append(item(heading_depth + 1 + block.depth, block.runs, block.marker,
                                ordered=block.ordered, number=block.number))
         elif isinstance(block, Paragraph) and heading_depth >= 0:
             # 제목 아래 본문 문단도 그 단계의 항목으로 붙인다. 원문 말머리를 살리는 경우엔
             # 그 말머리가 가리키는 단계("-"면 - 단계)로 둔다 — 제목보다 얕아지지는 않게.
-            new = item(heading_depth + 1, block.runs)
+            new = item(heading_depth + 1, block.runs, derived=True)
             if new.marker in depths:
                 new.depth = max(heading_depth + 1, depths[new.marker])
             blocks.append(new)

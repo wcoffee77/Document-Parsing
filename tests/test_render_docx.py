@@ -231,7 +231,8 @@ def _paras(doc, profile, tmp_path, name):
 
     doc, _ = fold_headings_into_levels(doc, profile.text.leading_markers, keep=profile.text.keep_leading_markers,
                                        marker_depths=profile.marker_depths(),
-                                       no_marker_openers=profile.text.no_marker_openers)
+                                       no_marker_openers=profile.text.no_marker_openers,
+                                       auto_markers=profile.text.auto_markers)
     out = tmp_path / name
     DocxRenderer(profile).save(doc, out)
     return [p for p in DocxDocument(str(out)).paragraphs if p.text]
@@ -251,7 +252,8 @@ def test_bracket_lines_get_no_profile_marker(tmp_path, profile_name, keep):
                            Paragraph(runs=[Run("일반 문장")])])
     texts = [p.text for p in _paras(doc, profile, tmp_path, "br.docx")]
     assert "【사업현황】" in texts and "[참고] 내용" in texts  # 말머리·탭 없이 그대로
-    assert any(t.endswith("\t일반 문장") for t in texts)  # 일반 문장은 프로파일 말머리를 받음
+    if profile.text.auto_markers:  # 말머리를 새로 만드는 프로파일이면 일반 문장은 말머리를 받음
+        assert any(t.endswith("\t일반 문장") for t in texts)
 
 
 def test_note_mark_is_indented_04cm_deeper_than_line_above(tmp_path):
@@ -276,3 +278,20 @@ def test_note_mark_is_indented_04cm_deeper_than_line_above(tmp_path):
     assert first_line_mm(paras["※ 참고 1"]) == pytest.approx(above + 4, abs=0.1)
     assert first_line_mm(paras["※\t참고 2"]) == pytest.approx(above + 4, abs=0.1)  # 연속 ※는 같은 들여쓰기
     assert first_line_mm(paras["1.\t다른 항목"]) == pytest.approx(0, abs=0.1)
+
+
+def test_auto_markers_off_keeps_unmarked_text_unmarked_but_indented(tmp_path):
+    """이미 말머리를 구분해 쓴 문서(Confluence)는 말머리 없는 문단에 □/-를 새로 만들지 않는다
+    (2026-09-29 사용자). 원문에 말머리가 있으면 그대로, 없으면 없는 채로 — 들여쓰기는 단계대로."""
+    from doc2report.ir import Document, Heading, Paragraph, Run
+
+    doc = Document(blocks=[Heading(level=2, runs=[Run("1. 추진 배경")]),
+                           Paragraph(runs=[Run("- 원문 말머리 있음")]),
+                           Paragraph(runs=[Run("말머리 없는 문장")])])
+    confluence = {p.text: p for p in _paras(doc, load_profile("confluence"), tmp_path, "a.docx")}
+    assert "말머리 없는 문장" in confluence  # 탭·말머리 없이 그대로
+    assert "-\t원문 말머리 있음" in confluence
+    assert "1.\t추진 배경" in confluence
+
+    default = [p.text for p in _paras(doc, load_profile("default"), tmp_path, "b.docx")]
+    assert any(t.endswith("\t말머리 없는 문장") for t in default)  # 새로 만드는 모드는 그대로 붙임

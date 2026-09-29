@@ -118,7 +118,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 208개
+uv run pytest                           # 210개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -304,9 +304,7 @@ water-filling 쪽을 구체적 수치와 함께 다시 요청할 것.
 목록(numbering, font_ladder)은 통째로 덮어쓴다. Confluence URL이면 `-p` 없이도 이
 프로파일이 자동 선택된다(`pipeline.py::auto_profile`).
 
-**아직 판단 안 한 것**: 원문 말머리가 **없는** 제목 아래 일반 문단은 여전히 프로파일
-말머리("□"/"-")를 받는다(예전부터의 `headings_as_levels` 동작). Confluence에서 "잘 정리된
-문장"을 그대로 두려면 이것도 끄는 게 맞을 수 있다 — 사용자 실측 피드백 대기.
+**(해결됨, 열 번째 라운드)** 원문 말머리가 없는 제목·문단의 프로파일 말머리는 `text.auto_markers`로 끈다.
 
 **2026-09-29 여섯 번째 라운드 — Confluence 실측에서 나온 것들:**
 
@@ -375,6 +373,22 @@ water-filling 쪽을 구체적 수치와 함께 다시 요청할 것.
   문단의 들여쓰기를 `_base_indent`로 기억하고, ※ 문단(`ListItem`이든 `Paragraph`든)은 그 값 + 0.4cm.
   ※가 연달아 나오면 계단식이 되지 않고 같은 들여쓰기를 쓴다(기준은 ※ 바로 위의 "일반" 문단).
   제목이 나오거나 들여쓰기 없는 일반 `Paragraph`가 나오면 기준은 0으로 돌아간다. 표 셀 안은 해당 없음.
+
+**2026-09-29 열 번째 라운드:**
+
+- **말머리 자동 부여를 옵션으로**: `text.auto_markers`(default true, confluence false). false면 원문에
+  말머리가 없는 **제목·일반 문단**은 `ListItem.marker = ""`(말머리 없음, 단계별 들여쓰기만 유지)로 접힌다.
+  진짜 목록(`<ul>/<ol>`)의 항목은 대상이 아니다(구조가 이미 있는 것). 사용자 판단: 대부분의 문서는
+  말머리를 이미 구분해 써 뒀으니 새로 만들 필요가 없고, **정리 안 된 글을 정형 보고서로 새로 만들 때만**
+  말머리 생성(`auto_markers: true`, `-p default`) + LLM 다듬기(`--polish llm`)가 필요하다. 웹앱 변환
+  옵션의 on/off 항목으로 넣을 예정 — 이미 프로파일 값이라 체크박스가 이 값을 덮어쓰기만 하면 된다.
+  (두 값이 별개라는 점 주의: 말머리 생성 = `text.auto_markers`, 문장 다듬기 = `text.polish`.)
+- **가운뎃점 앞 `-` 중복은 사라진 것으로 확인**(사용자, 다섯 번째 라운드의 keep 방식 이후). 다시 나오면
+  `--report` 원문이 필요.
+- **`--report`에 "httpx 요청이 SSL/연결 오류로…" 안내가 이미지 개수만큼 반복됨**: 페이지·첨부 목록·
+  첨부파일마다 httpx 실패 → PowerShell 재시도를 했기 때문. 한 번 막히면 `client`에 표식을 달아 나머지
+  요청은 httpx를 건너뛰고 PowerShell로 곧장 가며 안내는 한 번만 남긴다(변환도 그만큼 빨라짐).
+  이미지가 든 Confluence 페이지의 첨부 다운로드 경로는 사용자 실측으로 검증됨.
 
 ## Confluence 연동 (2026-09-28 재작업)
 

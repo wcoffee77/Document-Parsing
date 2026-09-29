@@ -210,6 +210,37 @@ def test_403_on_windows_falls_back_to_powershell_and_succeeds(monkeypatch):
     assert any("PowerShell" in note for note in loaded.notes)
 
 
+def test_powershell_fallback_is_noted_once_and_httpx_is_skipped_afterwards(monkeypatch):
+    """페이지 + 첨부 목록 + 첨부 이미지마다 같은 안내가 리포트에 반복되던 문제(2026-09-29 사용자)
+    — 한 번 막히면 나머지 요청은 처음부터 PowerShell로 가고 안내도 한 번만."""
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setattr("doc2report.sources.confluence.platform.system", lambda: "Windows")
+    hits = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hits.append(str(request.url))
+        raise httpx.ConnectError("CERTIFICATE_VERIFY_FAILED")
+
+    _patch_client(monkeypatch, handler)
+    responses = iter([
+        _b64_json({"title": "t", "body": {"storage": {"value": "<p>x</p>"}}}),
+        _b64_json({"results": [{"title": "a.png", "_links": {"download": "/download/a.png"}},
+                               {"title": "b.png", "_links": {"download": "/download/b.png"}}]}),
+        base64.b64encode(b"PNG-A").decode(),
+        base64.b64encode(b"PNG-B").decode(),
+    ])
+    monkeypatch.setattr(
+        "doc2report.sources.confluence.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=next(responses), stderr=""),
+    )
+
+    loaded = load_confluence("123")
+
+    assert len(hits) == 1  # 첫 요청만 httpx를 시도
+    assert sum("PowerShell" in note for note in loaded.notes) == 1
+
+
 def test_forced_powershell_transport_never_calls_httpx(monkeypatch):
     monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
     monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")

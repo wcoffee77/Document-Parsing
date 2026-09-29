@@ -215,6 +215,7 @@ text:
   keep_leading_markers: true
     # 2026-09-29 사용자 원칙: 문서에 이미 쓴 글머리 기호(1. 1) □ - · ① ※ 등)는 바꾸지 말고
     # 그대로 쓴다. 프로파일 말머리는 원문에 말머리가 없는 항목에만 붙는다.
+  auto_markers: true        # 원문에 말머리가 없는 제목·문단에 1. □ - 를 붙임 (false면 안 붙임 — confluence)
   note_marks: ["※"]
   note_indent: 4mm          # ※ 문단은 윗줄 문단보다 0.4cm 더 들여씀
   no_marker_openers: ["[", "［", "【", "〔", "〈", "《", "「", "『"]   # 이 꺾쇠로 시작하면 □/- 말머리를 안 붙임
