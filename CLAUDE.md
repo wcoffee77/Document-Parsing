@@ -347,6 +347,15 @@ HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 cert
   `--report` 원문 확인 후 정정.) **여전히 미확인**: 이 실측 문서에는 첨부 이미지가
   없어서, 첨부파일 다운로드 경로(PowerShell로 바이너리 응답을 Base64로 왕복하는
   부분)는 이번에도 확인 못 함 — 이미지가 있는 페이지로 다시 확인 필요.
+  **추가 확인(2026-09-29, 사용자 재확인)**: 이 SSL 실패 → PowerShell 재시도가
+  **매번(변환할 때마다) 일어난다** — 가끔 겹치는 우연이 아니라, 이 사내망
+  프록시가 발급하는 인증서가 httpx(Python 기본 CA 번들)에 구조적으로 안 맞는
+  것으로 확정. 결과물은 정확히 같이 나오지만 매번 httpx가 실패할 때까지 기다린
+  뒤 PowerShell 프로세스를 새로 띄우는 시간이 더 든다. 사용자에게 두 가지
+  줄이는 방법을 안내함: (1) `DOC2REPORT_CONFLUENCE_TRANSPORT=powershell`로
+  처음부터 강제(httpx 시도 자체를 건너뜀), (2) IT/보안팀에서 사내 루트 인증서
+  파일을 받아 `CONFLUENCE_CA_BUNDLE`로 지정(httpx가 아예 바로 성공, PowerShell
+  우회 자체가 필요 없어짐) — 아직 어느 쪽을 택할지는 미정.
 - 이 코드는 `tests/test_confluence_storage.py`(파서, 고정 XHTML 픽스처),
   `tests/test_confluence_source.py`(REST 클라이언트, `httpx.MockTransport`로 흉내),
   `tests/test_confluence_pipeline.py`(파서→변환→렌더 전 과정)로 검증했지만, 셋 다
