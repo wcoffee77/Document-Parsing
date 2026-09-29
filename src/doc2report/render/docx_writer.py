@@ -135,8 +135,8 @@ class DocxRenderer:
         if isinstance(block, Heading):
             self._after_table_gap(self._heading(block, container), container)
         elif isinstance(block, Paragraph):
-            self._after_table_gap(
-                self._paragraph(block.runs, self.profile.font("body"), container), container)
+            spec = self._noted(self.profile.font("body"), plain(block.runs).lstrip())
+            self._after_table_gap(self._paragraph(block.runs, spec, container), container)
         elif isinstance(block, ListItem):
             self._list_item(block, container, next_block)
         elif isinstance(block, Table):
@@ -186,6 +186,7 @@ class DocxRenderer:
             spec = spec.model_copy(update={"bold": level.bold})
 
         marker = self._marker(block, level)
+        spec = self._noted(spec, block.marker or plain(block.runs).lstrip())
 
         paragraph = self._new_paragraph(container)
         oxml.apply_paragraph_format(paragraph, spec, indent=False)
@@ -202,6 +203,13 @@ class DocxRenderer:
             run = paragraph.add_run(marker + "\t")
             oxml.apply_run_format(run, spec)
         self._runs(paragraph, block.runs, spec)
+
+    def _noted(self, spec: FontSpec, text: str) -> FontSpec:
+        """※ 같은 참고사항 표시로 시작하면 본문보다 text.note_size_delta만큼 작게."""
+        rules = self.profile.text
+        if rules.note_size_delta and any(text.startswith(m) for m in rules.note_marks):
+            return spec.resized(max(spec.size - rules.note_size_delta, 1))
+        return spec
 
     def _marker(self, block: ListItem, level) -> str:
         """말머리 문자열. {n} 같은 자리표시자가 있으면 깊이별 번호를 매긴다."""
@@ -418,13 +426,27 @@ class DocxRenderer:
         # python-docx가 만들어 둔 빈 문단을 첫 블록에 재사용한다.
         blocks = cell.blocks or [Paragraph(runs=[])]
         for i, inner in enumerate(blocks):
-            if i == 0 and isinstance(inner, Paragraph):
-                self._paragraph(inner.runs, spec, docx_cell,
-                                reuse=docx_cell.paragraphs[0])
-            elif isinstance(inner, Paragraph):
-                self._paragraph(inner.runs, spec, docx_cell)
+            reuse = docx_cell.paragraphs[0] if i == 0 else None
+            if isinstance(inner, Paragraph):
+                self._paragraph(inner.runs, spec, docx_cell, reuse=reuse)
+            elif isinstance(inner, Heading):
+                # 셀 안 제목은 본문용 제목 서식(14pt·앞 간격)이 아니라 표 글자 크기의 굵은 글씨로.
+                bold = [replace(run, bold=True) for run in inner.runs]
+                self._paragraph(bold, spec, docx_cell, reuse=reuse)
+            elif isinstance(inner, ListItem):
+                self._paragraph(self._cell_item_runs(inner), spec, docx_cell, reuse=reuse)
             else:
                 self._block(inner, docx_cell)
+        _drop_leading_blank(docx_cell)
+
+    def _cell_item_runs(self, item: ListItem) -> list[Run]:
+        """표 안 목록 항목: 본문용 번호 체계(1. □ -)와 들여쓰기를 쓰면 좁은 칸에서 깨지고
+        글자도 본문 크기로 나온다 — 원문 말머리(또는 tables.cell_list_markers)를 앞에 붙여
+        표 글자 서식으로 그대로 쓴다."""
+        markers = self.profile.tables.cell_list_markers
+        marker = item.marker or (markers[min(item.depth, len(markers) - 1)] if markers else "")
+        head = [Run(marker + " ")] if marker else []
+        return head + item.runs
 
     # ── 문단/런 ─────────────────────────────────────────────────────────
 
@@ -463,6 +485,15 @@ class DocxRenderer:
     def _paragraphs(self, container=None):
         target = container if container is not None else self.docx
         return target.paragraphs
+
+
+def _drop_leading_blank(docx_cell) -> None:
+    """첫 블록이 문단이 아니어서(코드·이미지·인용 등) 재사용 못 한 빈 첫 문단은 지운다 —
+    남으면 셀 맨 위에 엔터 한 줄이 들어간 것처럼 보인다. 셀은 문단으로 끝나야 하므로
+    다른 문단이 뒤에 있을 때만 지운다."""
+    paragraphs = docx_cell._tc.p_lst
+    if len(paragraphs) > 1 and not "".join(paragraphs[0].itertext()).strip():
+        docx_cell._tc.remove(paragraphs[0])
 
 
 def _with_text(cell: Cell, text: str) -> Cell:

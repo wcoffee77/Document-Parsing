@@ -186,8 +186,11 @@ def _list(el, depth: int, ordered: bool) -> list[Block]:
         else:
             # walk()가 ul/ol/table 자식은 건너뛰므로, 뒤이은 중첩 목록과 안 섞인다.
             runs, images = _inline(li)
-        out.append(ListItem(depth=depth, runs=runs, ordered=ordered,
-                            number=number if ordered else None))
+        if any(r.text.strip() for r in runs) or images:
+            out.append(ListItem(depth=depth, runs=runs, ordered=ordered,
+                                number=number if ordered else None))
+        # else: Confluence는 들여쓰기용으로 글자 없는 <li><ol>…</ol></li> 껍데기를 만든다 —
+        # 항목으로 만들면 "□"만 덜렁 찍힌 줄이 생긴다. 안쪽 목록의 깊이는 그대로 둔다.
         out.extend(images)
         for child in block_children:
             tag = _local(child)

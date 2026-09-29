@@ -138,12 +138,12 @@ def test_cell_align_does_not_override_explicit_alignment(profile):
 
 
 def test_crowded_table_uses_char_scale_within_font_range(profile):
-    """글자가 많으면 11~12pt 안에서 크기와 장평(90%)을 줄인다."""
+    """글자가 많으면 11~12pt 안에서 크기와 장평(95%)을 줄인다."""
     long = "가나다라마바사아자차카타파하 " * 3
     table = table_of([[f"열{i}" for i in range(10)], [long] * 10])
     layout = fit_table(table, profile, profile.page.usable_width)
     assert min(profile.table_font_ladder()) <= layout.font_size <= max(profile.table_font_ladder())
-    assert layout.char_scale == pytest.approx(0.9)
+    assert layout.char_scale == pytest.approx(0.95)
     assert any("장평" in note for note in layout.notes)
 
 
@@ -174,3 +174,18 @@ def test_landscape_is_used_only_when_allowed(profile):
     )
     wide = fit_table(table, allowed, allowed.page.usable_width)
     assert wide.total_width <= allowed.page.landscape().usable_width
+
+
+def test_left_align_applies_to_whole_column_when_any_cell_is_long(profile):
+    """같은 열 안에서 정렬이 섞여 보이면 안 된다 — 여러 줄인 셀이 하나라도 있으면 그
+    열의 본문 셀 전부 왼쪽 맞춤(2026-09-29 사용자). 머리행은 그대로 가운데."""
+    many = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄입니다")]) for i in range(5)])
+    table = Table(rows=[Row(cells=[cell("구분", header=True), cell("내용", header=True)]),
+                        Row(cells=[cell("가"), cell("짧음")]),
+                        Row(cells=[cell("나"), many]),
+                        Row(cells=[cell("다"), cell("짧음2")])],
+                  header_rows=1)
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert [layout.cell_align.get((r, 1)) for r in (1, 2, 3)] == ["left"] * 3
+    assert (0, 1) not in layout.cell_align  # 머리행
+    assert all((r, 0) not in layout.cell_align for r in (1, 2, 3))  # 다른 열은 그대로

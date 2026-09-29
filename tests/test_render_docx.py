@@ -122,3 +122,59 @@ def test_changes_are_reported(built):
     result, _ = built
     assert result.changes
     assert "개조식" in result.report()
+
+
+def _render_table(tmp_path, cell_blocks):
+    from doc2report.ir import Cell, Document, Row, Table
+    from doc2report.render.docx_writer import DocxRenderer
+
+    profile = load_profile("confluence")
+    table = Table(rows=[Row(cells=[Cell(blocks=cell_blocks)])], header_rows=0)
+    out = tmp_path / "t.docx"
+    DocxRenderer(profile).save(Document(blocks=[table]), out)
+    return DocxDocument(str(out)).tables[0].rows[0].cells[0], profile
+
+
+def test_heading_inside_cell_is_bold_table_size_without_blank_line_above(tmp_path):
+    """표 안 굵은 제목이 14pt로 커지고 위에 빈 줄이 생기던 문제(2026-09-29 사용자)."""
+    from doc2report.ir import Heading, Run
+
+    cell, profile = _render_table(tmp_path, [Heading(level=3, runs=[Run("굵은 소제목")])])
+    assert [p.text for p in cell.paragraphs] == ["굵은 소제목"]  # 앞에 빈 문단 없음
+    run = cell.paragraphs[0].runs[0]
+    assert run.bold
+    assert emu_to_pt(run.font.size) == emu_to_pt(profile.font("table").size)
+
+
+def test_list_item_inside_cell_uses_table_font_and_cell_marker(tmp_path):
+    from doc2report.ir import ListItem, Run
+
+    cell, profile = _render_table(tmp_path, [ListItem(depth=0, runs=[Run("항목")])])
+    assert [p.text for p in cell.paragraphs] == ["- 항목"]
+    assert emu_to_pt(cell.paragraphs[0].runs[0].font.size) == emu_to_pt(profile.font("table").size)
+
+
+def test_reference_mark_is_two_points_smaller_than_body(tmp_path):
+    """※ 참고사항은 항상 본문보다 2pt 작게(2026-09-29 사용자)."""
+    from doc2report.ir import Document, ListItem, Paragraph, Run
+    from doc2report.render.docx_writer import DocxRenderer
+
+    profile = load_profile("confluence")  # 본문 12pt
+    doc = Document(blocks=[Paragraph(runs=[Run("일반 문단")]),
+                           Paragraph(runs=[Run("※ 참고 문단")]),
+                           ListItem(depth=1, runs=[Run("참고 항목")], marker="※")])
+    out = tmp_path / "n.docx"
+    DocxRenderer(profile).save(doc, out)
+    sizes = {p.text: emu_to_pt(p.runs[-1].font.size) for p in DocxDocument(str(out)).paragraphs if p.text}
+    assert sizes["일반 문단"] == 12
+    assert sizes["※ 참고 문단"] == 10
+    assert sizes["※\t참고 항목"] == 10
+
+
+def test_note_size_delta_survives_dump_and_reload(tmp_path):
+    from doc2report.profile import dump_profile
+
+    profile = load_profile("default")
+    path = tmp_path / "p.yaml"
+    path.write_text(dump_profile(profile), encoding="utf-8")
+    assert load_profile(path).text.note_size_delta == profile.text.note_size_delta

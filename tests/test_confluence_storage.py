@@ -153,3 +153,11 @@ def test_unknown_macro_without_body_is_reported_not_silently_dropped():
     parsed = parse_confluence_storage(xhtml)
     assert parsed.document.blocks == []
     assert any("jira-issue" in note for note in parsed.notes)
+
+
+def test_empty_wrapper_list_item_is_not_emitted_but_nested_items_are():
+    """Confluence는 들여쓰기용으로 글자 없는 <li><ol>…</ol></li> 껍데기를 만든다 —
+    항목으로 만들면 "□"만 덜렁 찍힌 줄이 생긴다(2026-09-29 사용자 보고)."""
+    parsed = parse_confluence_storage("<ol><li><ol><li>(1) 세부 내용</li></ol></li></ol>")
+    items = [b for b in parsed.document.blocks if isinstance(b, ListItem)]
+    assert [(i.depth, plain(i.runs)) for i in items] == [(1, "(1) 세부 내용")]

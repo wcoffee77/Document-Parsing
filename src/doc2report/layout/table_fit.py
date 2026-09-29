@@ -131,18 +131,30 @@ def _cell_total_lines(cell: Cell, profile: Profile, width: float, size: int, sca
 
 def _left_align_long_cells(table: Table, profile: Profile, layout: TableLayout) -> None:
     """내용이 여러 줄인 셀은 가운데 정렬이면 줄마다 들쭉날쭉해 읽기 불편하다 —
-    max_cell_lines(기본 3)줄 이상이면 왼쪽 맞춤으로 바꾼다(2026-09-29 사용자 요청).
-    이미 저자가 정렬을 지정한 셀(cell.align)은 존중해 건드리지 않는다."""
+    max_cell_lines(기본 3)줄 이상이 되는 셀이 있으면 **그 열의 본문 셀 전부**를 왼쪽 맞춤으로
+    바꾼다(2026-09-29 사용자 요청). 셀마다 따로 정하면 같은 열 안에서 정렬이 섞여 보인다.
+    머리행은 제 서식(가운데)을 유지하고, 저자가 정렬을 지정한 셀(cell.align)도 건드리지 않는다.
+    병합 셀은 자기 자신만 판단한다(여러 열에 걸쳐 열 전체를 좌우하지 못하게)."""
     limit = profile.tables.max_cell_lines
     if not limit:
         return
     content = [w - layout.cell_margin_x * 2 for w in layout.col_widths]
-    for row_index, cell_index, cell, col, span in _iter_grid_indexed(table):
-        if cell.align or col >= len(content):
-            continue
+    body = [(ri, ci, cell, col, span) for ri, ci, cell, col, span in _iter_grid_indexed(table)
+            if not cell.is_header and col < len(content)]
+
+    long_cells: set[tuple[int, int]] = set()
+    long_cols: set[int] = set()
+    for row_index, cell_index, cell, col, span in body:
         width = sum(content[col: min(col + span, len(content))])
-        total_lines = _cell_total_lines(cell, profile, width, layout.font_size, layout.char_scale)
-        if total_lines >= limit:
+        if _cell_total_lines(cell, profile, width, layout.font_size, layout.char_scale) >= limit:
+            long_cells.add((row_index, cell_index))
+            if span == 1:
+                long_cols.add(col)
+
+    for row_index, cell_index, cell, col, span in body:
+        if cell.align:
+            continue
+        if (row_index, cell_index) in long_cells or (span == 1 and col in long_cols):
             layout.cell_align[(row_index, cell_index)] = "left"
 
 
