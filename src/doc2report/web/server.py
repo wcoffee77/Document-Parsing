@@ -8,16 +8,28 @@ FastAPI 같은 웹 프레임워크를 쓰지 않는 이유: 사내 PC는 인터�
 프로세스의 환경변수에 있으므로 다른 PC에 열지 않는다. 쓰기 요청(POST)은 전용 헤더
 (X-Doc2Report)가 있어야 받는다 — 다른 사이트가 브라우저를 시켜 몰래 요청하는 것을 막는다.
 파일 열기·내려받기는 저장 폴더 바로 아래 파일만 된다.
+
+**예전 서버가 남아 있는 문제(2026-09-29 사용자 PC)**: git pull 뒤 서버 창을 닫지 않고 다시 켜면,
+예전 파이썬 코드가 새 화면 파일(static/)을 내보내 화면이 반쯤 깨진다(서식 목록이 비고 체크박스가 안
+그려짐). 막는 장치 셋: ① Windows에서는 포트를 **독점**으로 잡는다(SO_EXCLUSIVEADDRUSE — 기본
+SO_REUSEADDR는 Windows에서 두 프로세스가 같은 포트를 나눠 잡게 해 요청이 예전 서버로 갈 수 있다)
+② 포트가 이미 doc2report면 `/api/shutdown`으로 끄고 넘겨받는다 ③ 서버가 켜진 뒤 코드가 바뀌었으면
+`/api/status`의 `stale`로 화면에 "서버를 다시 켜세요"를 띄운다.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
 import platform
 import shutil
+import socket
 import subprocess
+import sys
+import time
+import urllib.request
 import tempfile
 import threading
 import uuid
@@ -33,6 +45,8 @@ from . import options as opts
 from .jobs import JobRunner, history
 
 STATIC = Path(__file__).parent / "static"
+PACKAGE = Path(__file__).resolve().parents[1]
+API_VERSION = 6  # 화면(app.js)과 서버가 주고받는 형식이 바뀌면 올린다 — app.js의 API_VERSION과 같아야 함
 MAX_UPLOAD = 50 * 1024 * 1024
 _STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -53,12 +67,17 @@ class App:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.upload_dir = Path(tempfile.mkdtemp(prefix="doc2report-uploads-"))
         self.jobs = JobRunner(self.output_dir, self.upload_dir)
+        self.fingerprint = code_fingerprint()
+        self.server: ThreadingHTTPServer | None = None
+        self.handed_over = False  # 새로 켠 서버에 포트를 넘겨주고 끝났는가
 
     def status(self) -> dict:
         from ..render.pdf import pdf_engine
 
-        return {"confluence": confluence_status(), "llm": llm_status(),
-                "pdf": pdf_engine(), "output_dir": str(self.output_dir)}
+        return {"version": API_VERSION, "stale": code_fingerprint() != self.fingerprint,
+                "confluence": confluence_status(), "llm": llm_status(),
+                "pdf": pdf_engine(), "output_dir": str(self.output_dir),
+                "profile_errors": opts.profile_errors()}
 
     def output_file(self, name: str) -> Path:
         """저장 폴더 바로 아래 파일만 — "../" 같은 경로로 폴더 밖을 못 가리키게."""
@@ -120,6 +139,11 @@ def make_handler(app: App):
                 if path == "/api/llm/test":
                     sample = body.get("text") or "시스템 응답 속도를 개선하기 위해 인덱스를 재설계하였습니다."
                     return self._json({"ok": True, "before": sample, "after": llm_try(sample)})
+                if path == "/api/shutdown":  # 새로 켠 서버가 예전 서버를 끄고 포트를 넘겨받을 때
+                    self._json({"ok": True})
+                    app.handed_over = True
+                    threading.Thread(target=app.server.shutdown, daemon=True).start()
+                    return None
                 if path == "/api/open":
                     return self._json(_open(app, body.get("name", ""), folder=bool(body.get("folder"))))
                 return self._error(404, "없는 주소입니다")
@@ -211,17 +235,74 @@ def _open(app: App, name: str, *, folder: bool) -> dict:
     return {"ok": True}
 
 
+def code_fingerprint() -> str:
+    """패키지의 .py·화면 파일 수정 시각 — 서버가 켜진 뒤 git pull로 바뀌었는지 알아보려고."""
+    digest = hashlib.sha1()
+    for path in sorted(PACKAGE.rglob("*")):
+        if path.suffix in (".py", ".js", ".html", ".css") and "__pycache__" not in path.parts:
+            digest.update(f"{path}:{path.stat().st_mtime_ns}".encode())
+    for path in sorted(opts.PROFILE_DIR.glob("*.yaml")):
+        digest.update(f"{path}:{path.stat().st_mtime_ns}".encode())
+    return digest.hexdigest()
+
+
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+    # Windows의 SO_REUSEADDR는 이미 쓰는 포트도 또 잡게 해 준다(요청이 예전 서버로 갈 수 있음) — 끄고
+    # 독점 모드로 잡아 포트가 쓰이고 있으면 확실히 실패하게 한다.
+    allow_reuse_address = platform.system() != "Windows"
+
+    def server_bind(self):
+        if platform.system() == "Windows" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def create_server(host: str, port: int, output_dir: Path) -> tuple[ThreadingHTTPServer, App]:
     app = App(output_dir)
-    server = ThreadingHTTPServer((host, port), make_handler(app))
-    server.daemon_threads = True
+    server = _Server((host, port), make_handler(app))
+    app.server = server
     return server, app
+
+
+def _take_over(port: int) -> str:
+    """포트를 쓰고 있는 게 doc2report면 끄게 한다. 결과: "stopped" | "old" | "other"."""
+    base = f"http://127.0.0.1:{port}"
+    try:
+        with urllib.request.urlopen(base + "/api/status", timeout=3) as res:
+            status = json.loads(res.read().decode("utf-8"))
+    except Exception:
+        return "other"
+    if "version" not in status:
+        return "old"  # 끄는 기능이 없는 예전 버전
+    request = urllib.request.Request(base + "/api/shutdown", data=b"{}", method="POST",
+                                     headers={"X-Doc2Report": "1", "Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(request, timeout=3).close()
+    except Exception:
+        return "other"
+    time.sleep(1.0)
+    return "stopped"
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: Path | None = None,
           open_browser: bool = True) -> None:
     output_dir = output_dir or Path(os.environ.get("DOC2REPORT_OUTPUT_DIR") or Path.cwd() / "out" / "webapp")
-    server, app = create_server(host, port, output_dir)
+    try:
+        server, app = create_server(host, port, output_dir)
+    except OSError:
+        result = _take_over(port)
+        if result == "stopped":
+            print(f"이미 켜져 있던 doc2report 서버(포트 {port})를 끄고 새로 시작합니다.")
+            server, app = create_server(host, port, output_dir)
+        else:
+            reason = ("예전 버전의 doc2report 서버" if result == "old"
+                      else "다른 프로그램")
+            print(f"\n[시작 실패] 포트 {port}를 {reason}가 쓰고 있습니다.")
+            print("  - 예전에 띄운 doc2report 서버 창(검은 창)이 있으면 모두 닫고 다시 실행하세요.")
+            print("  - 창을 찾기 어려우면 작업 관리자에서 python.exe / uv.exe 를 끝내세요.")
+            print(f"  - 또는 다른 포트로: start_webapp.bat --port {port + 1}")
+            sys.exit(1)
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{server.server_address[1]}/"
     print(f"doc2report 웹 화면: {url}")
     print(f"  결과 저장 폴더: {app.output_dir}")
@@ -230,6 +311,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: Path | None = N
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
+        if app.handed_over:
+            print("\n새로 켠 doc2report 서버에 자리를 넘기고 이 서버는 종료합니다. 이 창은 닫아도 됩니다.")
     except KeyboardInterrupt:
         print("\n종료합니다.")
     finally:

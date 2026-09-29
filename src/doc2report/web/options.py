@@ -66,7 +66,26 @@ class Decision:
 
 
 def profile_names() -> list[str]:
-    return sorted(p.stem for p in PROFILE_DIR.glob("*.yaml"))
+    """읽을 수 있는 프로파일만 — profiles/에 망가진 yaml이 하나 있어도 화면 전체가 멈추지 않게.
+    못 읽은 것은 profile_errors()로 화면에 알린다."""
+    names = []
+    for path in sorted(PROFILE_DIR.glob("*.yaml")):
+        try:
+            load_profile(path.stem)
+            names.append(path.stem)
+        except Exception:  # 오류 내용은 profile_errors()가 다시 읽어서 보여 준다
+            continue
+    return names
+
+
+def profile_errors() -> list[str]:
+    errors = []
+    for path in sorted(PROFILE_DIR.glob("*.yaml")):
+        try:
+            load_profile(path.stem)
+        except Exception as exc:
+            errors.append(f"{path.name}: {str(exc).splitlines()[0][:200]}")
+    return errors
 
 
 def profile_info(name: str) -> dict:

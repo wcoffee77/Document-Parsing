@@ -4,6 +4,15 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
+const API_VERSION = 6;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
+
+// 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
+function banner(title, detail, warn) {
+  const el = $("#banner");
+  el.className = "banner" + (warn ? " warn" : "");
+  el.innerHTML = `<b>${esc(title)}</b>${esc(detail || "")}`;
+}
 
 const state = {
   inputs: [],      // {type, url|upload_id|text, name, title, detail, error}
@@ -47,6 +56,16 @@ function toast(message, bad) {
 async function loadStatus() {
   const st = await api("/api/status");
   state.status = st;
+  if (st.version !== API_VERSION) {
+    // 예전 서버가 새 화면 파일을 내보내는 중 — 이대로면 서식·옵션이 비어 보인다(2026-09-29 사용자 PC)
+    throw new StaleServer("서버 프로그램이 이 화면보다 예전 버전입니다.");
+  }
+  if (st.stale) {
+    banner("서버를 켠 뒤 프로그램이 업데이트되었습니다(git pull).", " 새 기능을 쓰려면 " + RESTART_HELP, true);
+  }
+  if (st.profile_errors && st.profile_errors.length) {
+    banner("읽지 못한 서식 파일이 있습니다 — 그 서식만 빼고 보여 줍니다.", " " + st.profile_errors.join(" / "), true);
+  }
   const cf = $("#st-confluence");
   cf.textContent = st.confluence.configured ? "Confluence 연결 설정됨" : "Confluence 미설정";
   cf.className = "chip " + (st.confluence.configured ? "ok" : "warn");
@@ -493,13 +512,25 @@ document.addEventListener("change", (ev) => {
   if (ev.target.name === "preset") syncPreset();
 });
 
+class StaleServer extends Error {}
+
 (async function init() {
   renderInputs();
   try {
-    await Promise.all([loadStatus(), loadProfiles()]);
-    restoreOptions();
-    await loadHistory();
+    await loadStatus();
+    await loadProfiles();
   } catch (e) {
-    toast("서버와 연결하지 못했습니다: " + e.message, true);
+    if (e instanceof StaleServer) banner(e.message, " " + RESTART_HELP);
+    else if (e instanceof TypeError && /fetch/i.test(e.message)) banner("서버에 연결할 수 없습니다.", " 서버 창이 떠 있는지 확인하고, 없으면 start_webapp.bat을 실행하세요.");
+    else banner("화면 정보를 불러오지 못했습니다: " + e.message, " " + RESTART_HELP);
+    return;
   }
+  try {
+    restoreOptions();
+  } catch (e) {
+    // 예전 버전에서 저장한 옵션이 맞지 않으면 버리고 기본값으로
+    try { localStorage.removeItem(STORE_KEY); } catch (_) { /* 무시 */ }
+    restoreOptions();
+  }
+  loadHistory().catch(() => {});
 })();

@@ -281,3 +281,56 @@ def test_http_files_cannot_escape_output_folder(server, tmp_path):
         assert _call(base + path)[0] == 404
     status, data = _post(base, "/api/open", {"name": "../secret.txt"})
     assert status == 400 and not data["ok"]
+
+
+# ── 예전 서버가 남아 있는 문제 (2026-09-29 사용자 PC) ───────────────────
+
+
+def test_status_reports_api_version_and_stale_code(server):
+    from doc2report.web import server as srv
+
+    base, app = server
+    data = json.loads(_call(base + "/api/status")[2])
+    assert data["version"] == srv.API_VERSION and data["stale"] is False
+    app.fingerprint = "예전 코드"  # 서버를 켠 뒤 git pull로 코드가 바뀐 상황
+    assert json.loads(_call(base + "/api/status")[2])["stale"] is True
+
+
+def test_app_js_expects_the_same_api_version():
+    from pathlib import Path
+
+    from doc2report.web import server as srv
+
+    js = (Path(srv.STATIC) / "app.js").read_text(encoding="utf-8")
+    assert f"const API_VERSION = {srv.API_VERSION};" in js
+
+
+def test_new_server_takes_over_port_from_running_one(tmp_path):
+    from doc2report.web import server as srv
+
+    first, _ = srv.create_server("127.0.0.1", 0, tmp_path / "a")
+    port = first.server_address[1]
+    thread = threading.Thread(target=first.serve_forever, daemon=True)
+    thread.start()
+    with pytest.raises(OSError):
+        srv.create_server("127.0.0.1", port, tmp_path / "b")  # 포트가 쓰이고 있으면 확실히 실패
+    assert srv._take_over(port) == "stopped"
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    first.server_close()
+    second, _ = srv.create_server("127.0.0.1", port, tmp_path / "b")  # 이제 잡힌다
+    second.server_close()
+
+
+def test_broken_profile_file_does_not_break_the_screen(tmp_path, monkeypatch):
+    import shutil
+
+    from doc2report import profile as profile_mod
+
+    for name in ("default.yaml", "confluence.yaml"):
+        shutil.copy(profile_mod.PROFILE_DIR / name, tmp_path / name)
+    (tmp_path / "망가진.yaml").write_text("fonts: [이상한 값", encoding="utf-8")
+    monkeypatch.setattr(profile_mod, "PROFILE_DIR", tmp_path)
+    monkeypatch.setattr(opts, "PROFILE_DIR", tmp_path)
+    assert opts.profile_names() == ["confluence", "default"]
+    assert [e.split(":")[0] for e in opts.profile_errors()] == ["망가진.yaml"]

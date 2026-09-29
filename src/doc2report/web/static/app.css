@@ -184,3 +184,9 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 .combo { display: flex; flex-direction: column; gap: 4px; }
 .combo select { width: 100%; }
 .custom .combo input.free { margin: 0; }
+.banner {
+  margin: 12px 24px 0; padding: 12px 16px; border-radius: 8px; background: var(--bad-soft);
+  color: var(--bad); border: 1px solid #f3c2bd; line-height: 1.6;
+}
+.banner b { display: block; margin-bottom: 2px; }
+.banner.warn { background: var(--warn-soft); color: var(--warn); border-color: #f0dc9c; }

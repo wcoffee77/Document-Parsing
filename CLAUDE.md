@@ -114,11 +114,22 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
   (`profile.template`이 있으면 그 경로). `assets/`는 없앴고 `.gitattributes`에 `*.docx binary`.
   **출력 .docx는 어쩔 수 없이 파일이라 같은 보안 프로그램이 건드릴 수 있다** — 출력이
   안 열리면 이쪽을 의심할 것.
+- **git pull 뒤 웹 화면이 반쯤 깨짐(서식 목록이 비고, 직접 선택의 체크박스가 안 그려지고, 빨간 "서버와
+  연결하지 못했습니다" 알림이 5초 떴다 사라짐)** — 2026-09-29 사용자 PC. 원인은 **예전 서버 프로세스**:
+  서버 창을 닫지 않은 채 pull하면 예전 파이썬 코드가 새 화면 파일(static/은 요청마다 디스크에서 읽음)을
+  내보내고, 새 화면이 기대하는 API 필드(`schema.presets` 등)가 없어 초기화가 중간에 멈춘다. 게다가
+  **Windows의 SO_REUSEADDR(파이썬 HTTPServer 기본값)는 이미 쓰는 포트를 또 잡게 해** 새 서버가 "정상
+  시작"처럼 보여도 요청이 예전 서버로 갈 수 있다. 예전 서버 코드 + 새 화면 파일 조합으로 재현해 증상이
+  똑같음을 확인했다. 대응(`web/server.py`): Windows는 `SO_EXCLUSIVEADDRUSE`로 포트를 독점 → 포트가 쓰이면
+  확실히 실패 → 그게 doc2report(버전 있음)면 `/api/shutdown`으로 끄고 넘겨받고, 예전 버전이면 창을 닫으라고
+  안내하고 종료. 화면은 `API_VERSION`(server.py·app.js 둘 다 — 테스트가 일치를 강제)이 다르면, 서버가 켜진 뒤
+  코드가 바뀌었으면(`stale`, 파일 수정 시각 지문) 계속 떠 있는 안내 띠로 알린다. **API 형식을 바꾸면
+  `API_VERSION`을 두 곳 모두 올릴 것.** profiles/에 망가진 yaml이 있어도 그 서식만 빼고 보여 준다.
 
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 245개
+uv run pytest                           # 249개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
