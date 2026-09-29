@@ -118,7 +118,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 203개
+uv run pytest                           # 208개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -362,6 +362,19 @@ water-filling 쪽을 구체적 수치와 함께 다시 요청할 것.
   `_balance_table_font`(표 전체 ↔ 가장 작은 셀 2pt 차이) 보다 **먼저** 돌고, 표 크기가 내려가
   표 크기와 같아진 셀 값은 `_drop_redundant_cell_fonts`가 뺀다. `--report`에 "열 N: 글자 크기를
   Xpt로 열 전체 통일"이 남는다.
+
+**2026-09-29 아홉 번째 라운드:**
+
+- **꺾쇠로 시작하는 줄에는 프로파일 말머리를 안 붙인다**(모든 문서 공통). "【사업현황】"이 표 위
+  제목이 아니라 일반 줄이면 접기에서 □ 항목이 되어 "□【사업현황】"이 됐다. `text.no_marker_openers`
+  (`[ ［ 【 〔 〈 《 「 『`)로 시작하면 `fold_headings_into_levels`가 `ListItem.marker = ""`(빈 문자열)을
+  준다 — **`None`(=프로파일 말머리)과 `""`(=말머리 없음)는 다른 뜻**이다. 렌더러는 `""`이면 말머리·탭을
+  안 쓰고 내어쓰기도 0으로 둬 첫 줄과 다음 줄이 맞는다. 번호 단계의 자동 번호도 세지 않는다(`_marker`).
+  keep 여부와 무관하게 적용. (표 바로 위 꺾쇠 제목은 이전 그대로 `Table.caption`.)
+- **※ 문단은 윗줄 문단보다 +0.4cm 더 들여쓴다**(`text.note_indent: 4mm`). 렌더러가 마지막 ※가 아닌
+  문단의 들여쓰기를 `_base_indent`로 기억하고, ※ 문단(`ListItem`이든 `Paragraph`든)은 그 값 + 0.4cm.
+  ※가 연달아 나오면 계단식이 되지 않고 같은 들여쓰기를 쓴다(기준은 ※ 바로 위의 "일반" 문단).
+  제목이 나오거나 들여쓰기 없는 일반 `Paragraph`가 나오면 기준은 0으로 돌아간다. 표 셀 안은 해당 없음.
 
 ## Confluence 연동 (2026-09-28 재작업)
 

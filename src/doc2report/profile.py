@@ -275,12 +275,21 @@ class TextRules(_Base):
     # 표 바로 위에 "[사업현황]"처럼 꺾쇠로 감싼 문단이 있으면 Table.caption으로 옮긴다.
     # 안 옮기면 제목 접기에서 ListItem이 되어 "- [사업현황]"처럼 말머리가 붙는다 —
     # 원래 표 제목이지 항목이 아니다.
-
+    no_marker_openers: list[str] = Field(default_factory=list)
+    # 이 꺾쇠·괄호로 시작하는 제목·문단·항목에는 프로파일 말머리(□, - 등)를 붙이지 않는다
+    # (2026-09-29 사용자: "【사업현황】" 앞에 □가 붙음 — 모든 문서 공통). 문서 어디서나 적용.
+    note_indent: int | None = None
+    # ※ 참고사항 문단은 바로 윗줄 문단의 들여쓰기보다 이만큼 더 들여쓴다(2026-09-29 사용자: +0.4cm).
 
     @field_validator("note_size_delta", mode="before")
     @classmethod
     def _delta(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
+
+    @field_validator("note_indent", mode="before")
+    @classmethod
+    def _indent(cls, v: Any) -> Any:
+        return None if v is None else parse_length(v, default_unit="mm")
 
 
 class Choices(_Base):
@@ -489,6 +498,8 @@ def dump_profile(profile: Profile) -> str:
     data["numbering"] = [_strip(_dump_level(level)) for level in profile.numbering]
     data["tables"] = _dump_tables(profile.tables)
     text = profile.text.model_dump()
+    if text["note_indent"] is not None:
+        text["note_indent"] = _mm(text["note_indent"])
     text["note_size_delta"] = _pt(text["note_size_delta"])  # EMU 그대로 쓰면 다시 읽을 때 또 변환된다
     data["text"] = _strip(text)
     choices = _strip(profile.choices.model_dump())

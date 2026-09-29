@@ -41,6 +41,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                               keep: bool = False,
                               marker_depths: dict[str, int] | None = None,
                               normalize: bool = False,
+                              no_marker_openers: list[str] | None = None,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -48,6 +49,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     heading_depth = -1
     marker_re = _marker_pattern(markers or [])
     depths = marker_depths or {}
+    openers = tuple(no_marker_openers or ())
 
     def item(depth: int, runs: list[Run], own: str | None = None, **extra) -> ListItem:
         if own is None:
@@ -59,7 +61,11 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                 else:
                     changes.append(Change(plain(runs), plain(rest), label))
                     runs, own = rest, None
-        return ListItem(depth=depth, runs=runs, marker=own if keep else None, **extra)
+        if own is None and openers and plain(runs).lstrip().startswith(openers):
+            own = ""  # 꺾쇠 표기는 말머리 없이 — 빈 문자열이면 렌더러가 프로파일 말머리를 안 붙인다
+        elif not keep:
+            own = None
+        return ListItem(depth=depth, runs=runs, marker=own, **extra)
 
     for block in doc.blocks:
         if isinstance(block, Heading):

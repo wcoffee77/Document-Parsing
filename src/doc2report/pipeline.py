@@ -119,7 +119,8 @@ def convert(
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
         doc, fold_changes = fold_headings_into_levels(
             doc, prof.text.leading_markers, keep=prof.text.keep_leading_markers,
-            marker_depths=prof.marker_depths(), normalize=prof.text.normalize_levels)
+            marker_depths=prof.marker_depths(), normalize=prof.text.normalize_levels,
+            no_marker_openers=prof.text.no_marker_openers)
         changes.extend(fold_changes)
     if polish == "llm":
         from .transform.llm_polish import polish_document

@@ -223,3 +223,56 @@ def test_default_profile_still_bolds_whole_level_sentences(tmp_path):
     DocxRenderer(profile).save(doc, out)
     para = [p for p in DocxDocument(str(out)).paragraphs if "본문 문장" in p.text][0]
     assert all(r.bold for r in para.runs)  # 사내 규격: □ 문장은 굵은체
+
+
+def _paras(doc, profile, tmp_path, name):
+    from doc2report.render.docx_writer import DocxRenderer
+    from doc2report.transform.structure import fold_headings_into_levels
+
+    doc, _ = fold_headings_into_levels(doc, profile.text.leading_markers, keep=profile.text.keep_leading_markers,
+                                       marker_depths=profile.marker_depths(),
+                                       no_marker_openers=profile.text.no_marker_openers)
+    out = tmp_path / name
+    DocxRenderer(profile).save(doc, out)
+    return [p for p in DocxDocument(str(out)).paragraphs if p.text]
+
+
+@pytest.mark.parametrize("profile_name", ["default", "confluence"])
+@pytest.mark.parametrize("keep", [True, False])
+def test_bracket_lines_get_no_profile_marker(tmp_path, profile_name, keep):
+    """【…】처럼 꺾쇠로 시작하는 줄 앞에 □가 붙던 문제(2026-09-29 사용자) — 모든 문서 공통."""
+    from doc2report.ir import Document, Heading, Paragraph, Run
+
+    profile = load_profile(profile_name)
+    profile = profile.model_copy(update={"text": profile.text.model_copy(update={"keep_leading_markers": keep})})
+    doc = Document(blocks=[Heading(level=2, runs=[Run("추진 배경")]),
+                           Paragraph(runs=[Run("【사업현황】")]),
+                           Paragraph(runs=[Run("[참고] 내용")]),
+                           Paragraph(runs=[Run("일반 문장")])])
+    texts = [p.text for p in _paras(doc, profile, tmp_path, "br.docx")]
+    assert "【사업현황】" in texts and "[참고] 내용" in texts  # 말머리·탭 없이 그대로
+    assert any(t.endswith("\t일반 문장") for t in texts)  # 일반 문장은 프로파일 말머리를 받음
+
+
+def test_note_mark_is_indented_04cm_deeper_than_line_above(tmp_path):
+    from doc2report.ir import Document, ListItem, Paragraph, Run
+    from doc2report.units import emu_to_mm
+
+    profile = load_profile("confluence")
+    doc = Document(blocks=[ListItem(depth=1, runs=[Run("윗줄 항목")], marker="-"),
+                           Paragraph(runs=[Run("※ 참고 1")]),
+                           ListItem(depth=1, runs=[Run("참고 2")], marker="※"),
+                           ListItem(depth=0, runs=[Run("다른 항목")], marker="1.")])
+    from doc2report.render.docx_writer import DocxRenderer
+    out = tmp_path / "n2.docx"
+    DocxRenderer(profile).save(doc, out)
+    paras = {p.text: p for p in DocxDocument(str(out)).paragraphs if p.text}
+
+    def first_line_mm(p):
+        fmt = p.paragraph_format
+        return emu_to_mm(int(fmt.left_indent or 0) + int(fmt.first_line_indent or 0))
+
+    above = first_line_mm(paras["-\t윗줄 항목"])
+    assert first_line_mm(paras["※ 참고 1"]) == pytest.approx(above + 4, abs=0.1)
+    assert first_line_mm(paras["※\t참고 2"]) == pytest.approx(above + 4, abs=0.1)  # 연속 ※는 같은 들여쓰기
+    assert first_line_mm(paras["1.\t다른 항목"]) == pytest.approx(0, abs=0.1)

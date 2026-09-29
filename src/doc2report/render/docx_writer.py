@@ -63,6 +63,7 @@ class DocxRenderer:
         self._figure_seq = 0
         self._counters: dict[int, int] = {}
         self._previous: Block | None = None  # 바로 앞에 무엇이 왔는지 (표 뒤 간격 판단용)
+        self._base_indent = 0  # 마지막 (※가 아닌) 문단의 왼쪽 들여쓰기 — ※ 문단은 이보다 더 들여쓴다
 
     # ── 진입점 ──────────────────────────────────────────────────────────
 
@@ -135,8 +136,15 @@ class DocxRenderer:
         if isinstance(block, Heading):
             self._after_table_gap(self._heading(block, container), container)
         elif isinstance(block, Paragraph):
-            spec = self._noted(self.profile.font("body"), plain(block.runs).lstrip())
-            self._after_table_gap(self._paragraph(block.runs, spec, container), container)
+            text = plain(block.runs).lstrip()
+            spec = self._noted(self.profile.font("body"), text)
+            paragraph = self._paragraph(block.runs, spec, container)
+            if container is None:
+                if self._is_note(text):
+                    paragraph.paragraph_format.left_indent = Emu(self._note_indent())
+                else:
+                    self._base_indent = 0
+            self._after_table_gap(paragraph, container)
         elif isinstance(block, ListItem):
             self._list_item(block, container, next_block)
         elif isinstance(block, Table):
@@ -158,6 +166,7 @@ class DocxRenderer:
 
     def _heading(self, block: Heading, container=None) -> None:
         self._counters.clear()  # 제목이 나오면 항목 번호를 다시 1부터
+        self._base_indent = 0
         key = f"heading{block.level}"
         if not self.profile.has_font(key):
             for level in range(block.level - 1, 0, -1):
@@ -194,7 +203,15 @@ class DocxRenderer:
 
         paragraph = self._new_paragraph(container)
         oxml.apply_paragraph_format(paragraph, spec, indent=False)
-        oxml.set_list_indent(paragraph, level.indent, level.hanging)
+        indent = level.indent
+        note = container is None and self._is_note(block.marker or plain(block.runs).lstrip())
+        if note:
+            indent = self._note_indent()
+        elif container is None:
+            self._base_indent = indent
+        # 말머리를 일부러 뺀 항목(꺾쇠 표기)은 내어쓰기 없이 첫 줄과 나머지 줄을 맞춘다.
+        hanging = 0 if block.marker == "" else level.hanging
+        oxml.set_list_indent(paragraph, indent, hanging)
 
         space = self._item_spacing(block, level, next_block)
         if space is not None:
@@ -207,6 +224,14 @@ class DocxRenderer:
             run = paragraph.add_run(marker + "\t")
             oxml.apply_run_format(run, spec)
         self._runs(paragraph, block.runs, spec)
+
+    def _is_note(self, text: str) -> bool:
+        rules = self.profile.text
+        return bool(rules.note_indent and any(text.startswith(m) for m in rules.note_marks))
+
+    def _note_indent(self) -> int:
+        """※ 참고사항: 바로 윗줄 문단의 들여쓰기 + text.note_indent (2026-09-29 사용자: +0.4cm)."""
+        return self._base_indent + (self.profile.text.note_indent or 0)
 
     def _noted(self, spec: FontSpec, text: str) -> FontSpec:
         """※ 같은 참고사항 표시로 시작하면 본문보다 text.note_size_delta만큼 작게."""
@@ -221,7 +246,7 @@ class DocxRenderer:
                     else level.marker)
         if block.marker is not None:
             # 원문 말머리를 그대로 쓴다. 번호 단계면 번호는 세어 둬야 다음 자동 번호가 맞는다.
-            if template and "{" in template:
+            if template and "{" in template and block.marker:
                 self._next_number(block.depth)
             return block.marker
         if not template:
