@@ -184,6 +184,10 @@ class TableRules(_Base):
     char_scale_ladder: list[float] = Field(default_factory=list)  # 장평 후보 (1.0 = 100%)
     max_cell_lines: int = 0  # 한 셀이 이 줄 수를 넘으면 글자 크기를 낮춰 본다 (0=제한 없음)
     max_header_lines: int = 0  # 머리행이 이 줄 수를 넘으면 머리 문구를 축약한다 (0=축약 안 함)
+    max_font_spread: int | None = None
+    # 셀 하나만 유난히 작아지면(예: 표는 12pt인데 바쁜 셀만 9pt) 어색해 보인다.
+    # 표 전체 크기와 가장 작은 셀 크기의 차이가 이 값을 넘으면 표 전체를 그만큼
+    # 낮춘다(2026-09-29 사용자 요청 — "12pt·9pt는 불균형, 11pt·9pt가 낫다").
     note_markers: list[str] = Field(default_factory=list)  # 표 바로 아래 이 기호로 시작하면 주석
     note_marker: str | None = None  # 주석을 쓸 때 앞에 붙일 기호
     safety_margin: float = 0.0
@@ -198,7 +202,7 @@ class TableRules(_Base):
     row_height_relaxed: int | None = None  # 지면에 여유가 있을 때의 행 최소 높이
 
     @field_validator("border_width", "cell_margin_x", "cell_margin_y",
-                     "cell_margin_x_min", "space_after", mode="before")
+                     "cell_margin_x_min", "space_after", "max_font_spread", mode="before")
     @classmethod
     def _len(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
@@ -462,7 +466,7 @@ def _dump_level(level: NumberingLevel) -> dict:
 
 def _dump_tables(rules: TableRules) -> dict:
     data = rules.model_dump()
-    for key in ("border_width", "cell_margin_y", "space_after"):
+    for key in ("border_width", "cell_margin_y", "space_after", "max_font_spread"):
         data[key] = _pt(data[key])
     for key in ("cell_margin_x", "cell_margin_x_min", "row_height", "row_height_relaxed"):
         data[key] = _mm(data[key])

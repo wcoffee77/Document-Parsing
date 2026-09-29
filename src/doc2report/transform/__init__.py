@@ -178,4 +178,4 @@ def _rebuild(block: Paragraph | ListItem, runs: list[Run]) -> Block:
     if isinstance(block, ListItem):
         return ListItem(depth=block.depth, runs=runs, ordered=block.ordered,
                         number=block.number)
-    return Paragraph(runs=runs)
+    return Paragraph(runs=runs, align=block.align)

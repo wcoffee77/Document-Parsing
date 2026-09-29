@@ -43,6 +43,8 @@ class Heading:
 @dataclass
 class Paragraph:
     runs: list[Run] = field(default_factory=list)
+    align: str | None = None  # left | center | right — 원문에 명시된 정렬만 (예: Confluence의
+                              # style="text-align:..."). 없으면 프로파일 기본값을 따른다.
 
 
 @dataclass
@@ -88,6 +90,7 @@ class Table:
     rows: list[Row] = field(default_factory=list)
     header_rows: int = 1
     caption: str | None = None
+    caption_align: str | None = None  # 원문 문단의 정렬을 그대로 (없으면 프로파일 기본값)
     notes: list[list[Run]] = field(default_factory=list)  # 표 바로 아래 주석 (기호는 뗀 본문)
 
     @property

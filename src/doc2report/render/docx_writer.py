@@ -329,8 +329,10 @@ class DocxRenderer:
 
         self._table_seq += 1
         if block.caption:
-            self._paragraph([Run(f"<표 {self._table_seq}> {block.caption}")],
-                            self.profile.font("caption"), container)
+            spec = self.profile.font("caption")
+            if block.caption_align:
+                spec = spec.model_copy(update={"align": block.caption_align})
+            self._paragraph([Run(block.caption)], spec, container)
 
         cols = block.col_count
         rows = len(block.rows)

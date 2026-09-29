@@ -112,7 +112,7 @@ def _block(el) -> tuple[list[Block], list[str]]:
 
     if tag == "p":
         lines, images = _inline_lines(el)
-        return _paragraphs_from_lines(lines, images), []
+        return _paragraphs_from_lines(lines, images, align=_align_of(el)), []
 
     if tag in {"ul", "ol"}:
         return _list(el, depth=0, ordered=(tag == "ol")), []
@@ -256,10 +256,30 @@ def _cell_blocks(el) -> list[Block]:
     return _paragraphs_from_lines(lines, images)
 
 
-def _paragraphs_from_lines(lines: list[list[Run]], images: list[Image]) -> list[Block]:
-    blocks: list[Block] = [Paragraph(runs=line) for line in lines if any(r.text.strip() for r in line)]
+def _paragraphs_from_lines(lines: list[list[Run]], images: list[Image],
+                           align: str | None = None) -> list[Block]:
+    blocks: list[Block] = [Paragraph(runs=line, align=align)
+                           for line in lines if any(r.text.strip() for r in line)]
     blocks.extend(images)
     return blocks
+
+
+_ALIGN_RE = re.compile(r"text-align\s*:\s*(left|center|right)", re.I)
+
+
+def _align_of(el) -> str | None:
+    """Confluence 편집기의 정렬 버튼이 넣는 style="text-align: ..."(또는 옛
+    align="..." 속성)을 읽는다 — 이게 있으면 표 제목으로 옮겨도 원래 정렬을
+    유지할 수 있다(2026-09-29 사용자 요청)."""
+    style = el.get("style")
+    if style:
+        m = _ALIGN_RE.search(style)
+        if m:
+            return m.group(1).lower()
+    align = el.get("align")
+    if align and align.lower() in ("left", "center", "right"):
+        return align.lower()
+    return None
 
 
 def _int_attr(el, name: str, default: int) -> int:

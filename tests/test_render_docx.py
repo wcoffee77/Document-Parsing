@@ -29,6 +29,17 @@ def test_document_opens_and_has_content(built):
     assert len(docx.tables) == 1
 
 
+def test_header_row_is_shaded_with_profile_color(built):
+    """표 머리행 음영은 profiles의 tables.header_shading을 그대로 써야 한다
+    (2026-09-29 사용자 요청: R242,G242,B242 옅은 회색 = F2F2F2)."""
+    _, docx = built
+    profile = load_profile("default")
+    header_cell = docx.tables[0].rows[0].cells[0]
+    shd = header_cell._tc.tcPr.find(qn("w:shd"))
+    assert shd is not None
+    assert shd.get(qn("w:fill")).upper() == profile.tables.header_shading
+
+
 def test_bundled_template_exists_and_is_used_by_default():
     # python-docx가 내부에 갖고 있는 default.docx가 오프라인 설치·백신 격리 등으로
     # 사라져도(사내 PC에서 실제로 "Package not found" 로 겪음) 우리 사본이 쓰이는지.

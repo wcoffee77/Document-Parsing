@@ -119,16 +119,20 @@ def attach_table_captions(doc: Document) -> tuple[Document, list[Change]]:
     프로파일 말머리(-)가 또 붙는다 — 표 제목이지 항목이 아니므로 attach_table_notes와
     같은 이유로 접기 **전에** 빼 둔다(표 뒤 대신 표 앞이라는 점만 다르다).
     꺾쇠 자체는 원문 그대로 남긴다 — 뗄 건 그 앞에 붙던 "-" 뿐이다
-    (2026-09-29 사용자 요청: "꺾쇠는 원형 유지, 앞의 '-'만 제외").
+    (2026-09-29 사용자 요청: "꺾쇠는 원형 유지, 앞의 '-'만 제외"). 원문 문단에
+    정렬이 있었으면(`Paragraph.align`) 그것도 같이 옮긴다 — 없으면 렌더러가
+    프로파일의 caption 기본 정렬을 쓴다.
     """
     blocks: list[Block] = []
     changes: list[Change] = []
     for block in doc.blocks:
         if isinstance(block, Table) and blocks and isinstance(blocks[-1], Paragraph) and not block.caption:
-            text = plain(blocks[-1].runs).strip()
+            para = blocks[-1]
+            text = plain(para.runs).strip()
             if _is_bracket_caption(text):
                 blocks.pop()
                 block.caption = text
+                block.caption_align = para.align
                 changes.append(Change(text, text, "표 제목(말머리 제외)"))
         blocks.append(block)
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes

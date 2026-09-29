@@ -63,7 +63,32 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     _abbreviate_headers(table, profile, layout)
     _left_align_long_cells(table, profile, layout)
     _shrink_long_cells(table, profile, layout)
+    _balance_table_font(profile, layout)
     return layout
+
+
+def _balance_table_font(profile: Profile, layout: TableLayout) -> None:
+    """바쁜 셀 하나만 많이 줄면(예: 표는 12pt인데 그 셀만 9pt) 불균형해 보인다
+    (2026-09-29 사용자 지적: "12pt·9pt는 불균형, 11pt·9pt 정도가 낫다"). 표 전체
+    크기와 가장 작은 셀 크기의 차이가 `tables.max_font_spread`를 넘으면 표
+    전체를 그만큼 낮춘다 — 이미 맞는 폭에서 더 작게만 바꾸는 것이라 다시
+    맞춰 볼 필요 없이 그대로 적용 가능하다."""
+    spread = profile.tables.max_font_spread
+    if not spread or not layout.cell_font:
+        return
+    min_cell_size = min(size for size, _ in layout.cell_font.values())
+    if layout.font_size - min_cell_size <= spread:
+        return
+    ladder = profile.table_font_ladder()
+    candidates = [s for s in ladder if s <= min_cell_size + spread]
+    target = max(candidates) if candidates else min(ladder)
+    if target < layout.font_size:
+        old = layout.font_size
+        layout.font_size = target
+        layout.notes.append(
+            f"셀별 글자 크기 차이를 {fmt_pt(spread)} 이내로 맞추려 표 전체 크기 "
+            f"{fmt_pt(old)} → {fmt_pt(target)}로 낮춤"
+        )
 
 
 def _shrink_long_cells(table: Table, profile: Profile, layout: TableLayout) -> None:

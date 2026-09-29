@@ -99,21 +99,33 @@ def test_cell_with_many_lines_is_left_aligned(profile):
 def test_cell_with_many_short_lines_is_shrunk_without_affecting_others(profile):
     """<br>/여러 문단으로 줄이 많은 셀은 '가장 긴 한 줄'만 보는 _max_cell_lines에는
     안 걸린다(각 줄이 짧아서) — 그래서 표 전체 크기가 안 줄었다(2026-09-29
-    사용자 보고). 그 셀만 따로 줄이고 다른 셀·표 전체 크기는 그대로 둔다."""
+    사용자 보고). 그 셀만 따로 줄인다(다른 셀은 안 건드림) — 단, 표 전체와
+    그 셀의 차이가 max_font_spread(2pt)를 넘으면 표 전체를 그만큼만 낮춘다."""
     many_lines = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄")]) for i in range(6)])
     one_line = cell("짧은 값")
     table = Table(rows=[Row(cells=[cell("항목", header=True), cell("설명", header=True)]),
                         Row(cells=[one_line, many_lines])],
                   header_rows=1)
-    base_layout = fit_table(Table(rows=[Row(cells=[cell("항목", header=True), cell("설명", header=True)]),
-                                        Row(cells=[one_line, cell("짧은 값2")])],
-                                  header_rows=1),
-                            profile, profile.page.usable_width)
     layout = fit_table(table, profile, profile.page.usable_width)
-    assert layout.font_size == base_layout.font_size  # 표 전체 크기는 그대로
     assert (1, 0) not in layout.cell_font  # 짧은 셀은 안 건드림
     size, scale = layout.cell_font[(1, 1)]
     assert size < layout.font_size or scale < layout.char_scale
+    assert layout.font_size - size <= profile.tables.max_font_spread
+
+
+def test_table_font_is_lowered_to_keep_spread_within_2pt(profile):
+    """표 크기 12pt, 바쁜 셀만 9pt면 차이가 3pt라 불균형해 보인다는 사용자 지적 —
+    표 전체를 11pt로 낮춰 9pt와의 차이를 2pt로 좁힌다."""
+    many_lines = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄")]) for i in range(8)])
+    table = Table(rows=[Row(cells=[cell("항목", header=True), cell("설명", header=True)]),
+                        Row(cells=[cell("A"), many_lines])],
+                  header_rows=1)
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert (1, 1) in layout.cell_font
+    size, _ = layout.cell_font[(1, 1)]
+    assert size == min(profile.table_font_ladder())  # 바닥까지 내려간 경우
+    assert layout.font_size - size == profile.tables.max_font_spread
+    assert any("표 전체 크기" in note for note in layout.notes)
 
 
 def test_cell_align_does_not_override_explicit_alignment(profile):

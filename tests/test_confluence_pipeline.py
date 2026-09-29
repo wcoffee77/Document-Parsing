@@ -81,3 +81,33 @@ def test_panel_code_and_nested_list_all_made_it_through(docx):
     assert any("SELECT idx_name" in t for t in texts)
     assert any(t.startswith("□\t") and "2차 성능 시험" in t for t in texts)
     assert any(t.startswith("-\t") and "10월 중 실시" in t for t in texts)
+
+
+def test_bracket_table_caption_keeps_brackets_alignment_and_drops_prefix(tmp_path, profile):
+    """표 앞 "【사업현황】"(왼쪽 정렬로 작성)이 "<표 1> 사업현황"처럼 꺾쇠가
+    벗겨지거나 가운데 정렬로 강제되면 안 된다 — 꺾쇠·정렬 모두 원문 그대로,
+    앞에 붙던 "-"만 없어져야 한다(2026-09-29 사용자 요청)."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    from doc2report.transform.structure import attach_table_captions
+
+    xhtml = """
+    <p style="text-align: left;">【사업현황】</p>
+    <table><tbody><tr><td>A</td><td>1</td></tr></tbody></table>
+    """
+    parsed = parse_confluence_storage(xhtml, title="캡션 테스트")
+    doc = parsed.document
+    transformed = apply_text_rules(doc, profile)
+    doc, _ = attach_table_captions(transformed.document)
+    doc, _ = fold_headings_into_levels(doc)
+
+    layouts = plan_tables(doc, profile)
+    flow = plan_flow(doc, profile, layouts)
+    renderer = DocxRenderer(profile, layouts, flow)
+    out = tmp_path / "caption.docx"
+    renderer.save(doc, out)
+
+    document = DocxDocument(str(out))
+    caption = next(p for p in document.paragraphs if "사업현황" in p.text)
+    assert caption.text == "【사업현황】"
+    assert caption.alignment == WD_ALIGN_PARAGRAPH.LEFT
