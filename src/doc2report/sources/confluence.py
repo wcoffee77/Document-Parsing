@@ -125,15 +125,23 @@ MAX_LINK_DEPTH = 4      # 연결의 연결… 몇 단계까지
 
 
 class LinkedPages:
+    """follow_links: 본문 링크(다른 페이지, 또는 그 페이지의 책갈피)가 가리키는 내용도 링크가 든 문단
+    바로 뒤에 넣는다(2026-09-29 사용자: 책갈피=앵커로 다른 페이지 구간을 붙여 둔다). 참고용 링크까지
+    끌려 오므로 기본은 끔 — 켜면 책갈피 링크는 그 구간만, 책갈피 없는 링크는 페이지 전체."""
+
     def __init__(self, base_url: str, page_id: str, space: str | None, out_dir: Path):
         self.base_url = base_url
         self.root = (page_id, space, out_dir)
-        self.visited = {page_id}
+        self.visited = {page_id}   # 통째로 넣은 페이지
+        self.sections: set = set()  # 책갈피 구간만 넣은 (페이지, 책갈피)
         self.loaded = 0
+        self.follow_links = False
 
     def expand(self, blocks: list, notes: list[str], *, progress=None) -> list:
-        from ..parsers.confluence_storage import PageRef
+        from ..parsers.confluence_storage import PageRef, drop_page_refs
 
+        if not self.follow_links:
+            blocks = drop_page_refs(blocks, notes, kinds={"link"})
         if not _has_ref(blocks, PageRef):
             return blocks
         self.say = progress or (lambda message: None)
@@ -154,9 +162,10 @@ class LinkedPages:
                 out.append(block)
             elif isinstance(block, Table):
                 for row in block.rows:  # 표 칸 안에 페이지 통째로는 넣지 않는다 — 이름만 남김
-                    for cell in row.cells:
+                    for cell in row.cells:  # (본문 링크는 글자가 이미 칸에 있으니 그냥 뺀다)
                         cell.blocks = [Paragraph(runs=[Run(f"({b.describe()})")])
-                                       if isinstance(b, PageRef) else b for b in cell.blocks]
+                                       if isinstance(b, PageRef) and b.kind != "link" else b
+                                       for b in cell.blocks]
                         cell.blocks = drop_page_refs(cell.blocks, notes)
                 out.append(block)
             else:
@@ -181,27 +190,36 @@ class LinkedPages:
             page = self._find(client, ref.title, ref.space or space, notes)
         except Exception as exc:
             notes.append(f"{ref.describe()}을(를) 불러오지 못함: {exc}")
+            if ref.kind == "link":  # 링크 글자는 본문에 이미 있다
+                return []
             return [Paragraph(runs=[Run(f"({ref.describe()} — 불러오지 못함)")])]
-        return self._page_blocks(client, page, notes, depth, excerpt=ref.kind == "excerpt")
+        anchor = ref.anchor if ref.kind == "link" else None
+        return self._page_blocks(client, page, notes, depth, excerpt=ref.kind == "excerpt",
+                                 anchor=anchor)
 
     def _page_blocks(self, client, page: dict, notes: list[str], depth: int, *,
-                     excerpt: bool = False, heading_level: int | None = None) -> list:
+                     excerpt: bool = False, heading_level: int | None = None,
+                     anchor: str | None = None) -> list:
         from ..ir import Heading, Run, resolve_image_paths
         from ..parsers.confluence_storage import parse_confluence_storage
 
         pid, title = str(page.get("id")), page.get("title") or ""
-        if pid in self.visited:
-            notes.append(f"페이지 '{title}'는 이미 넣었으므로 다시 넣지 않음(순환 연결 방지)")
+        label = f"'{title}'" + (f"의 책갈피 '{anchor}'" if anchor else "")
+        if pid in self.visited or (pid, anchor) in self.sections:
+            notes.append(f"{label}은(는) 이미 넣었으므로 다시 넣지 않음(순환 연결 방지)")
             return []
         if self.loaded >= MAX_LINKED_PAGES:
-            notes.append(f"연결 페이지가 {MAX_LINKED_PAGES}개를 넘어 '{title}'부터는 불러오지 않음")
+            notes.append(f"연결 페이지가 {MAX_LINKED_PAGES}개를 넘어 {label}부터는 불러오지 않음")
             return []
-        self.visited.add(pid)
+        if anchor:
+            self.sections.add((pid, anchor))  # 같은 페이지의 다른 책갈피는 따로 넣을 수 있다
+        else:
+            self.visited.add(pid)
         self.loaded += 1
         self.say(f"연결 페이지 불러오는 중 ({self.loaded}): {title}")
         storage = ((page.get("body") or {}).get("storage") or {}).get("value") or ""
         parsed = parse_confluence_storage(storage, source=title, title=title, keep_refs=True,
-                                          excerpt_only=excerpt)
+                                          excerpt_only=excerpt, anchor=anchor)
         notes.extend(parsed.notes)
         folder = self.root[2] / pid
         folder.mkdir(parents=True, exist_ok=True)
@@ -209,8 +227,12 @@ class LinkedPages:
         blocks = parsed.document.blocks
         resolve_image_paths(blocks, folder)
         space = (page.get("space") or {}).get("key") or self.root[1]
+        if not self.follow_links:
+            from ..parsers.confluence_storage import drop_page_refs
+
+            blocks = drop_page_refs(blocks, notes, kinds={"link"})
         blocks = self._expand(client, blocks, notes, (pid, space, folder), depth + 1)
-        notes.append(f"연결 페이지 '{title}'를 함께 불러옴 (id={pid})")
+        notes.append(f"연결 페이지 {label}를 함께 불러옴 (id={pid})")
         if heading_level:  # 하위 페이지는 제목을 절 제목으로
             return [Heading(level=heading_level, runs=[Run(title)])] + blocks
         return blocks

@@ -57,6 +57,8 @@ def convert(
     watch: bool = typer.Option(False, "--watch", help="입력·프로파일이 바뀌면 자동 재변환"),
     no_linked: bool = typer.Option(False, "--no-linked",
                                    help="Confluence 본문에 연결된 페이지(페이지 포함·하위 페이지·첨부 Word)를 불러오지 않음"),
+    follow_links: bool = typer.Option(False, "--follow-links",
+                                      help="Confluence 본문 링크(다른 페이지의 책갈피 포함)가 가리키는 내용도 불러옴"),
 ) -> None:
     out = output or Path(_default_output(source))
     profile = profile or auto_profile(source)
@@ -73,7 +75,8 @@ def convert(
         typer.echo(f"서식 저장: {save_profile}")
 
     def once() -> None:
-        result = run_convert(source, out, effective, polish=polish, date=date, linked=not no_linked)
+        result = run_convert(source, out, effective, polish=polish, date=date, linked=not no_linked,
+                             follow_links=follow_links)
         typer.echo(f"[완료] {out}  (표 {len(result.layouts)}개, 문구 수정 {len(result.changes)}건)")
         for note in result.notes:
             typer.echo(f"  · {note}")

@@ -91,6 +91,7 @@ class JobRunner:
             job.say(f"입력 읽는 중 ({index}/{len(sources)}): {name}")
             try:
                 doc, source_notes = load_document(source, linked=options.get("linked", True),
+                                                  follow_links=bool(options.get("follow_links")),
                                                   progress=job.say)
             except Exception as exc:
                 raise RuntimeError(f"{index}번 입력({name}) 읽기 실패: {exc}") from exc

@@ -187,3 +187,62 @@ def test_anchor_bookmark_and_status_do_not_leak_parameters():
     table = next(b for b in parsed.document.blocks if isinstance(b, Table))
     assert plain(table.rows[0].cells[0].blocks[0].runs) == "진행 지연"   # 예전엔 칸이 통째로 비었다
     assert parsed.notes == []   # 책갈피는 "지원하지 않는 매크로"가 아니다
+
+
+# ── 본문 링크·책갈피(앵커) 따라가기 (follow_links) ─────────────────────────
+
+LINK_MAIN = """
+<h2>1. 추진 배경</h2>
+<p>세부는 <ac:link ac:anchor="b2"><ri:page ri:content-title="세부 계획"/>
+<ac:plain-text-link-body><![CDATA[여기]]></ac:plain-text-link-body></ac:link> 참고</p>
+<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">예산</ac:parameter><ac:rich-text-body>
+<p><ac:link ac:anchor="예산 계획"><ri:page ri:content-title="세부 계획"/></ac:link></p>
+</ac:rich-text-body></ac:structured-macro>
+<p><ac:link ac:anchor="top"><ac:plain-text-link-body><![CDATA[맨 위로]]></ac:plain-text-link-body></ac:link></p>
+<p><ac:link><ri:page ri:content-title="요약 페이지" ri:space-key="HR"/></ac:link></p>
+"""
+
+LINK_TARGET = """
+<h2>개요</h2><p>개요 문장</p>
+<h2><ac:structured-macro ac:name="anchor"><ac:parameter ac:name="">b2</ac:parameter></ac:structured-macro>2. 인력 계획</h2>
+<p>인력 문장</p><h3>2-1 세부</h3><p>세부 문장</p>
+<h2>예산 계획</h2><p>예산 문장</p>
+<h2>기타</h2><p>기타 문장</p>
+"""
+
+
+@pytest.fixture
+def linked_site(confluence, monkeypatch):
+    monkeypatch.setitem(PAGES, "본문", {**PAGES["본문"], "body": {"storage": {"value": LINK_MAIN}}})
+    monkeypatch.setitem(PAGES, "세부 계획", {**PAGES["세부 계획"], "body": {"storage": {"value": LINK_TARGET}}})
+    return confluence
+
+
+def test_bookmark_links_bring_only_that_section(linked_site):
+    doc, notes = load_document("https://wiki.company.com/pages/100", follow_links=True)
+    texts = _texts(doc.blocks)
+    # 앵커 매크로 책갈피: 그 제목(h2)부터 다음 h2 전까지 — 하위 h3는 포함
+    start = texts.index("2. 인력 계획")
+    assert texts.index("세부는 여기 참고") < start
+    assert texts[start:start + 4] == ["2. 인력 계획", "인력 문장", "2-1 세부", "세부 문장"]
+    # 제목 글자로 된 책갈피(Confluence 제목 앵커) + 펼치기 안의 링크
+    assert texts.index("예산") < texts.index("예산 계획") < texts.index("예산 문장")
+    assert "개요 문장" not in texts and "기타 문장" not in texts
+    # 책갈피 없는 링크는 페이지 전체
+    assert "발췌 밖 문장" in texts and "발췌 안 문장" in texts
+    assert any("'세부 계획'의 책갈피 'b2'" in n for n in notes)
+
+
+def test_links_are_not_followed_by_default(linked_site):
+    doc, notes = load_document("https://wiki.company.com/pages/100")
+    texts = _texts(doc.blocks)
+    assert "인력 문장" not in texts and "발췌 밖 문장" not in texts
+    assert "세부는 여기 참고" in texts and "요약 페이지" in texts   # 링크 글자는 그대로
+    assert not any("링크 페이지" in n for n in notes)               # 링크마다 노트를 남기지 않음
+    assert not any("/rest/api/content?" in s for s in linked_site)
+
+
+def test_missing_bookmark_falls_back_to_whole_page():
+    parsed = parse_confluence_storage(LINK_TARGET, title="세부 계획", anchor="없는책갈피")
+    assert "기타 문장" in _texts(parsed.document.blocks)
+    assert any("책갈피 '없는책갈피'를 찾지 못해" in n for n in parsed.notes)

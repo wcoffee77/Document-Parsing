@@ -121,6 +121,7 @@ legend { font-weight: bold; padding: 0 6px; }
 .check .hint { flex-basis: 100%; padding-left: 20px; margin-top: -2px; }
 .check.strong { font-weight: bold; margin-top: 6px; }
 .check.disabled { opacity: .5; }
+.check.sub { margin-left: 20px; }
 .inline { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .inline select { width: auto; }
 .explain { margin: 0 0 6px; }
