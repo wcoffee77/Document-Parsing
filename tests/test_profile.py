@@ -96,21 +96,26 @@ def test_profile_init_round_trips(tmp_path):
 
 
 def test_confluence_profile_extends_default_with_dense_sizes():
-    """Confluence·내용 많은 문서: 제목 16pt, 본문 12pt, 표 11~9pt, 문장 다듬기 없음
-    (2026-09-29 사용자 규칙). 나머지(말머리 체계 등)는 default에서 물려받는다."""
+    """Confluence 변환 서식(2026-09-29 사용자 두 번째 확정): 제목 18pt, 본문 12pt·장평 95%·
+    줄간격 1.0·단락 앞뒤 0pt, 표 10pt·장평 80% 고정, 문장 다듬기 없음."""
     conf, default = load_profile("confluence"), load_profile("default")
-    assert emu_to_pt(conf.font("title").size) == 16
-    assert emu_to_pt(conf.font("body").size) == 12
-    assert emu_to_pt(conf.font("table").size) == 11
-    assert [emu_to_pt(s) for s in conf.table_font_ladder()] == [11, 10, 9]
+    assert emu_to_pt(conf.font("title").size) == 18
+    assert conf.font("title").char_scale == 1.0  # 본문 장평을 물려받지 않음
+    body = conf.font("body")
+    assert (emu_to_pt(body.size), body.char_scale, body.line_spacing) == (12, 0.95, 1.0)
+    assert body.space_before == body.space_after == 0
+    assert conf.table_steps() == [(10 * 12700, 0.8)]  # 10pt·80% 하나 — 더 줄이지 않는다
     assert conf.text.polish == "none"
     assert conf.text.keep_leading_markers
-    # 덮어쓰지 않은 값은 부모 그대로 — 단위가 두 번 변환되지도 않는다
-    # 덮어쓰지 않은 값(머리글 여백·말머리 체계·표 음영)은 부모 그대로 — 단위가 두 번 변환되지도 않는다.
-    # 글꼴·여백·줄간격은 2026-09-29 "Confluence 변환" 서식으로 바뀜(맑은 고딕, 2.0/1.5cm, 1.25배)
+    # 덮어쓰지 않은 값(머리글 여백·표 음영·말머리 기호·들여쓰기)은 부모 그대로 — 단위가 두 번 변환되지도 않는다.
     assert conf.page.margin.header == default.page.margin.header
     assert conf.tables.header_shading == default.tables.header_shading
-    assert conf.numbering == default.numbering
+    assert [(l.marker, l.indent, l.aliases) for l in conf.numbering] == \
+        [(l.marker, l.indent, l.aliases) for l in default.numbering]
+    # numbering_all: 모든 단계의 단락 앞뒤·단계 전환 간격 0
+    assert all(l.space_before == l.space_after == l.space_after_level_change == 0
+               for l in conf.numbering)
+    assert any(l.space_before for l in default.numbering)  # default는 그대로
 
 
 def test_extends_cycle_is_reported(tmp_path):

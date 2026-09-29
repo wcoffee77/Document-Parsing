@@ -308,6 +308,8 @@ class Choices(_Base):
     line_spacing: list[str] = Field(default_factory=list)
     title_size: list[str] = Field(default_factory=list)
     table_size: list[str] = Field(default_factory=list)
+    body_scale: list[str] = Field(default_factory=list)   # 본문 장평 선택지 ("95%")
+    table_scale: list[str] = Field(default_factory=list)  # 표 장평 선택지
 
 
 class Profile(_Base):
@@ -380,6 +382,8 @@ class Profile(_Base):
         title_size: str | None = None,
         table_size: str | None = None,
         margin: str | None = None,
+        body_scale: str | float | None = None,
+        table_scale: str | float | None = None,
     ) -> Profile:
         """변환 직전에 사용자가 고른 값을 프로파일 위에 덮어쓴다.
 
@@ -404,13 +408,18 @@ class Profile(_Base):
             fonts["title"] = fonts["title"].model_copy(
                 update={"size": parse_length(title_size, default_unit="pt")})
 
+        if body_scale:  # 본문 장평 — 말머리 항목·일반 문단이 body 서식을 쓴다
+            fonts["body"] = fonts["body"].model_copy(update={"char_scale": parse_ratio(body_scale)})
+
         tables = self.tables
+        if table_scale:  # 표 장평은 한 값으로 고정(더 좁히지 않음)
+            tables = tables.model_copy(update={"char_scale_ladder": [parse_ratio(table_scale)]})
         if table_size:
             value = parse_length(table_size, default_unit="pt")
             for key in ("table", "table_header"):
                 if key in fonts:
                     fonts[key] = fonts[key].model_copy(update={"size": value})
-            ladder = [step for step in self.tables.font_ladder if step <= value]
+            ladder = [step for step in self.tables.font_ladder if step < value]
             tables = tables.model_copy(update={"font_ladder": [value] + ladder})
 
         page = self.page
@@ -445,7 +454,7 @@ class Profile(_Base):
 def load_profile(name_or_path: str | Path) -> Profile:
     """이름('default') 또는 경로('./my.yaml') 로 프로파일을 읽는다."""
     path = _profile_file(name_or_path)
-    data = _read_profile_data(path, seen=set())
+    data = _apply_numbering_all(_read_profile_data(path, seen=set()))
     profile = Profile.model_validate(data)
     if profile.template:
         tpl = Path(profile.template)
@@ -477,6 +486,16 @@ def _read_profile_data(path: Path, seen: set[Path]) -> dict:
         return data
     parent_path = _profile_file(parent if Path(parent).suffix == "" else path.parent / parent)
     return _deep_merge(_read_profile_data(parent_path, seen), data)
+
+
+def _apply_numbering_all(data: dict) -> dict:
+    """`numbering_all:`에 적은 값을 모든 단계에 덮어쓴다 — numbering 목록은 통째로 덮어써지므로
+    (단계가 꼬이지 않게) 상속한 프로파일이 "간격만 전부 0"처럼 일부만 바꾸려면 이게 필요하다.
+    합친 뒤·검증 전의 dict에서 한다(겪은 함정: 검증된 값을 다시 검증하면 단위가 두 번 변환됨)."""
+    common = data.pop("numbering_all", None)
+    if common:
+        data["numbering"] = [{**level, **common} for level in data.get("numbering") or []]
+    return data
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

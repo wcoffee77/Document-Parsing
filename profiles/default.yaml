@@ -233,4 +233,6 @@ choices:
   size: [14pt, 13pt, 12pt, 11pt]
   line_spacing: ["1.4", "1.45", "1.5", "1.6"]
   title_size: [20pt, 18pt, 16pt]
+  body_scale: ["100%", "95%", "90%"]
+  table_scale: ["100%", "95%", "90%", "80%"]
   table_size: [12pt, 11pt, 10pt, 9pt]

@@ -110,12 +110,12 @@ function applyRules(name) {
   $("#tbl-align").value = p.tables.align;
 }
 
-const COMBO_KEYS = ["font", "title_size", "size", "line_spacing", "table_size"];
+const COMBO_KEYS = ["font", "title_size", "size", "line_spacing", "body_scale", "table_size", "table_scale"];
 const MARGIN_KEYS = ["margin_top", "margin_bottom", "margin_left", "margin_right"];
 const CUSTOM_KEYS = COMBO_KEYS.concat(MARGIN_KEYS);
 const FREE = "__free__";
 const FREE_HINT = { font: "예: 나눔고딕", title_size: "예: 18pt", size: "예: 13pt",
-  line_spacing: "예: 1.3", table_size: "예: 10pt" };
+  line_spacing: "예: 1.3", table_size: "예: 10pt", body_scale: "예: 95%", table_scale: "예: 85%" };
 
 // 선택 목록 + 맨 끝 "직접 입력…"(고르면 옆에 입력칸이 나온다). datalist는 값이 들어 있으면
 // 그 값으로 걸러져 목록이 안 펼쳐졌다(2026-09-29 사용자) — 그래서 select로 바꿨다.
@@ -173,7 +173,7 @@ function syncPreset() {
   const custom = preset === "custom";
   $("#custom-panel").classList.toggle("hidden", !custom);
   const p = state.profiles[custom ? $("#cu-base").value : preset];
-  $("#preset-summary").textContent = custom ? "출발 서식에서 바꾸고 싶은 값만 고치세요 (단위: pt, 배, cm)"
+  $("#preset-summary").textContent = custom ? "출발 서식에서 바꾸고 싶은 값만 고치세요 (단위: pt, 배, 장평 %, 여백 cm)"
     : (p ? `${p.summary}` : "");
   const hasConfluence = state.inputs.some((i) => i.type === "confluence");
   const suggest = hasConfluence && preset === "default" && state.profiles.confluence;

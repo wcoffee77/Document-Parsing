@@ -133,5 +133,5 @@ def test_confluence_url_gets_confluence_profile_and_keeps_text(tmp_path, monkeyp
     assert "1.\t추진 배경" in texts
     assert any(t.endswith("응답 지연이 지속적으로 발생하였습니다.") for t in texts)
     assert "ㆍ\t입사예정시기는 10월입니다" in texts
-    assert emu_to_pt(texts["보고"].runs[0].font.size) == 16
+    assert emu_to_pt(texts["보고"].runs[0].font.size) == 18  # Confluence 변환 서식 제목
     assert emu_to_pt(texts["1.\t추진 배경"].runs[0].font.size) == 12

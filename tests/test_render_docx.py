@@ -295,3 +295,27 @@ def test_auto_markers_off_keeps_unmarked_text_unmarked_but_indented(tmp_path):
 
     default = [p.text for p in _paras(doc, load_profile("default"), tmp_path, "b.docx")]
     assert any(t.endswith("\t말머리 없는 문장") for t in default)  # 새로 만드는 모드는 그대로 붙임
+
+
+def test_confluence_table_stays_10pt_80_percent_even_when_crowded(tmp_path):
+    """표는 10pt·장평 80% 고정 — 글씨가 많아도 9pt로 줄이지 않는다(2026-09-29 사용자)."""
+    from doc2report.ir import Cell, Document, Paragraph, Row, Run, Table
+    from doc2report.render.docx_writer import DocxRenderer
+
+    profile = load_profile("confluence")
+    many = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄 내용이 꽤 길게 들어갑니다")]) for i in range(8)])
+    table = Table(rows=[Row(cells=[Cell(blocks=[Paragraph(runs=[Run("구분")])], is_header=True),
+                                   Cell(blocks=[Paragraph(runs=[Run("내용")])], is_header=True)]),
+                        Row(cells=[Cell(blocks=[Paragraph(runs=[Run("가")])]), many])], header_rows=1)
+    out = tmp_path / "t.docx"
+    # 본문 문단을 표 앞에 둔다 — 표 바로 뒤 문단은 "표 뒤 간격"(tables.space_after)을 받는다
+    DocxRenderer(profile).save(Document(blocks=[Paragraph(runs=[Run("본문 문장")]), table]), out)
+    docx = DocxDocument(str(out))
+    for row in docx.tables[0].rows:
+        for cell in row.cells:
+            for run in cell.paragraphs[0].runs:
+                assert emu_to_pt(run.font.size) == 10
+                assert run._element.find(qn("w:rPr")).find(qn("w:w")).get(qn("w:val")) == "80"
+    body = [p for p in docx.paragraphs if p.text == "본문 문장"][0]
+    assert body.runs[0]._element.find(qn("w:rPr")).find(qn("w:w")).get(qn("w:val")) == "95"
+    assert (body.paragraph_format.space_before or 0) == 0 and (body.paragraph_format.space_after or 0) == 0

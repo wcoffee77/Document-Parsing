@@ -25,14 +25,23 @@ def test_presets_are_profiles_with_preset_order():
 
 
 def test_confluence_preset_matches_user_spec():
-    """2026-09-29 사용자: 위·아래 2.0cm, 좌·우 1.5cm, 제목 16pt, 본문 12pt, 맑은 고딕, 줄간격 1.25."""
+    """2026-09-29 사용자(두 번째 확정): 여백 모두 2cm, 맑은 고딕, 제목 18pt, 본문 12pt·장평 95%·
+    줄간격 1.0, 표 10pt·장평 80%."""
     fmt = opts.profile_info("confluence")["format"]
     assert (fmt["margin_top"], fmt["margin_bottom"], fmt["margin_left"], fmt["margin_right"]) == \
-        ("2", "2", "1.5", "1.5")
+        ("2", "2", "2", "2")
     assert (fmt["title_size"], fmt["size"], fmt["font"], fmt["line_spacing"]) == \
-        ("16pt", "12pt", "맑은 고딕", "1.25")
+        ("18pt", "12pt", "맑은 고딕", "1.0")
+    assert (fmt["body_scale"], fmt["table_size"], fmt["table_scale"]) == ("95%", "10pt", "80%")
     prof = opts.load_profile("confluence")
     assert prof.font("table").east_asia == "맑은 고딕"  # 제목·표도 body 글꼴을 물려받음
+
+
+def test_custom_preset_sets_body_and_table_char_scale():
+    prof = opts.format_profile({"preset": "custom", "custom": {
+        "base": "default", "body_scale": "90", "table_scale": "85%"}})
+    assert prof.font("body").char_scale == pytest.approx(0.9)  # % 없이 적어도 90%
+    assert [scale for _, scale in prof.table_steps()] == [pytest.approx(0.85)] * len(prof.table_steps())
 
 
 def test_custom_preset_overrides_only_changed_values():

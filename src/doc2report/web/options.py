@@ -47,7 +47,7 @@ POLISH_TOGGLES = [
 TABLE_TOGGLES: list = []
 _TOGGLES = {key: fields for key, _, _, fields in MARKER_TOGGLES + POLISH_TOGGLES + TABLE_TOGGLES}
 TABLE_CHOICES = {"align": [("right", "오른쪽"), ("center", "가운데"), ("left", "왼쪽")]}
-FORMAT_KEYS = ("font", "size", "line_spacing", "title_size", "table_size")
+FORMAT_KEYS = ("font", "size", "line_spacing", "title_size", "table_size", "body_scale", "table_scale")
 MARGIN_SIDES = ("top", "bottom", "left", "right")
 _HEAVY_PRESET = "confluence"  # 내용이 많을 때 권하는 서식
 
@@ -79,10 +79,10 @@ def profile_info(name: str) -> dict:
         "label": prof.label or name,
         "preset_order": prof.preset_order,
         "description": prof.description or name,
-        "summary": (f"여백 위·아래 {_pair(fmt['margin_top'], fmt['margin_bottom'])}cm, "
-                    f"좌·우 {_pair(fmt['margin_left'], fmt['margin_right'])}cm · {fmt['font']} · "
-                    f"제목 {fmt['title_size']}·본문 {fmt['size']}·표 {fmt['table_size']}부터 · "
-                    f"줄간격 {fmt['line_spacing']}"),
+        "summary": (f"{_margins(fmt)} · {fmt['font']} · "
+                    f"제목 {fmt['title_size']} · 본문 {fmt['size']}{_scale(fmt['body_scale'])}"
+                    f"·줄간격 {fmt['line_spacing']} · 표 {fmt['table_size']}{_scale(fmt['table_scale'])}"
+                    + ("" if len(prof.table_font_ladder()) == 1 else "부터")),
         "text": {key: all(bool(getattr(text, f)) for f in fields) for key, fields in _TOGGLES.items()},
         "polish": "none" if text.polish == "none" else "rules",
         "llm": text.polish == "llm",
@@ -90,6 +90,26 @@ def profile_info(name: str) -> dict:
         "format": fmt,
         "choices": {k: [str(v) for v in values] for k, values in prof.choices.model_dump().items()},
     }
+
+
+def _ratio(value: float) -> str:
+    text = f"{value:g}"
+    return text if "." in text else text + ".0"  # 1 → "1.0" (선택지 표기와 맞춤)
+
+
+def _margins(fmt: dict) -> str:
+    t, b, l, r = (fmt[f"margin_{s}"] for s in MARGIN_SIDES)
+    if t == b == l == r:
+        return f"여백 {t}cm"
+    return f"여백 위·아래 {_pair(t, b)}cm, 좌·우 {_pair(l, r)}cm"
+
+
+def _scale(pct: str) -> str:
+    return "" if pct == "100%" else f"(장평 {pct})"
+
+
+def _pct(ratio: float) -> str:
+    return f"{round(ratio * 100)}%"
 
 
 def _pair(a: str, b: str) -> str:
@@ -102,9 +122,11 @@ def format_values(prof: Profile) -> dict:
     return {
         "font": body.east_asia or body.latin or "",
         "size": fmt_pt(body.size),
-        "line_spacing": f"{body.line_spacing:g}" if body.line_spacing else "",
+        "line_spacing": _ratio(body.line_spacing) if body.line_spacing else "",
         "title_size": fmt_pt(prof.font("title").size) if prof.has_font("title") else "",
         "table_size": fmt_pt(prof.table_font_ladder()[0]),
+        "body_scale": _pct(body.char_scale or 1.0),
+        "table_scale": _pct(prof.table_steps()[0][1]),
         **{f"margin_{side}": f"{emu_to_mm(getattr(margin, side)) / 10:g}"
            for side in MARGIN_SIDES},
     }
@@ -142,6 +164,10 @@ def format_profile(options: dict) -> Profile:
     changed = {k: str(v).strip() for k, v in custom.items()
                if k in current and str(v).strip() and str(v).strip() != current[k]}
     overrides = {k: v for k, v in changed.items() if k in FORMAT_KEYS}
+    for key in ("body_scale", "table_scale"):  # 장평 "95"처럼 %를 빼고 적어도 95%로
+        value = overrides.get(key, "")
+        if value and not value.endswith("%") and value.replace(".", "", 1).isdigit() and float(value) > 3:
+            overrides[key] = value + "%"
     if any(f"margin_{side}" in changed for side in MARGIN_SIDES):
         overrides["margin"] = ",".join(
             f"{changed.get(f'margin_{side}', current[f'margin_{side}'])}cm" for side in MARGIN_SIDES)
