@@ -72,8 +72,15 @@ doc2report convert https://회사.atlassian.net/wiki/spaces/TEAM/pages/12345 -o 
 ```
 
 Server/Data Center(사내 자체 호스팅)면 `CONFLUENCE_USERNAME`은 비우고
-개인 액세스 토큰(PAT)만 `CONFLUENCE_API_TOKEN`에 넣는다. 사내 PC에서 처음
-연결할 때 확인할 체크리스트와 흔한 오류 대응은
+개인 액세스 토큰(PAT)만 `CONFLUENCE_API_TOKEN`에 넣는다.
+
+사내 프록시가 자체 CA로 HTTPS를 중계해 "SSL 인증서 검증 실패"가 나면
+`CONFLUENCE_CA_BUNDLE`(또는 `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`)에 사내 루트
+인증서(`.crt`/`.pem`) 경로를 넣는다. 그래도 안 되거나 403으로 막히면 Windows에서
+자동으로 PowerShell(`Invoke-WebRequest`)로 재시도한다 — `DOC2REPORT_CONFLUENCE_
+TRANSPORT=powershell`로 처음부터 강제할 수도 있다.
+
+사내 PC에서 처음 연결할 때 확인할 체크리스트와 흔한 오류 대응은
 [docs/confluence-first-run.md](docs/confluence-first-run.md)에 정리해 뒀다.
 
 ## 문구를 LLM으로 다듬기 (선택)

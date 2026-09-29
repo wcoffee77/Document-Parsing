@@ -22,13 +22,20 @@ CONFLUENCE_URL은 REST 엔드포인트 앞의 기본 주소여야 한다(`/rest/
 REST API 한 번으로는 못 푼다 — 페이지를 열어 실제 URL(또는 "..." 메뉴의 페이지 ID)을
 확인해서 넣어야 한다.
 
-사내망 우회(2026-09-29, 사내 PC 실측): 일부 사내망에서는 httpx 요청이 403으로
-막히는데 PowerShell의 Invoke-WebRequest는 통과한다(다른 에이전트가 직접 검증). 정확한
-원인은 모른다 — 인증서 신뢰 저장소 차이일 수도, 사내 보안 게이트웨이가 요청 형태(예:
-User-Agent)로 걸러내는 것일 수도 있다. 원인을 모르는 채로 httpx 쪽을 계속 추측해
-고치는 대신, **검증된 그 경로를 그대로 재현**한다: httpx가 403을 받으면(Windows에서만)
-Invoke-WebRequest로 한 번 더 시도하고, 성공하면 그 결과를 쓰며 --report에 남긴다.
-DOC2REPORT_CONFLUENCE_TRANSPORT=powershell 로 처음부터 이 경로를 강제할 수도 있다.
+사내망 SSL 인증서 문제(2026-09-29, 사내 PC 실측): 사내 프록시가 자체 발급한 인증서로
+HTTPS를 중계하면, 그 루트 인증서가 파이썬 기본 CA 번들(certifi)에는 없어서 httpx가
+"SSL 인증서 검증 실패"로 연결 자체를 못 하는 경우가 있다(사내 LLM이 직접 진단). 두 가지로
+대응한다:
+  1. CONFLUENCE_CA_BUNDLE(또는 REQUESTS_CA_BUNDLE, SSL_CERT_FILE) 환경변수로 사내
+     루트 인증서(.crt/.pem) 경로를 주면 그걸 신뢰 기준으로 쓴다. **httpx는 requests와
+     달리 REQUESTS_CA_BUNDLE을 자동으로 읽지 않아서**, 이 세 변수를 명시적으로 읽어
+     verify=에 넘긴다(`_ssl_verify`).
+  2. 인증서 파일을 아직 못 구했거나 그래도 안 될 때: httpx 연결이 실패하면(Windows
+     에서만) Windows 인증서 저장소를 그대로 쓰는 PowerShell의 Invoke-WebRequest로
+     한 번 더 시도한다(다른 에이전트가 직접 검증한 경로). 같은 대체 로직이 403 응답을
+     받았을 때도 동작한다(사내 보안 게이트웨이가 요청 형태로 걸러내는 경우 대응).
+     성공하면 --report에 남긴다. DOC2REPORT_CONFLUENCE_TRANSPORT=powershell 로
+     처음부터 이 경로를 강제할 수도 있다.
 """
 
 from __future__ import annotations
@@ -79,7 +86,7 @@ def load_confluence(url_or_id: str) -> LoadedSource:
         )
 
     notes: list[str] = []
-    with _client(base_url) as client:
+    with _client(base_url, notes) as client:
         page = _get_page(client, page_id, notes)
         storage = page.get("body", {}).get("storage", {}).get("value")
         if not storage:
@@ -130,8 +137,30 @@ def _auth_header() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}  # Server/Data Center: PAT
 
 
-def _client(base_url: str) -> httpx.Client:
-    return httpx.Client(base_url=base_url, headers=_auth_header(), timeout=_TIMEOUT, verify=True)
+def _client(base_url: str, notes: list[str]) -> httpx.Client:
+    return httpx.Client(base_url=base_url, headers=_auth_header(), timeout=_TIMEOUT,
+                        verify=_ssl_verify(notes))
+
+
+_CA_BUNDLE_ENV_VARS = ("CONFLUENCE_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
+
+
+def _ssl_verify(notes: list[str]) -> bool | str:
+    """사내 루트 인증서 경로가 있으면 그걸 신뢰 기준으로 쓴다.
+
+    httpx는 requests와 달리 REQUESTS_CA_BUNDLE을 자동으로 읽지 않으므로 명시적으로
+    확인한다. CONFLUENCE_CA_BUNDLE이 doc2report 전용 이름, 나머지 둘은 다른 사내
+    도구가 이미 쓰고 있을 만한 관례적 이름이라 같이 봐 준다.
+    """
+    for env_key in _CA_BUNDLE_ENV_VARS:
+        path = os.environ.get(env_key)
+        if not path:
+            continue
+        if Path(path).is_file():
+            notes.append(f"사내 CA 인증서 사용: {env_key}={path}")
+            return path
+        notes.append(f"{env_key}={path} 이지만 파일을 찾을 수 없어 무시함(기본 인증서로 시도)")
+    return True
 
 
 # ── 응답 래퍼 (httpx.Response 또는 PowerShell 결과, 둘 다 같은 인터페이스) ──
@@ -224,11 +253,24 @@ def _require(key: str) -> str:
 
 
 def _get(client: httpx.Client, path: str, notes: list[str], *, params: dict | None = None):
-    """httpx로 GET하되, 403을 받으면(또는 강제 설정이면) PowerShell로 다시 시도한다."""
+    """httpx로 GET하되, SSL/연결 실패나 403을 받으면(또는 강제 설정이면) PowerShell로
+    다시 시도한다. SSL 인증서 검증 실패는 응답 자체를 못 받고 예외로 터지므로 403과
+    따로 잡아야 한다."""
     if _forced_powershell():
         return _fetch_via_powershell(client, path, params, notes, forced=True)
 
-    resp = client.get(path, params=params)
+    try:
+        resp = client.get(path, params=params)
+    except httpx.TransportError as exc:
+        if _is_windows():
+            return _fetch_via_powershell(client, path, params, notes, forced=False,
+                                         httpx_error=exc)
+        raise RuntimeError(
+            f"Confluence 서버 연결 실패: {exc}\n"
+            "사내망 SSL 인증서 문제일 수 있습니다 — CONFLUENCE_CA_BUNDLE 환경변수로 "
+            "사내 루트 인증서(.crt/.pem) 경로를 지정해 보세요."
+        ) from exc
+
     if resp.status_code == 403 and _is_windows():
         return _fetch_via_powershell(client, path, params, notes, forced=False, httpx_403=resp)
     return resp
@@ -245,6 +287,7 @@ def _is_windows() -> bool:
 def _fetch_via_powershell(
     client: httpx.Client, path: str, params: dict | None, notes: list[str],
     *, forced: bool, httpx_403: httpx.Response | None = None,
+    httpx_error: Exception | None = None,
 ):
     url = str(client.build_request("GET", path, params=params).url)
     try:
@@ -253,11 +296,19 @@ def _fetch_via_powershell(
         if httpx_403 is not None:
             notes.append(f"httpx 403 → PowerShell(Invoke-WebRequest) 대체 시도도 실패: {exc}")
             return httpx_403
+        if httpx_error is not None:
+            raise RuntimeError(
+                f"Confluence 서버 연결 실패: {httpx_error}\n"
+                f"PowerShell(Invoke-WebRequest) 대체 시도도 실패: {exc}\n"
+                "사내망 SSL 인증서 문제일 수 있습니다 — CONFLUENCE_CA_BUNDLE 환경변수로 "
+                "사내 루트 인증서(.crt/.pem) 경로를 지정해 보세요."
+            ) from exc
         raise RuntimeError(f"PowerShell 요청 실패: {exc}") from exc
 
     if not forced:
+        reason = "SSL/연결 오류" if httpx_error is not None else "403"
         notes.append(
-            "httpx 요청이 403으로 거부돼 PowerShell(Invoke-WebRequest)로 재시도해 성공함 "
+            f"httpx 요청이 {reason}로 실패해 PowerShell(Invoke-WebRequest)로 재시도해 성공함 "
             "— 이 사내망에서 필요한 우회 경로(2026-09-29 실측, 원인 미확정)"
         )
     return _Reply(status_code=200, content=content)

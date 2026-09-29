@@ -40,7 +40,7 @@
 ```bash
 git clone <저장소 URL>
 cd Document-Parsing
-git checkout claude/next-tasks-zmwk4x
+git checkout main   # 2026-09-28부터: 예전엔 별도 브랜치(next-tasks-zmwk4x)였는데 main에 합쳐짐
 uv sync
 ```
 

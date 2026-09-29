@@ -264,3 +264,127 @@ def test_powershell_fallback_failure_still_surfaces_original_403(monkeypatch):
 
 def test_ps_escape_handles_embedded_single_quotes():
     assert _ps_escape("Bearer it's-a-token") == "Bearer it''s-a-token"
+
+
+# ── SSL 인증서 문제 (2026-09-29, 사내 LLM이 진단: 사내 프록시 자체 CA를 certifi가 모름) ──
+
+
+_CA_ENV_KEYS = ("CONFLUENCE_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
+
+
+def _clear_ca_env(monkeypatch) -> None:
+    # 이 샌드박스 자체가 프록시용 SSL_CERT_FILE/REQUESTS_CA_BUNDLE을 미리 깔아 둬서
+    # (에이전트 프록시 CA 번들), 그 값이 새어 들어오지 않게 테스트마다 먼저 지운다.
+    for key in _CA_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.mark.parametrize("env_key", _CA_ENV_KEYS)
+def test_ca_bundle_env_var_is_used_when_file_exists(monkeypatch, tmp_path, env_key):
+    """httpx는 REQUESTS_CA_BUNDLE을 자동으로 안 읽으므로 직접 확인해 verify=에 넘겨야 한다."""
+    from doc2report.sources.confluence import _ssl_verify
+
+    _clear_ca_env(monkeypatch)
+    cert = tmp_path / "samsungsemi-prx.com.crt"
+    cert.write_text("fake cert")
+    monkeypatch.setenv(env_key, str(cert))
+
+    notes: list[str] = []
+    assert _ssl_verify(notes) == str(cert)
+    assert any(env_key in note for note in notes)
+
+
+def test_ca_bundle_env_var_pointing_to_missing_file_is_ignored(monkeypatch):
+    from doc2report.sources.confluence import _ssl_verify
+
+    _clear_ca_env(monkeypatch)
+    monkeypatch.setenv("CONFLUENCE_CA_BUNDLE", "C:\\no\\such\\file.crt")
+    notes: list[str] = []
+    assert _ssl_verify(notes) is True
+    assert any("찾을 수 없어" in note for note in notes)
+
+
+def test_no_ca_bundle_env_defaults_to_true(monkeypatch):
+    from doc2report.sources.confluence import _ssl_verify
+
+    for key in ("CONFLUENCE_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    notes: list[str] = []
+    assert _ssl_verify(notes) is True
+    assert notes == []
+
+
+def test_ca_bundle_path_is_actually_passed_to_httpx_client(monkeypatch, tmp_path):
+    """verify= 계산만 맞고 실제로 안 넘어가면 소용없으니 httpx.Client 생성 자체를 확인한다."""
+    cert = tmp_path / "ca.crt"
+    cert.write_text("fake cert")
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setenv("CONFLUENCE_CA_BUNDLE", str(cert))
+
+    seen = {}
+    real_client = httpx.Client
+
+    def fake_client(*args, **kwargs):
+        seen["verify"] = kwargs.get("verify")
+        kwargs["transport"] = httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"results": []})
+            if r.url.path.endswith("/child/attachment") else _page_response(r)
+        )
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("doc2report.sources.confluence.httpx.Client", fake_client)
+    load_confluence("123")
+
+    assert seen["verify"] == str(cert)
+
+
+def test_ssl_error_on_windows_falls_back_to_powershell(monkeypatch):
+    """SSL 인증서 검증 실패는 403과 달리 응답 없이 예외로 터진다 — 따로 잡아야 한다."""
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setattr("doc2report.sources.confluence.platform.system", lambda: "Windows")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("SSL: CERTIFICATE_VERIFY_FAILED")
+
+    _patch_client(monkeypatch, handler)
+    responses = iter([
+        _b64_json({"title": "t", "body": {"storage": {"value": "<p>ssl 우회 성공</p>"}}}),
+        _b64_json({"results": []}),
+    ])
+    monkeypatch.setattr(
+        "doc2report.sources.confluence.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=next(responses), stderr=""),
+    )
+
+    loaded = load_confluence("123")
+    assert "ssl 우회 성공" in loaded.text
+    assert any("SSL/연결 오류" in note for note in loaded.notes)
+
+
+def test_ssl_error_without_windows_raises_clear_message_with_ca_bundle_hint(monkeypatch):
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("SSL: CERTIFICATE_VERIFY_FAILED")
+
+    _patch_client(monkeypatch, handler)
+    with pytest.raises(RuntimeError, match="CONFLUENCE_CA_BUNDLE"):
+        load_confluence("123")
+
+
+def test_ssl_error_with_powershell_also_failing_reports_both(monkeypatch):
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setattr("doc2report.sources.confluence.platform.system", lambda: "Windows")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("SSL: CERTIFICATE_VERIFY_FAILED")
+
+    _patch_client(monkeypatch, handler)
+    _fake_ps_run(monkeypatch, returncode=1, stderr="powershell.exe를 찾을 수 없음")
+
+    with pytest.raises(RuntimeError, match="PowerShell.*대체 시도도 실패"):
+        load_confluence("123")

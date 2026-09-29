@@ -10,21 +10,39 @@
 
 ## 지금 상태 (2026-09-29)
 
-**토큰 승인 완료, REST API 연결 확인됨.** 0~3번은 끝났다 — 이제 4번(실제
-`.docx` 변환)부터 하면 된다.
+**토큰 승인 완료, REST API 연결 확인됨.** 코드는 이제 `main` 브랜치 하나에
+있다 — `git pull`만 하면 된다(예전엔 별도 브랜치였는데 합쳐졌다).
 
-**사내망 우회를 코드에 반영함(중요)**: 다른 에이전트(CodeMate/Roo)가 같은 사내
-PC에서 Confluence 페이지를 읽어 보다가, httpx 요청이 403으로 막히고
-PowerShell의 `Invoke-WebRequest`(원시 바이트를 UTF-8로 디코딩)는 통과하는 걸
-확인했다. 원인은 확정되지 않았다(인증서 신뢰 저장소 차이일 수도, 사내 보안
-게이트웨이가 요청 형태로 걸러내는 것일 수도) — 원인을 추측해 고치는 대신
-**검증된 그 경로를 그대로 코드에 넣었다**: `doc2report`가 httpx로 403을 받으면
-Windows에서는 자동으로 PowerShell로 한 번 더 시도하고, 성공하면 그 결과를 쓰며
-`--report`에 "PowerShell로 재시도해 성공함"이라고 남긴다. 그래서 4번을 그냥
-실행하면 되고, 따로 뭘 더 설정할 필요는 없다.
+**새 창을 열 때마다 먼저 이 세 줄** (토큰을 다시 입력하는 게 아니라 "불러오기"만 다시):
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+. .\scripts\confluence_env.ps1
+$env:CONFLUENCE_API_TOKEN.Length   # 0이 아니면 성공
+```
+`.ps1` 실행 자체가 보안 오류(`PSSecurityException`)로 막히면 위 `Set-ExecutionPolicy`
+줄이 그 창에서만 푼다 — 그래도 막히면 `notepad`로 파일을 열어 안의 두 줄
+(`$env:CONFLUENCE_URL`, `$env:CONFLUENCE_API_TOKEN`)을 그대로 복사해 붙여넣어도 된다.
 
-혹시 자동 대체가 안 통하면(예: httpx가 403이 아니라 다른 방식으로 막히는 경우)
-아래 환경변수로 처음부터 PowerShell만 쓰게 강제할 수 있다:
+**사내망 접속 문제 2건을 코드에 반영함(중요, 실제로 겪은 순서대로):**
+
+1. **httpx가 403으로 막힘** — 다른 에이전트(CodeMate/Roo)가 같은 사내 PC에서
+   확인: PowerShell의 `Invoke-WebRequest`(원시 바이트를 UTF-8로 디코딩)는 통과.
+2. **httpx가 SSL 인증서 검증 실패로 아예 응답을 못 받음** — 사내 LLM 진단:
+   사내 프록시가 자체 발급한 인증서를 쓰는데, 그 루트 인증서가 파이썬 기본
+   CA 번들(certifi)에는 없어서 생기는 문제.
+
+원인이 여러 겹일 수 있어서 **둘 다** 코드에 반영했다:
+- httpx가 403을 받거나 SSL/연결에 실패하면, Windows에서는 자동으로
+  PowerShell(`Invoke-WebRequest`, Windows 인증서 저장소를 그대로 씀)로 한 번
+  더 시도한다 — 성공하면 `--report`에 남는다. **그래서 보통은 4번을 그냥
+  실행하면 된다**, 따로 설정할 필요 없이.
+- 사내 루트 인증서(`.crt`/`.pem`) 파일을 구했다면
+  `$env:CONFLUENCE_CA_BUNDLE = "C:\경로\파일.crt"`로 지정해도 된다(더 근본적인
+  해결 — PowerShell 우회 없이 httpx가 바로 통과한다). IT팀이 사내 PC에 이미
+  깔아 둔 인증서 파일이 있다면(예: `samsungsemi-prx.com.crt`) 그 경로를 찾아
+  써도 된다.
+
+자동 대체도 안 통하면 이 환경변수로 처음부터 PowerShell만 쓰게 강제할 수 있다:
 ```powershell
 $env:DOC2REPORT_CONFLUENCE_TRANSPORT = "powershell"
 ```
@@ -33,8 +51,8 @@ $env:DOC2REPORT_CONFLUENCE_TRANSPORT = "powershell"
 
 ## 0. 사전 준비물
 
-- [ ] 이 브랜치(`claude/confluence-document-conversion-dtygn4`)로 코드가 최신인지
-      (`git log -1 --oneline` — 이 문서를 만든 커밋 이후인지 확인)
+- [ ] `main` 브랜치로 코드가 최신인지 (`git pull`, `git log -1 --oneline` —
+      이 문서를 만든 커밋 이후인지 확인)
 - [x] **REST API 주소 확정**: `http://api.confluence.samsungds.net/rest/api/`
       (`scripts/confluence_env.example.ps1`/`.sh`에 이미 반영해 둠). 브라우저로
       보는 위키 주소와는 다른 REST 전용 게이트웨이다. `http`(평문)라 사내망
@@ -134,11 +152,14 @@ Invoke-RestMethod -Uri "$base/content/123456?expand=body.storage" -Headers $head
 > ID나 `CONFLUENCE_URL`(끝에 `/wiki` 필요 여부) 확인, 아예 응답이 없으면
 > (타임아웃) 프록시 문제일 수 있다 — 2번 끝의 `NO_PROXY` 참고.
 >
-> **403이면 이 명령(`Invoke-RestMethod`)만으로는 권한 문제인지 사내망 차단인지
-> 구분이 안 된다** — 이 스크립트는 PowerShell 자동 대체 로직이 없는 순수
-> 확인용이기 때문이다(맨 위 "지금 상태" 참고). `doc2report`(4번)는 이 403을
-> 자동으로 PowerShell로 재시도하므로, 여기서 403이 나도 당황하지 말고 4번을
-> 그냥 실행해 본다 — 거기서도 안 되면 진짜 권한 문제다.
+> **403이나 SSL 인증서 오류가 나도 이 명령(`Invoke-RestMethod`)만으로는 권한
+> 문제인지 사내망 차단인지 구분이 안 된다** — 이 스크립트는 PowerShell 자동
+> 대체 로직이 없는 순수 확인용이기 때문이다(맨 위 "지금 상태" 참고). 재미있게도
+> `Invoke-RestMethod` 자체는 이미 PowerShell이라 이 SSL 문제를 안 겪는다 — 여기서
+> 성공했는데 4번(`doc2report`, 내부적으로 파이썬 httpx를 씀)에서 SSL 오류가
+> 나는 게 오히려 정상적인 패턴이다. `doc2report`는 403·SSL 오류 둘 다 자동으로
+> PowerShell로 재시도하므로, 여기서 뭐가 나든 당황하지 말고 4번을 그냥 실행해
+> 본다 — 거기서도 안 되면 그때 클로드에 에러 메시지를 알려준다.
 
 ## 4. 실제 변환
 

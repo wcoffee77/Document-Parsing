@@ -31,8 +31,16 @@ $env:CONFLUENCE_API_TOKEN = "여기에_PAT"
 # (scripts/onprem_env.ps1 참고). Confluence 접속도 안 되면 이 호스트를 추가해 본다.
 # $env:NO_PROXY = "api.confluence.samsungds.net," + $env:NO_PROXY
 
-# ── 4. 사내망에서 httpx가 403으로 막힐 때 (2026-09-29 실측) ───────────────
-# doc2report는 httpx가 403을 받으면 Windows에서 자동으로 PowerShell
-# (Invoke-WebRequest)로 한 번 더 시도한다 — 보통은 아래를 켤 필요가 없다.
-# 자동 대체도 안 통하면 이 줄의 주석을 풀어 처음부터 PowerShell만 쓰게 한다.
+# ── 4. 사내망 SSL 인증서 문제 (2026-09-29, 사내 LLM 진단) ──────────────────
+# 사내 프록시가 자체 발급한 인증서로 HTTPS를 중계하면, 그 루트 인증서가 파이썬
+# 기본 CA 번들(certifi)에는 없어서 "SSL 인증서 검증 실패"가 날 수 있다. 사내
+# 루트 인증서(.crt/.pem) 파일 경로를 구했으면 여기 넣는다 — httpx는
+# REQUESTS_CA_BUNDLE을 자동으로 안 읽어서 doc2report가 이 값을 직접 확인해 쓴다.
+# $env:CONFLUENCE_CA_BUNDLE = "C:\certs\samsungsemi-prx.com.crt"
+
+# ── 5. 그래도 안 되면: httpx가 403/SSL 오류로 막힐 때 (2026-09-29 실측) ────
+# doc2report는 httpx가 403을 받거나 SSL/연결에 실패하면 Windows에서 자동으로
+# PowerShell(Invoke-WebRequest, Windows 인증서 저장소를 그대로 씀)로 한 번 더
+# 시도한다 — 보통은 아래를 켤 필요가 없다. 자동 대체도 안 통하면 이 줄의
+# 주석을 풀어 처음부터 PowerShell만 쓰게 한다.
 # $env:DOC2REPORT_CONFLUENCE_TRANSPORT = "powershell"

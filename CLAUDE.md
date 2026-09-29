@@ -105,7 +105,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 146개
+uv run pytest                           # 155개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -192,6 +192,21 @@ PowerShell(`subprocess` + `Invoke-WebRequest -UseBasicParsing`, 바이너리 안
 PowerShell 스크립트 자체는 **이 세션(Linux 샌드박스)에서 실행해 볼 수 없어서
 Windows에서 실제로 검증된 적은 아직 없다** — Python 쪽 분기·재시도·오류 처리
 로직만 `tests/test_confluence_source.py`에서 `subprocess.run`을 흉내 내 검증했다.
+
+**두 번째 문제, SSL 인증서 검증 실패 발견·대응 (2026-09-29)**: 위 403 우회를 넣은
+뒤 실제로 돌려 보니 이번엔 httpx가 **응답조차 못 받고 SSL 인증서 검증 실패로
+바로 죽었다** — 위에서 "403은 정상 HTTP 응답이라 TLS 신뢰 실패는 아닐 것"이라고
+썼던 추측이 이 두 번째 증상에는 안 맞고, 사내 LLM 진단(사내 프록시가 자체 CA로
+HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 certifi엔 없음)이 이
+증상과는 정확히 들어맞는다. 즉 **두 문제가 서로 다른 요청/시점에 겹쳐 있었을
+가능성이 크다** — 하나의 원인으로 둘 다 설명하려던 게 성급했다. 대응:
+1. `_ssl_verify()`가 `CONFLUENCE_CA_BUNDLE`/`REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE`
+   환경변수(이 순서로 확인)에 있는 인증서 파일을 `httpx.Client(verify=...)`에
+   직접 넘긴다 — **httpx는 requests와 달리 `REQUESTS_CA_BUNDLE`을 자동으로 안
+   읽으므로** 이 확인이 없으면 방법 A(사내 LLM이 추천한 방법)가 애초에 안 먹힌다.
+2. `_get()`이 이제 `httpx.TransportError`(SSL 실패 포함)도 403과 나란히 잡아서
+   Windows에서 PowerShell로 재시도한다 — SSL 실패는 응답이 아니라 예외로 오므로
+   403과는 별도 분기가 필요했다(`_fetch_via_powershell`의 `httpx_error` 인자).
 
 **아직 검증되지 않은 것 — 실제 사내 Confluence로 다음에 확인할 것:**
 
