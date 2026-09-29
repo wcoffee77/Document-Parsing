@@ -239,9 +239,9 @@ HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 cert
   `httpx_error` 분기(403이 아니라 예외로 잡는 경로)가 타서 PowerShell 대체가
   정상 동작해 페이지를 받아 왔다. 헤더 해시테이블 리터럴 문법, 토큰 이스케이프는
   이걸로 검증됨. (처음에 "바로 성공했음"으로 잘못 전달돼 이 절에 반대로 적었다가
-  `--report` 원문 확인 후 정정.) **아직 안 본 것**: 첨부파일(이미지)이 있는
-  페이지에서 바이너리 응답의 Base64 왕복까지 탔는지는 이 실측 문서에 첨부가
-  있었는지에 달려 있음 — 확인 필요.
+  `--report` 원문 확인 후 정정.) **여전히 미확인**: 이 실측 문서에는 첨부 이미지가
+  없어서, 첨부파일 다운로드 경로(PowerShell로 바이너리 응답을 Base64로 왕복하는
+  부분)는 이번에도 확인 못 함 — 이미지가 있는 페이지로 다시 확인 필요.
 - 이 코드는 `tests/test_confluence_storage.py`(파서, 고정 XHTML 픽스처),
   `tests/test_confluence_source.py`(REST 클라이언트, `httpx.MockTransport`로 흉내),
   `tests/test_confluence_pipeline.py`(파서→변환→렌더 전 과정)로 검증했지만, 셋 다
