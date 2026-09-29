@@ -14,6 +14,7 @@ from doc2report.pipeline import convert
 from doc2report.profile import load_profile
 from doc2report.transform.structure import (
     attach_table_captions,
+    drop_blank_blocks,
     fold_headings_into_levels,
     merge_short_list_items,
 )
@@ -266,3 +267,34 @@ def test_things_that_only_look_like_markers_are_left_alone(text):
     folded, _ = fold_headings_into_levels(doc, _KEEP, keep=True, marker_depths=_DEPTHS)
     assert folded.blocks[1].marker is None
     assert plain(folded.blocks[1].runs) == text
+
+
+@pytest.mark.parametrize("blank", ["", "  ", "\u200b", "\u3164", "\u00a0\u200b\ufeff"])
+def test_blank_looking_blocks_are_dropped_so_no_lonely_square_appears(blank):
+    """제로폭 공백·한글 채움문자만 든 "빈 줄"이 접을 때 "□"만 찍힌 줄이 됐다(2026-09-29 사용자,
+    두 번 보고). 빈 제목도 마찬가지."""
+    doc = Document(blocks=[Heading(level=2, runs=[Run("추진 배경")]),
+                           Paragraph(runs=[Run(blank)]),
+                           Heading(level=3, runs=[Run(blank)]),
+                           ListItem(depth=0, runs=[Run(blank)]),
+                           Paragraph(runs=[Run("실제 내용")])])
+    result, changes = drop_blank_blocks(doc)
+    assert [plain(b.runs) for b in result.blocks] == ["추진 배경", "실제 내용"]
+    # 보이지 않는 글자가 원인이면 코드를 리포트에 남겨 원인을 알 수 있게 한다
+    assert bool(changes) == (blank.strip() != "" and any(ord(c) > 127 and not c.isspace() for c in blank))
+
+
+def test_report_names_the_invisible_character():
+    _, changes = drop_blank_blocks(Document(blocks=[Paragraph(runs=[Run("\u200b")])]))
+    assert "U+200B" in changes[0].before
+
+
+def test_outermost_level_is_zero_even_when_document_starts_at_h3():
+    """문서가 ###부터 시작해도 첫 문장은 0cm(1. 단계), 그 아래가 한 단계 안쪽(2026-09-29 사용자)."""
+    doc = Document(blocks=[Heading(level=3, runs=[Run("첫째")]),
+                           Paragraph(runs=[Run("(1) 세부")]),
+                           Heading(level=3, runs=[Run("둘째")])])
+    plain_fold, _ = fold_headings_into_levels(doc)
+    assert [b.depth for b in plain_fold.blocks] == [1, 2, 1]  # 정규화 없으면 첫 문장부터 안쪽
+    normalized, _ = fold_headings_into_levels(doc, normalize=True)
+    assert [b.depth for b in normalized.blocks] == [0, 1, 0]

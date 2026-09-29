@@ -6,6 +6,7 @@ IR 자체에는 서식(pt, mm, 글꼴명)이 절대 들어가지 않는다. 서�
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, field
 
 
@@ -24,6 +25,25 @@ class Run:
 
     def copy_with(self, text: str) -> Run:
         return Run(text=text, bold=self.bold, italic=self.italic, code=self.code, href=self.href)
+
+
+# 화면에 아무것도 안 그려지는데 str.strip()으로는 안 걸러지는 글자 — 한국어 문서(Confluence·메신저에서
+# 복사)에서는 "빈 줄"을 이런 글자로 채워 두는 일이 흔하다: 한글 채움문자(U+3164)·점자 빈칸 등.
+_INVISIBLE = frozenset("\u3164\u115f\u1160\u2800\u17b4\u17b5\u034f")
+
+
+def _is_invisible(ch: str) -> bool:
+    return ch.isspace() or ch in _INVISIBLE or unicodedata.category(ch) in ("Cf", "Cc", "Zs", "Zl", "Zp")
+
+
+def is_blank(text: str) -> bool:
+    """공백이거나 보이지 않는 글자(제로폭 공백 U+200B, 한글 채움문자 U+3164 등)뿐인가."""
+    return all(_is_invisible(ch) for ch in text)
+
+
+def invisible_codes(text: str) -> list[str]:
+    """text에 든, 일반 공백이 아닌 보이지 않는 글자의 코드("U+200B") — 리포트에 원인을 보이려고."""
+    return sorted({f"U+{ord(ch):04X}" for ch in text if _is_invisible(ch) and not ch.isspace()})
 
 
 def plain(runs: list[Run]) -> str:

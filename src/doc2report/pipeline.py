@@ -19,6 +19,7 @@ from .transform import Change, apply_text_rules
 from .transform.structure import (
     attach_table_captions,
     attach_table_notes,
+    drop_blank_blocks,
     fold_headings_into_levels,
     merge_short_list_items,
 )
@@ -96,10 +97,11 @@ def convert(
     if date:
         _insert_dateline(doc, date, prof)
 
-    changes: list[Change] = []
+    doc, changes = drop_blank_blocks(doc)  # 안 그러면 접을 때 "□"만 덜렁 찍힌 줄이 된다
     if polish != "none":
         transformed = apply_text_rules(doc, prof)
-        doc, changes = transformed.document, transformed.changes
+        doc = transformed.document
+        changes.extend(transformed.changes)
     if prof.tables.note_markers or prof.tables.note_marker:
         # 제목 접기보다 먼저 — 안 그러면 주석 문단이 □ 항목으로 접혀 버린다.
         doc, note_changes = attach_table_notes(doc, prof.tables.note_markers,
@@ -117,7 +119,7 @@ def convert(
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
         doc, fold_changes = fold_headings_into_levels(
             doc, prof.text.leading_markers, keep=prof.text.keep_leading_markers,
-            marker_depths=prof.marker_depths())
+            marker_depths=prof.marker_depths(), normalize=prof.text.normalize_levels)
         changes.extend(fold_changes)
     if polish == "llm":
         from .transform.llm_polish import polish_document

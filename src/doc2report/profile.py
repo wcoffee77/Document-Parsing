@@ -250,6 +250,9 @@ class TextRules(_Base):
     keep_original_in_tables: bool = True
     date_format: str = ""  # 비우면 rules/notation.yaml 의 형식을 쓴다
     headings_as_levels: bool = False  # ##/### 제목을 1./□ 단락 체계로 접어 넣을지
+    normalize_levels: bool = False
+    # 접은 뒤 가장 얕은 단계를 0으로 당긴다. 문서가 ###(h3)부터 시작하면 첫 문장이 □ 단계(0.4cm)로
+    # 들여쓰여 나오기 때문 — 첫 문장은 0cm, 그 아래가 0.4cm, 그 아래가 0.8cm여야 한다.
     leading_markers: list[str] = Field(default_factory=list)
     # 원문에 이미 문자로 쳐 둔 말머리("□ ", "- ", "ㆍ", "①", "※"). "1." "1)" "(1)" "가."
     # 같은 번호는 목록에 안 적어도 알아본다. 이게 있는 제목·항목에 프로파일이 또

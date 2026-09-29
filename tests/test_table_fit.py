@@ -137,12 +137,24 @@ def test_cell_align_does_not_override_explicit_alignment(profile):
     assert (1, 0) not in layout.cell_align
 
 
-def test_crowded_table_uses_char_scale_within_font_range(profile):
-    """글자가 많으면 11~12pt 안에서 크기와 장평(95%)을 줄인다."""
+def test_crowded_table_shrinks_font_only_and_keeps_full_char_scale(profile):
+    """글씨가 많아도 장평은 100%로 두고 글자 크기만 줄인다(2026-09-29 사용자: 90%도 95%도
+    보기 안 좋다). 크기는 사다리 하한(9pt)까지."""
     long = "가나다라마바사아자차카타파하 " * 3
     table = table_of([[f"열{i}" for i in range(10)], [long] * 10])
     layout = fit_table(table, profile, profile.page.usable_width)
-    assert min(profile.table_font_ladder()) <= layout.font_size <= max(profile.table_font_ladder())
+    assert layout.char_scale == 1.0
+    assert min(profile.table_font_ladder()) <= layout.font_size < max(profile.table_font_ladder())
+    assert not any("장평" in note for note in layout.notes)
+
+
+def test_char_scale_ladder_still_works_when_a_profile_asks_for_it(profile):
+    """장평 기능 자체는 남겨 뒀다 — 프로파일이 사다리에 95%를 넣으면 쓴다."""
+    tables = profile.tables.model_copy(update={"char_scale_ladder": [1.0, 0.95]})
+    wide = profile.model_copy(update={"tables": tables})
+    long = "가나다라마바사아자차카타파하 " * 3
+    table = table_of([[f"열{i}" for i in range(10)], [long] * 10])
+    layout = fit_table(table, wide, wide.page.usable_width)
     assert layout.char_scale == pytest.approx(0.95)
     assert any("장평" in note for note in layout.notes)
 

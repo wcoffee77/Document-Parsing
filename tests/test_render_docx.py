@@ -178,3 +178,11 @@ def test_note_size_delta_survives_dump_and_reload(tmp_path):
     path = tmp_path / "p.yaml"
     path.write_text(dump_profile(profile), encoding="utf-8")
     assert load_profile(path).text.note_size_delta == profile.text.note_size_delta
+
+
+def test_table_itself_is_right_aligned(built):
+    """표 전체는 오른쪽 정렬(2026-09-29 사용자). 셀 안 글자 정렬과는 별개다."""
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+
+    _, docx = built
+    assert docx.tables[0].alignment == WD_TABLE_ALIGNMENT.RIGHT

@@ -32,6 +32,8 @@ from ..ir import (
     Row,
     Run,
     Table,
+    is_blank,
+    plain,
 )
 
 AC_NS = "http://www.atlassian.com/schema/confluence/4/ac/"
@@ -60,8 +62,6 @@ def parse_confluence_storage(
     root = _fragment_root(xhtml)
     blocks, notes = _children_blocks(root)
     if title is None and blocks and isinstance(blocks[0], Heading) and blocks[0].level == 1:
-        from ..ir import plain
-
         title = plain(blocks[0].runs)
         blocks = blocks[1:]
     doc = Document(blocks=blocks, title=title, source=source)
@@ -186,7 +186,7 @@ def _list(el, depth: int, ordered: bool) -> list[Block]:
         else:
             # walk()가 ul/ol/table 자식은 건너뛰므로, 뒤이은 중첩 목록과 안 섞인다.
             runs, images = _inline(li)
-        if any(r.text.strip() for r in runs) or images:
+        if not is_blank(plain(runs)) or images:
             out.append(ListItem(depth=depth, runs=runs, ordered=ordered,
                                 number=number if ordered else None))
         # else: Confluence는 들여쓰기용으로 글자 없는 <li><ol>…</ol></li> 껍데기를 만든다 —

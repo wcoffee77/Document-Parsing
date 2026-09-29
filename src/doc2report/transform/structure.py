@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import re
 
-from ..ir import Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table, plain
+from ..ir import (Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table,
+                  invisible_codes, is_blank, plain)
 from .stylize_ko import Change
 
 HEADING_BASE = 2  # H1은 문서 제목이므로 H2가 첫 단계(1.)가 된다
@@ -39,6 +40,7 @@ _HANGUL_ENUM = re.compile(r"^\s*(?:\([가나다라마바사아자차카타파하
 def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *,
                               keep: bool = False,
                               marker_depths: dict[str, int] | None = None,
+                              normalize: bool = False,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -77,6 +79,28 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         else:
             blocks.append(block)
 
+    if normalize:
+        items = [b for b in blocks if isinstance(b, ListItem)]
+        shift = min((b.depth for b in items), default=0)
+        for b in items:
+            b.depth -= shift  # 접는 단계에서 새로 만든 객체라 바꿔도 원본 IR은 그대로다
+
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def drop_blank_blocks(doc: Document) -> tuple[Document, list[Change]]:
+    """글자가 하나도 없는 제목·문단·항목을 뺀다. 접으면 프로파일 말머리만 덜렁 찍힌 줄("□")이 되기
+    때문이다(2026-09-29 사용자 보고 — 두 번). 공백뿐인 것은 조용히 빼고, **보이지 않는 글자가 든
+    것**(제로폭 공백·한글 채움문자)은 원인을 알 수 있게 코드를 리포트에 남긴다."""
+    blocks: list[Block] = []
+    changes: list[Change] = []
+    for block in doc.blocks:
+        if isinstance(block, (Heading, Paragraph, ListItem)) and is_blank(plain(block.runs)):
+            codes = invisible_codes(plain(block.runs))
+            if codes:
+                changes.append(Change(f"(보이지 않는 글자 {' '.join(codes)}만 있는 줄)", "(삭제)", "빈 항목 제거"))
+            continue
+        blocks.append(block)
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
 
