@@ -10,7 +10,8 @@ from docx.oxml.ns import qn
 
 from doc2report.pipeline import convert
 from doc2report.profile import load_profile
-from doc2report.render.docx_writer import _FALLBACK_TEMPLATE, _base_template
+from doc2report.render.base_template import open_base_template
+from doc2report.render.docx_writer import _base_template
 from doc2report.units import emu_to_dxa, emu_to_pt
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_report.md"
@@ -40,13 +41,19 @@ def test_header_row_is_shaded_with_profile_color(built):
     assert shd.get(qn("w:fill")).upper() == profile.tables.header_shading
 
 
-def test_bundled_template_exists_and_is_used_by_default():
-    # python-docx가 내부에 갖고 있는 default.docx가 오프라인 설치·백신 격리 등으로
-    # 사라져도(사내 PC에서 실제로 "Package not found" 로 겪음) 우리 사본이 쓰이는지.
-    assert _FALLBACK_TEMPLATE.exists()
+def test_base_template_is_embedded_not_a_docx_file():
+    """기본 템플릿을 .docx 파일로 두면 사내 PC 문서보안/백신이 손상시켜 "Package not
+    found"로 죽었다(2026-09-29, 두 번). 파이썬 소스에 든 사본을 메모리에서 연다."""
+    import zipfile
+
+    assert not (Path(__file__).parents[1] / "assets" / "default_template.docx").exists()
     profile = load_profile("default")
     assert profile.template is None
-    assert _base_template(profile) == str(_FALLBACK_TEMPLATE)
+    source = _base_template(profile)
+    assert zipfile.is_zipfile(source)
+    source.seek(0)
+    assert len(DocxDocument(source).styles) > 10
+    assert open_base_template().getvalue()[:2] == b"PK"
 
 
 def test_page_setup_matches_profile(built):

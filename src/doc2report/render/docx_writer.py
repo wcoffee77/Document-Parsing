@@ -34,24 +34,16 @@ from ..layout.flow import FlowPlan
 from ..layout.table_fit import TableLayout, plan_tables
 from ..profile import FontSpec, Profile
 from . import oxml
+from .base_template import open_base_template
 from .markers import format_marker
 
 # "2026. 10. 1" / "2026.10.1." 처럼 날짜만 있는 줄 (제목 아래 날짜 표기 판별용)
 DATE_LINE = re.compile(r"^\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?$")
 
-# python-docx가 내부적으로 쓰는 기본 템플릿(docx/templates/default.docx)이 오프라인
-# 설치·백신 격리 등으로 사라지면 "Package not found"로 죽는다. profiles/, rules/와
-# 같은 방식(__file__ 기준 저장소 루트)으로 우리 저장소에도 사본을 두고 우선 쓴다 —
-# 이게 없을 때만(예: 이 파일이 빠진 패키징) python-docx 자체 기본값으로 되돌아간다.
-_FALLBACK_TEMPLATE = Path(__file__).resolve().parents[3] / "assets" / "default_template.docx"
-
-
-def _base_template(profile: Profile) -> str | None:
-    if profile.template:
-        return profile.template
-    if _FALLBACK_TEMPLATE.exists():
-        return str(_FALLBACK_TEMPLATE)
-    return None
+def _base_template(profile: Profile):
+    """profile.template(사내 template.docx 경로)이 있으면 그 경로, 없으면 메모리에 든
+    기본 템플릿. 파일(.docx)로 두지 않는 이유는 base_template.py 참고."""
+    return profile.template or open_base_template()
 
 
 @dataclass

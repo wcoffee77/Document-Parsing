@@ -103,15 +103,17 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
   (`CT_Tc._span_to_width`가 `_move_content_to`로 그렇게 동작). 병합 *먼저*, 내용 채우기는
   *그 다음*이어야 한다 — 순서를 바꾸면 먼저 써 둔 내용이 사라진다.
   (`render/docx_writer.py::_fill_cells`는 이미 그 순서를 지킨다.)
-- **`python-docx`가 내부에 갖고 있는 기본 템플릿(`docx/templates/default.docx`)이
-  사라지면 `Package not found at '...\default.docx'`로 죽는다** — 실제 사내 PC에서
-  겪음(2026-09-29). `profile.template`을 안 쓰면(사내 기본값) `Document()`를 인자
-  없이 불러 python-docx 설치 안의 이 파일을 쓰는데, 오프라인 wheelhouse 설치나
-  백신/DLP의 격리(.docx 확장자라 오탐 가능성)로 이 파일만 없어져도 변환 자체가
-  실패한다. 대응: `rules/`·`profiles/`와 같은 방식으로 저장소에 사본을
-  `assets/default_template.docx`로 두고 `docx_writer.py::_base_template()`이
-  `profile.template` → 이 사본 → (그마저 없으면) python-docx 자체 기본값 순으로
-  고른다 — 설치 환경이 얼마나 깨져도 저장소 자체 사본은 git으로 항상 같이 온다.
+- **기본 템플릿을 `.docx` 파일로 두면 `Package not found at '...\\default_template.docx'`로
+  죽는다** — 사내 PC에서 두 번 겪음(2026-09-29). 처음엔 python-docx 설치 안의
+  `docx/templates/default.docx`가 "없어졌다"고 보고 저장소에 사본(`assets/default_template.docx`)을
+  넣었는데, 그 사본도 같은 에러가 났다. 저장소의 파일은 멀쩡했다(38,116바이트, 올바른 zip,
+  git도 바이너리 처리) — python-docx의 이 에러는 파일이 **없을 때뿐 아니라 zip으로 못 읽을
+  때**도 나므로, 사내 문서보안/백신이 `.docx`를 가로채 손상시킨 것으로 추정한다(확정은 못 함).
+  원인이 무엇이든 통하도록 `.docx` 파일을 아예 두지 않는다: 템플릿을 base64 텍스트로
+  `render/base_template.py`에 넣고 `docx_writer.py::_base_template()`이 `BytesIO`로 연다
+  (`profile.template`이 있으면 그 경로). `assets/`는 없앴고 `.gitattributes`에 `*.docx binary`.
+  **출력 .docx는 어쩔 수 없이 파일이라 같은 보안 프로그램이 건드릴 수 있다** — 출력이
+  안 열리면 이쪽을 의심할 것.
 
 ## 검증 방법
 
