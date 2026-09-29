@@ -100,13 +100,9 @@ class JobRunner:
                                  section_titles=options.get("section_titles", True),
                                  page_breaks=bool(options.get("page_breaks")))
 
-        decision = None
-        if options.get("mode") == "manual":
-            profile, polish = opts.manual_profile(options)
-        else:
-            decision = opts.auto_decide(docs, kinds, allow_llm=bool(options.get("allow_llm")),
-                                        llm_ready=llm_status()["configured"])
-            profile, polish = decision.profile, decision.polish
+        profile, polish, decision = opts.build_profile(options, docs, kinds,
+                                                       llm_ready=llm_status()["configured"])
+        if decision:
             notes = [f"자동 판단: {reason}" for reason in decision.reasons] + notes
 
         stem = self._reserve(merged.title or "보고서")
@@ -150,7 +146,9 @@ class JobRunner:
             "change_count": len(result.changes),
             "tables": len(result.layouts),
             "polish": polish,
-            "profile": profile.name,
+            "profile": (f"사용자 설정(출발: {profile.label or profile.name})"
+                        if options.get("preset") == "custom" else profile.label or profile.name),
+            "preset": options.get("preset") or "default",
             "decision": ({"reasons": decision.reasons, **decision.summary} if decision else None),
         }
 

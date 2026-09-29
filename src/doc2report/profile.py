@@ -313,6 +313,8 @@ class Choices(_Base):
 class Profile(_Base):
     name: str = "default"
     description: str | None = None
+    label: str | None = None         # 웹 화면 서식 선택에 보이는 이름("보고서", "Confluence 변환")
+    preset_order: int | None = None  # 있으면 웹 화면의 서식(preset) 목록에 이 순서로 나온다
     template: str | None = None  # 사내 template.docx 경로 (styles.xml 승계)
     page: Page
     fonts: dict[str, FontSpec]
@@ -497,6 +499,10 @@ def dump_profile(profile: Profile) -> str:
     data: dict[str, Any] = {"name": profile.name}
     if profile.description:
         data["description"] = profile.description
+    if profile.label:
+        data["label"] = profile.label
+    if profile.preset_order is not None:
+        data["preset_order"] = profile.preset_order
     if profile.template:
         data["template"] = profile.template
 

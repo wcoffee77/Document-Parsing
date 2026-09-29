@@ -18,27 +18,49 @@ from doc2report.web.server import create_server
 # ── 옵션 ────────────────────────────────────────────────────────────────
 
 
-def test_manual_options_override_profile_values():
-    prof, polish = opts.manual_profile({
-        "profile": "confluence", "polish": "llm",
+def test_presets_are_profiles_with_preset_order():
+    assert opts.presets()[:2] == ["default", "confluence"]
+    report, confluence = opts.profile_info("default"), opts.profile_info("confluence")
+    assert (report["label"], confluence["label"]) == ("보고서", "Confluence 변환")
+
+
+def test_confluence_preset_matches_user_spec():
+    """2026-09-29 사용자: 위·아래 2.0cm, 좌·우 1.5cm, 제목 16pt, 본문 12pt, 맑은 고딕, 줄간격 1.25."""
+    fmt = opts.profile_info("confluence")["format"]
+    assert (fmt["margin_top"], fmt["margin_bottom"], fmt["margin_left"], fmt["margin_right"]) == \
+        ("2", "2", "1.5", "1.5")
+    assert (fmt["title_size"], fmt["size"], fmt["font"], fmt["line_spacing"]) == \
+        ("16pt", "12pt", "맑은 고딕", "1.25")
+    prof = opts.load_profile("confluence")
+    assert prof.font("table").east_asia == "맑은 고딕"  # 제목·표도 body 글꼴을 물려받음
+
+
+def test_custom_preset_overrides_only_changed_values():
+    prof = opts.format_profile({"preset": "custom", "custom": {
+        "base": "confluence", "size": "13pt", "margin_top": "1.2", "font": "맑은 고딕"}})
+    base = opts.load_profile("confluence")
+    assert prof.font("body").size == 13 * 12700
+    assert prof.page.margin.top == 12 * 36000 and prof.page.margin.left == base.page.margin.left
+    assert prof.font("title").size == base.font("title").size
+    with pytest.raises(ValueError):
+        opts.format_profile({"preset": "../../etc"})
+    with pytest.raises(ValueError):
+        opts.format_profile({"preset": "custom", "custom": {"base": "nope"}})
+
+
+def test_manual_rules_are_put_into_the_chosen_preset():
+    prof, polish, _ = opts.build_profile({
+        "mode": "manual", "preset": "confluence", "polish": "llm",
         "text": {"auto_markers": True, "level_bold": True, "unknown": True},
         "tables": {"allow_landscape": True, "align": "center"},
-        "format": {"size": "13pt"},
-    })
+    }, [], [], llm_ready=False)
     assert polish == "llm"
     assert prof.text.auto_markers and prof.text.level_bold
     assert prof.tables.allow_landscape and prof.tables.align == "center"
-    assert prof.font("body").size == 13 * 12700
-    base = opts.profile_info("confluence")
-    assert prof.font("title").size == opts.load_profile("confluence").font("title").size
-    assert base["text"]["auto_markers"] is False  # 프로파일 파일은 그대로
-
-
-def test_manual_rejects_unknown_profile_and_polish():
+    assert prof.font("body").east_asia == "맑은 고딕"  # 서식은 preset 그대로
+    assert opts.profile_info("confluence")["text"]["auto_markers"] is False  # 프로파일 파일은 그대로
     with pytest.raises(ValueError):
-        opts.manual_profile({"profile": "../../etc"})
-    with pytest.raises(ValueError):
-        opts.manual_profile({"profile": "default", "polish": "magic"})
+        opts.build_profile({"mode": "manual", "polish": "magic"}, [], [], llm_ready=False)
 
 
 def test_every_toggle_is_a_real_profile_field():
@@ -65,8 +87,20 @@ def test_auto_decides_structured_confluence_vs_unstructured_memo():
     confluence = opts.auto_decide([memo], ["confluence"], allow_llm=True, llm_ready=True)
     assert confluence.polish == "none"  # Confluence는 항상 원문 유지(사용자 규칙)
     two = opts.auto_decide([memo, memo], ["text", "text"], allow_llm=False, llm_ready=False)
-    assert two.summary["heavy"] and two.profile.font("body").size == \
-        opts.load_profile("confluence").font("body").size
+    assert two.summary["heavy"]
+    assert two.profile.font("body").size == opts.load_profile("default").font("body").size  # 서식은 그대로
+    assert any("Confluence 변환" in r for r in two.reasons)  # 권하기만
+
+
+def test_auto_rules_keep_the_chosen_preset_format():
+    from doc2report.pipeline import load_document
+    from doc2report.sources import load_text
+
+    memo, _ = load_document(load_text("회의 메모입니다"))
+    prof, polish, decision = opts.build_profile({"preset": "confluence"}, [memo], ["text"],
+                                                llm_ready=False)
+    assert prof.font("body").east_asia == "맑은 고딕" and prof.text.auto_markers is True
+    assert decision is not None and polish == "rules"
 
 
 def test_date_option_is_formatted_with_profile():
@@ -87,7 +121,7 @@ def test_safe_name_strips_windows_illegal_characters():
 def test_job_writes_all_formats_with_unique_names(tmp_path):
     runner = JobRunner(tmp_path / "out", tmp_path / "up")
     payload = {"inputs": [{"type": "text", "text": "1. 배경\n□ 현황", "title": "메모"}],
-               "options": {"mode": "manual", "profile": "confluence", "formats": ["docx", "md"],
+               "options": {"mode": "manual", "preset": "confluence", "formats": ["docx", "md"],
                            "title": "주간: 보고", "date": "today"}}
     first = runner.run_sync(payload)
     second = runner.run_sync(payload)

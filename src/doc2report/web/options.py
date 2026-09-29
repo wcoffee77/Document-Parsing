@@ -1,5 +1,12 @@
 """웹 화면의 변환 옵션 ↔ 프로파일.
 
+두 축을 따로 고른다.
+- **서식(preset)** — 출력 설정의 "보고서 / Confluence 변환 / 사용자 설정". 여백·글꼴·크기·줄간격·
+  표 글자 사다리. `preset_order`가 있는 프로파일이 목록에 나오고(새 서식은 yaml 한 장 추가로),
+  사용자 설정은 고른 서식을 출발점으로 값을 덮어쓴다(`with_overrides`).
+- **규칙** — 말머리·문장 다듬기·표 제목 등 `text.*`. 자동 판단 또는 직접 선택.
+최종 프로파일 = 서식 프로파일에 규칙(text)을 끼운 것.
+
 화면의 체크박스 하나하나는 **프로파일 값 하나**다(text.*, tables.*). 그래서 옵션을 늘릴 때 변환
 코드에 분기를 추가하지 않고 여기 목록에 한 줄만 넣으면 된다 — 값은 프로파일을 model_copy로
 덮어쓸 뿐이다(프로파일 파일은 그대로). 체크박스 이름·설명도 여기가 원본이고 화면은 받아 그린다.
@@ -7,7 +14,8 @@
 "자동 판단"은 읽어 들인 문서를 보고 두 가지를 따로 정한다.
 - 정리 정도: 제목·말머리가 있는 문단 비율 → 원문 유지(confluence 규칙) / 새로 정리(default 규칙:
   말머리 생성 + 문장 다듬기, LLM은 허용했을 때만). Confluence 페이지는 항상 원문 유지(사용자 규칙).
-- 분량: 글자 수·표 개수·입력 개수 → 내용 많은 문서 서식(confluence 글자 크기) / 사내 기본 서식.
+- 분량: 글자 수·표 개수·입력 개수가 많은데 보고서 서식을 골랐으면 Confluence 변환 서식을 권한다
+  (서식은 사용자가 고른 것이 이긴다 — 조용히 바꾸지 않는다).
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ from datetime import date as _date
 from ..ir import Document, Heading, ListItem, Paragraph, Table, is_blank, iter_tables, plain
 from ..profile import PROFILE_DIR, Profile, load_profile
 from ..transform.structure import has_leading_marker
-from ..units import fmt_pt
+from ..units import emu_to_mm, fmt_pt
 
 # (키, 화면 이름, 설명)
 MARKER_TOGGLES = [
@@ -42,6 +50,8 @@ TABLE_TOGGLES = [
 ]
 TABLE_CHOICES = {"align": [("right", "오른쪽"), ("center", "가운데"), ("left", "왼쪽")]}
 FORMAT_KEYS = ("font", "size", "line_spacing", "title_size", "table_size")
+MARGIN_SIDES = ("top", "bottom", "left", "right")
+_HEAVY_PRESET = "confluence"  # 내용이 많을 때 권하는 서식
 
 _STRUCTURED_RATIO = 0.3  # 제목·말머리가 있는 문단이 이 비율 이상이면 "정리된 문서"
 _HEAVY_CHARS = 3000      # 본문 글자 수가 이 이상이면 "내용 많은 문서"
@@ -61,25 +71,50 @@ def profile_names() -> list[str]:
 
 
 def profile_info(name: str) -> dict:
-    """화면이 체크박스 기본값·선택지를 채우는 데 쓰는 프로파일 요약."""
+    """화면이 서식 선택지·체크박스 기본값을 채우는 데 쓰는 프로파일 요약."""
     prof = load_profile(name)
     text = prof.text
+    fmt = format_values(prof)
     return {
         "name": name,
+        "label": prof.label or name,
+        "preset_order": prof.preset_order,
         "description": prof.description or name,
+        "summary": (f"여백 위·아래 {_pair(fmt['margin_top'], fmt['margin_bottom'])}cm, "
+                    f"좌·우 {_pair(fmt['margin_left'], fmt['margin_right'])}cm · {fmt['font']} · "
+                    f"제목 {fmt['title_size']}·본문 {fmt['size']}·표 {fmt['table_size']}부터 · "
+                    f"줄간격 {fmt['line_spacing']}"),
         "text": {key: bool(getattr(text, key)) for key, _, _ in
                  MARKER_TOGGLES + POLISH_TOGGLES + TABLE_TOGGLES},
         "polish": text.polish or "rules",
         "tables": {"allow_landscape": prof.tables.allow_landscape, "align": prof.tables.align},
-        "format": {
-            "font": prof.font("body").east_asia or prof.font("body").latin or "",
-            "size": fmt_pt(prof.font("body").size),
-            "line_spacing": str(prof.font("body").line_spacing or ""),
-            "title_size": fmt_pt(prof.font("title").size) if prof.has_font("title") else "",
-            "table_size": fmt_pt(prof.table_font_ladder()[0]),
-        },
+        "format": fmt,
         "choices": {k: [str(v) for v in values] for k, values in prof.choices.model_dump().items()},
     }
+
+
+def _pair(a: str, b: str) -> str:
+    return a if a == b else f"{a}·{b}"
+
+
+def format_values(prof: Profile) -> dict:
+    body = prof.font("body")
+    margin = prof.page.margin
+    return {
+        "font": body.east_asia or body.latin or "",
+        "size": fmt_pt(body.size),
+        "line_spacing": f"{body.line_spacing:g}" if body.line_spacing else "",
+        "title_size": fmt_pt(prof.font("title").size) if prof.has_font("title") else "",
+        "table_size": fmt_pt(prof.table_font_ladder()[0]),
+        **{f"margin_{side}": f"{emu_to_mm(getattr(margin, side)) / 10:g}"
+           for side in MARGIN_SIDES},
+    }
+
+
+def presets() -> list[str]:
+    """서식 선택 목록(preset_order 순). 사용자 설정("custom")은 화면이 따로 붙인다."""
+    found = [(load_profile(n).preset_order, n) for n in profile_names()]
+    return [n for order, n in sorted((o, n) for o, n in found if o is not None)]
 
 
 def schema() -> dict:
@@ -87,23 +122,39 @@ def schema() -> dict:
         return [{"key": k, "label": label, "help": help_} for k, label, help_ in items]
 
     return {"markers": rows(MARKER_TOGGLES), "polish": rows(POLISH_TOGGLES),
-            "tables": rows(TABLE_TOGGLES),
+            "tables": rows(TABLE_TOGGLES), "presets": presets(),
             "table_align": [{"value": v, "label": label} for v, label in TABLE_CHOICES["align"]],
-            "auto": {"chars": _HEAVY_CHARS, "tables": _HEAVY_TABLES, "ratio": _STRUCTURED_RATIO,
-                     "heavy_profile": "confluence"}}
+            "auto": {"chars": _HEAVY_CHARS, "tables": _HEAVY_TABLES, "ratio": _STRUCTURED_RATIO}}
 
 
-def manual_profile(options: dict) -> tuple[Profile, str]:
-    """직접 선택 모드: 고른 프로파일 위에 체크박스 값을 덮어쓴다."""
-    name = options.get("profile") or "default"
-    if name not in profile_names():
-        raise ValueError(f"알 수 없는 프로파일: {name}")
-    prof = load_profile(name)
-    current = profile_info(name)["format"]
-    fmt = {k: v for k, v in (options.get("format") or {}).items()
-           if k in FORMAT_KEYS and v and str(v) != current.get(k)}  # 바꾼 값만 덮어쓴다
-    if fmt:
-        prof = prof.with_overrides(**fmt)
+def format_profile(options: dict) -> Profile:
+    """출력 설정의 서식 선택 → 서식 프로파일. 사용자 설정은 출발 서식에서 바꾼 값만 덮어쓴다."""
+    preset = options.get("preset") or "default"
+    if preset != "custom":
+        if preset not in presets():
+            raise ValueError(f"알 수 없는 서식: {preset}")
+        return load_profile(preset)
+    custom = options.get("custom") or {}
+    base = custom.get("base") or "default"
+    if base not in presets():
+        raise ValueError(f"알 수 없는 출발 서식: {base}")
+    prof = load_profile(base)
+    current = format_values(prof)
+    changed = {k: str(v).strip() for k, v in custom.items()
+               if k in current and str(v).strip() and str(v).strip() != current[k]}
+    overrides = {k: v for k, v in changed.items() if k in FORMAT_KEYS}
+    if any(f"margin_{side}" in changed for side in MARGIN_SIDES):
+        overrides["margin"] = ",".join(
+            f"{changed.get(f'margin_{side}', current[f'margin_{side}'])}cm" for side in MARGIN_SIDES)
+    try:
+        return prof.with_overrides(**overrides) if overrides else prof
+    except ValueError as exc:
+        raise ValueError(f"사용자 설정 값을 읽을 수 없습니다({exc}) — 크기는 12pt, 줄간격은 1.3, "
+                         "여백은 cm 숫자로 적어 주세요") from exc
+
+
+def manual_rules(prof: Profile, options: dict) -> tuple[Profile, str]:
+    """직접 선택 모드: 체크박스 값(규칙)을 서식 프로파일에 끼운다."""
     known = {k for k, _, _ in MARKER_TOGGLES + POLISH_TOGGLES + TABLE_TOGGLES}
     text_updates = {k: bool(v) for k, v in (options.get("text") or {}).items() if k in known}
     table_opts = options.get("tables") or {}
@@ -120,8 +171,22 @@ def manual_profile(options: dict) -> tuple[Profile, str]:
     return prof, polish
 
 
+def build_profile(options: dict, docs: list[Document], kinds: list[str], *,
+                  llm_ready: bool) -> tuple[Profile, str, Decision | None]:
+    fmt = format_profile(options)
+    if options.get("mode") == "manual":
+        prof, polish = manual_rules(fmt, options)
+        return prof, polish, None
+    decision = auto_decide(docs, kinds, allow_llm=bool(options.get("allow_llm")),
+                           llm_ready=llm_ready, preset=fmt)
+    return decision.profile, decision.polish, decision
+
+
 def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,
-                llm_ready: bool) -> Decision:
+                llm_ready: bool, preset: Profile | None = None) -> Decision:
+    """규칙만 정한다. 서식은 사용자가 고른 preset 그대로 — 내용이 많은데 보고서 서식이면
+    Confluence 변환 서식을 **권하기만** 한다(조용히 바꾸지 않음)."""
+    preset = preset or load_profile("default")
     base = load_profile("default")
     blocks = [b for d in docs for b in d.blocks
               if isinstance(b, (Heading, Paragraph, ListItem)) and not is_blank(plain(b.runs))]
@@ -144,15 +209,14 @@ def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,
                            "말머리를 만들고 문장을 개조식으로 다듬음")
 
     heavy = chars >= _HEAVY_CHARS or tables >= _HEAVY_TABLES or len(docs) >= 2
-    fonts = load_profile("confluence" if heavy else "default")
-    size_text = (f"본문 {fmt_pt(fonts.font('body').size)}·제목 {fmt_pt(fonts.font('title').size)}·"
-                 f"표 {fmt_pt(fonts.table_font_ladder()[0])}부터")
-    volume = f"본문 {chars:,}자·표 {tables}개·입력 {len(docs)}개"
-    reasons.append(f"{volume} → " + ("내용 많은 문서 서식" if heavy else "사내 기본 서식")
-                   + f"({size_text})")
+    heavy_name = _HEAVY_PRESET if _HEAVY_PRESET in presets() else None
+    if heavy and heavy_name and preset.name == "default":
+        label = load_profile(heavy_name).label or heavy_name
+        reasons.append(f"본문 {chars:,}자·표 {tables}개·입력 {len(docs)}개로 내용이 많음 — "
+                       f"'{label}' 서식이 더 잘 맞을 수 있음(서식은 고른 그대로 둠)")
 
     text_profile = load_profile("confluence" if structured else "default")
-    prof = fonts.model_copy(update={"text": text_profile.text})
+    prof = preset.model_copy(update={"text": text_profile.text})
     if structured:
         polish = "none"
     elif allow_llm and llm_ready:

@@ -97,7 +97,7 @@ def test_profile_init_round_trips(tmp_path):
 
 def test_confluence_profile_extends_default_with_dense_sizes():
     """Confluence·내용 많은 문서: 제목 16pt, 본문 12pt, 표 11~9pt, 문장 다듬기 없음
-    (2026-09-29 사용자 규칙). 나머지(글꼴·여백·말머리 체계)는 default에서 물려받는다."""
+    (2026-09-29 사용자 규칙). 나머지(말머리 체계 등)는 default에서 물려받는다."""
     conf, default = load_profile("confluence"), load_profile("default")
     assert emu_to_pt(conf.font("title").size) == 16
     assert emu_to_pt(conf.font("body").size) == 12
@@ -106,8 +106,10 @@ def test_confluence_profile_extends_default_with_dense_sizes():
     assert conf.text.polish == "none"
     assert conf.text.keep_leading_markers
     # 덮어쓰지 않은 값은 부모 그대로 — 단위가 두 번 변환되지도 않는다
-    assert conf.font("body").east_asia == default.font("body").east_asia
-    assert conf.page.margin.left == default.page.margin.left
+    # 덮어쓰지 않은 값(머리글 여백·말머리 체계·표 음영)은 부모 그대로 — 단위가 두 번 변환되지도 않는다.
+    # 글꼴·여백·줄간격은 2026-09-29 "Confluence 변환" 서식으로 바뀜(맑은 고딕, 2.0/1.5cm, 1.25배)
+    assert conf.page.margin.header == default.page.margin.header
+    assert conf.tables.header_shading == default.tables.header_shading
     assert conf.numbering == default.numbering
 
 

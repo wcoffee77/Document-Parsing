@@ -7,6 +7,8 @@
 
 name: default
 description: 사내 보고서 표준 서식 (A4 세로, 바탕체 14pt)
+label: 보고서                # 웹 화면 서식 선택 이름
+preset_order: 1
 
 page:
   size: A4

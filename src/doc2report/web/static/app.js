@@ -75,21 +75,23 @@ async function loadProfiles() {
   const data = await api("/api/profiles");
   state.schema = data.schema;
   for (const p of data.profiles) state.profiles[p.name] = p;
+  const presets = data.schema.presets.filter((n) => state.profiles[n]);
+  const label = (n) => state.profiles[n].label;
 
-  const sel = $("#profile");
-  sel.innerHTML = data.profiles.map((p) =>
-    `<option value="${esc(p.name)}">${esc(p.name)} — ${esc(p.description)}</option>`).join("");
+  $("#preset-radios").innerHTML = presets.concat(["custom"]).map((n) =>
+    `<label><input type="radio" name="preset" value="${esc(n)}"><span>${
+      esc(n === "custom" ? "사용자 설정" : label(n))}</span></label>`).join("");
+  const opts = presets.map((n) => `<option value="${esc(n)}">${esc(label(n))}</option>`).join("");
+  $("#rules-base").innerHTML = opts;
+  $("#cu-base").innerHTML = opts;
+
   renderChecks("#polish-rules", data.schema.polish);
   renderChecks("#marker-rules", data.schema.markers);
   renderChecks("#table-rules", data.schema.tables);
   $("#tbl-align").innerHTML = data.schema.table_align.map((o) =>
     `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
-
   const auto = data.schema.auto;
-  $("#auto-heavy").textContent =
-    `${auto.chars.toLocaleString()}자·표 ${auto.tables}개·입력 2개 이상`;
-  const heavy = state.profiles[auto.heavy_profile];
-  if (heavy) $("#auto-size").textContent = `본문 ${heavy.format.size}·제목 ${heavy.format.title_size}`;
+  $("#auto-heavy").textContent = `${auto.chars.toLocaleString()}자·표 ${auto.tables}개·입력 2개 이상`;
 }
 
 function renderChecks(target, rows) {
@@ -98,28 +100,52 @@ function renderChecks(target, rows) {
     (r.help ? `<span class="hint">${esc(r.help)}</span>` : "") + `</label>`).join("");
 }
 
-function fillSelect(id, values, current) {
-  const list = Array.from(new Set([current, ...(values || [])].filter(Boolean)));
-  $(id).innerHTML = list.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
-  $(id).value = current || "";
-}
-
-function applyProfileDefaults(name) {
+// 직접 선택 모드의 체크박스를 한 서식의 기본 규칙으로 채운다.
+function applyRules(name) {
   const p = state.profiles[name];
   if (!p) return;
-  $("#profile").value = name;
-  $("#profile-desc").textContent = p.description;
-  const ch = p.choices || {};
-  fillSelect("#fmt-font", ch.font, p.format.font);
-  fillSelect("#fmt-size", ch.size, p.format.size);
-  fillSelect("#fmt-line_spacing", ch.line_spacing, p.format.line_spacing);
-  fillSelect("#fmt-title_size", ch.title_size, p.format.title_size);
-  fillSelect("#fmt-table_size", ch.table_size, p.format.table_size);
+  $("#rules-base").value = name;
   for (const box of $$("[data-rule]")) box.checked = !!p.text[box.dataset.rule];
   setRadio("polish", p.polish);
   $("#tbl-landscape").checked = !!p.tables.allow_landscape;
   $("#tbl-align").value = p.tables.align;
 }
+
+const CUSTOM_KEYS = ["font", "title_size", "size", "line_spacing", "table_size",
+  "margin_top", "margin_bottom", "margin_left", "margin_right"];
+
+// 사용자 설정 칸을 출발 서식의 값으로 채운다(자유롭게 고쳐 쓰는 출발점).
+function fillCustom(base) {
+  const p = state.profiles[base];
+  if (!p) return;
+  $("#cu-base").value = base;
+  for (const k of CUSTOM_KEYS) $(`#cu-${k}`).value = p.format[k] || "";
+  for (const k of ["font", "title_size", "size", "line_spacing", "table_size"]) {
+    const values = Array.from(new Set([p.format[k], ...((p.choices || {})[k] || [])].filter(Boolean)));
+    $(`#dl-${k}`).innerHTML = values.map((v) => `<option value="${esc(v)}">`).join("");
+  }
+}
+
+function syncPreset() {
+  const preset = radio("preset");
+  const custom = preset === "custom";
+  $("#custom-panel").classList.toggle("hidden", !custom);
+  const p = state.profiles[custom ? $("#cu-base").value : preset];
+  $("#preset-summary").textContent = custom ? "출발 서식에서 바꾸고 싶은 값만 고치세요 (단위: pt, 배, cm)"
+    : (p ? `${p.summary}` : "");
+  const hasConfluence = state.inputs.some((i) => i.type === "confluence");
+  const suggest = hasConfluence && preset === "default" && state.profiles.confluence;
+  const hint = $("#preset-hint");
+  hint.classList.toggle("hidden", !suggest);
+  if (suggest) {
+    hint.innerHTML = `Confluence 입력이 있습니다 — '${esc(state.profiles.confluence.label)}' 서식이 맞을 수 있습니다
+      <button class="btn tiny" id="use-confluence">바꾸기</button>`;
+  }
+}
+
+document.addEventListener("click", (ev) => {
+  if (ev.target.id === "use-confluence") { setRadio("preset", "confluence"); syncPreset(); }
+});
 
 function setRadio(name, value) {
   const el = $(`input[name="${name}"][value="${value}"]`);
@@ -135,18 +161,17 @@ function collectOptions() {
   const formats = ["docx"];
   if ($("#out-pdf").checked && !$("#out-pdf").disabled) formats.push("pdf");
   if ($("#out-md").checked) formats.push("md");
+  const custom = { base: $("#cu-base").value };
+  for (const k of CUSTOM_KEYS) custom[k] = $(`#cu-${k}`).value.trim();
   return {
     mode,
     allow_llm: $("#allow-llm").checked,
-    profile: $("#profile").value,
+    preset: radio("preset") || "default",
+    custom,
+    rules_base: $("#rules-base").value,
     polish: radio("polish"),
     text,
     tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
-    format: {
-      font: $("#fmt-font").value, size: $("#fmt-size").value,
-      line_spacing: $("#fmt-line_spacing").value, title_size: $("#fmt-title_size").value,
-      table_size: $("#fmt-table_size").value,
-    },
     section_titles: $("#section-titles").checked,
     page_breaks: $("#page-breaks").checked,
     title: $("#doc-title").value.trim(),
@@ -168,18 +193,19 @@ function saveOptions() {
 function restoreOptions() {
   let o = null;
   try { o = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { o = null; }
-  const first = Object.keys(state.profiles).includes("default") ? "default" : Object.keys(state.profiles)[0];
-  applyProfileDefaults(o && state.profiles[o.profile] ? o.profile : first);
-  if (!o) return syncMode();
+  const presets = state.schema.presets;
+  const first = presets.includes("default") ? "default" : presets[0];
+  const known = (n) => n && state.profiles[n] && presets.includes(n);
+  setRadio("preset", o && (o.preset === "custom" || known(o.preset)) ? o.preset : first);
+  fillCustom(o && o.custom && known(o.custom.base) ? o.custom.base : first);
+  applyRules(o && known(o.rules_base) ? o.rules_base : first);
+  if (!o) { syncPreset(); return syncMode(); }
+  if (o.custom) for (const k of CUSTOM_KEYS) if (o.custom[k]) $(`#cu-${k}`).value = o.custom[k];
   setRadio("mode", o.mode || "auto");
   $("#allow-llm").checked = !!o.allow_llm;
   if (o.polish) setRadio("polish", o.polish);
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
-  for (const [k, v] of Object.entries(o.format || {})) {
-    const sel = $(`#fmt-${k}`);
-    if (sel && v) { if (![...sel.options].some((x) => x.value === v)) sel.add(new Option(v, v)); sel.value = v; }
-  }
   $("#section-titles").checked = o.section_titles !== false;
   $("#page-breaks").checked = !!o.page_breaks;
   setRadio("date", o.date_mode ?? "");
@@ -187,6 +213,7 @@ function restoreOptions() {
   $("#out-pdf").checked = (o.formats || []).includes("pdf");
   $("#out-md").checked = (o.formats || []).includes("md");
   $("#out-report").checked = o.report !== false;
+  syncPreset();
   syncMode();
 }
 
@@ -205,6 +232,7 @@ function syncMode() {
 const KIND_LABEL = { confluence: "Confluence", docx: "Word", text: "글" };
 
 function renderInputs() {
+  if (state.schema) syncPreset();
   const list = $("#input-list");
   $("#input-empty").classList.toggle("hidden", state.inputs.length > 0);
   list.innerHTML = state.inputs.map((item, i) => {
@@ -417,9 +445,11 @@ $("#llm-test").addEventListener("click", async () => {
 
 // ── 시작 ─────────────────────────────────────────────────────────────────
 
-$("#profile").addEventListener("change", (ev) => { applyProfileDefaults(ev.target.value); syncMode(); });
+$("#rules-base").addEventListener("change", (ev) => { applyRules(ev.target.value); syncMode(); });
+$("#cu-base").addEventListener("change", (ev) => { fillCustom(ev.target.value); syncPreset(); });
 document.addEventListener("change", (ev) => {
   if (ev.target.name === "mode" || ev.target.name === "polish" || ev.target.name === "date") syncMode();
+  if (ev.target.name === "preset") syncPreset();
 });
 
 (async function init() {

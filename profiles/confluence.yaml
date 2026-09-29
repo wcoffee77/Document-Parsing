@@ -7,14 +7,28 @@
 #   1) 원문에 이미 쓴 글머리 기호(1. 1) □ - · ① ※ 등)는 바꾸지 않는다 — default에서 물려받음
 #   2) Confluence 문장은 이미 정리돼 있으니 문장을 따로 다듬지 않는다 — text.polish: none
 #   3) 내용 많은 문서는 제목 16pt, 본문 12pt, 표 11~9pt
+# 2026-09-29 사용자 "Confluence 변환" 서식: 여백 위·아래 2.0cm, 좌·우 1.5cm, 맑은 고딕,
+#   제목 16pt, 본문 12pt, 줄간격 1.25배
 
 extends: default
 name: confluence
-description: Confluence·내용 많은 문서 (원문 말머리·문장 유지, 제목 16pt·본문 12pt·표 11~9pt)
+description: Confluence·내용 많은 문서 (원문 말머리·문장 유지)
+label: Confluence 변환
+preset_order: 2
+
+page:
+  margin:
+    top: 20mm
+    bottom: 20mm
+    left: 15mm
+    right: 15mm
 
 fonts:
-  body:
+  body:                      # 다른 서식(제목·표·날짜)은 글꼴을 body에서 물려받는다
+    eastAsia: 맑은 고딕
+    ascii: 맑은 고딕
     size: 12pt
+    line_spacing: 125%
   title:
     size: 16pt
   date:
@@ -37,5 +51,8 @@ text:
   level_bold: false          # 1.·□ 단계 문장 전체 굵게 안 함 — 원문에서 굵던 글씨와 제목만 굵게
 
 choices:
+  font: [맑은 고딕, 바탕체]
+  line_spacing: ["1.25", "1.15", "1.4", "1.45"]
+  title_size: [16pt, 18pt, 20pt]
   size: [12pt, 11pt, 13pt]
   table_size: [11pt, 10pt, 9pt]
