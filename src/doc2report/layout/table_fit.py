@@ -40,6 +40,9 @@ class TableLayout:
     header_text: dict[tuple[int, int], tuple[str, str]] = field(default_factory=dict)
     # (행 번호, 행 안의 칸 번호) → 정렬 재지정 (내용이 많아 여러 줄인 셀은 왼쪽 맞춤이 낫다)
     cell_align: dict[tuple[int, int], str] = field(default_factory=dict)
+    # (행 번호, 행 안의 칸 번호) → (글자 크기, 장평) 재지정. 표 전체 크기는 그대로 두고
+    # 유난히 내용이 많은 셀만 더 줄인다(다른 셀까지 덩달아 작아지지 않게).
+    cell_font: dict[tuple[int, int], tuple[int, float]] = field(default_factory=dict)
 
     @property
     def total_width(self) -> int:
@@ -59,7 +62,46 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     layout = _fit_widths(table, profile, available_width)
     _abbreviate_headers(table, profile, layout)
     _left_align_long_cells(table, profile, layout)
+    _shrink_long_cells(table, profile, layout)
     return layout
+
+
+def _shrink_long_cells(table: Table, profile: Profile, layout: TableLayout) -> None:
+    """유난히 내용이 많은 셀은 표 전체 크기는 그대로 두고 그 셀만 더 줄인다
+    (2026-09-29 사용자 요청). 표 전체를 검사하는 `_max_cell_lines`는 셀 하나의
+    **가장 긴 한 줄**이 폭 때문에 여러 줄로 쪼개지는 것만 본다(원래 목적: 열이
+    1글자로 좁아지는 것 방지) — `<br>`/문단이 여러 개라 원래도 줄이 많은 셀은
+    아무리 폭이 넓어도 그 수가 안 줄어 이 검사에 안 걸린다. 그래서 총 줄 수를
+    따로 세어, 표 전체 크기보다 작은 후보 중 큰 것부터 시도해 맞는 걸 쓰고
+    (표에 있는 다른 셀은 그대로 두어야 하니 전체를 다시 줄이지 않는다),
+    끝까지 못 맞추면 사다리의 가장 작은 값으로 멈춘다."""
+    limit = profile.tables.max_cell_lines
+    if not limit:
+        return
+    base = (layout.font_size, layout.char_scale)
+    smaller = sorted((s for s in profile.table_steps() if s[0] * s[1] < base[0] * base[1]),
+                     key=lambda s: -(s[0] * s[1]))
+    if not smaller:
+        return
+    content = [w - layout.cell_margin_x * 2 for w in layout.col_widths]
+
+    for row_index, cell_index, cell, col, span in _iter_grid_indexed(table):
+        if cell.is_header or col >= len(content):
+            continue
+        width = sum(content[col: min(col + span, len(content))])
+        if _cell_total_lines(cell, profile, width, *base) <= limit:
+            continue
+        chosen = smaller[-1]  # 못 맞추면 사다리의 가장 작은 값
+        for step in smaller:
+            if _cell_total_lines(cell, profile, width, *step) <= limit:
+                chosen = step
+                break
+        layout.cell_font[(row_index, cell_index)] = chosen
+
+
+def _cell_total_lines(cell: Cell, profile: Profile, width: float, size: int, scale: float) -> int:
+    measurer = _measurer(cell, profile, size, scale)
+    return sum(measurer.wrap_count(line, width) for line in cell_lines(cell))
 
 
 def _left_align_long_cells(table: Table, profile: Profile, layout: TableLayout) -> None:
@@ -74,8 +116,7 @@ def _left_align_long_cells(table: Table, profile: Profile, layout: TableLayout) 
         if cell.align or col >= len(content):
             continue
         width = sum(content[col: min(col + span, len(content))])
-        measurer = _measurer(cell, profile, layout.font_size, layout.char_scale)
-        total_lines = sum(measurer.wrap_count(line, width) for line in cell_lines(cell))
+        total_lines = _cell_total_lines(cell, profile, width, layout.font_size, layout.char_scale)
         if total_lines >= limit:
             layout.cell_align[(row_index, cell_index)] = "left"
 

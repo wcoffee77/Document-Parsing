@@ -96,6 +96,26 @@ def test_cell_with_many_lines_is_left_aligned(profile):
     assert layout.cell_align.get((1, 1)) == "left"
 
 
+def test_cell_with_many_short_lines_is_shrunk_without_affecting_others(profile):
+    """<br>/여러 문단으로 줄이 많은 셀은 '가장 긴 한 줄'만 보는 _max_cell_lines에는
+    안 걸린다(각 줄이 짧아서) — 그래서 표 전체 크기가 안 줄었다(2026-09-29
+    사용자 보고). 그 셀만 따로 줄이고 다른 셀·표 전체 크기는 그대로 둔다."""
+    many_lines = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄")]) for i in range(6)])
+    one_line = cell("짧은 값")
+    table = Table(rows=[Row(cells=[cell("항목", header=True), cell("설명", header=True)]),
+                        Row(cells=[one_line, many_lines])],
+                  header_rows=1)
+    base_layout = fit_table(Table(rows=[Row(cells=[cell("항목", header=True), cell("설명", header=True)]),
+                                        Row(cells=[one_line, cell("짧은 값2")])],
+                                  header_rows=1),
+                            profile, profile.page.usable_width)
+    layout = fit_table(table, profile, profile.page.usable_width)
+    assert layout.font_size == base_layout.font_size  # 표 전체 크기는 그대로
+    assert (1, 0) not in layout.cell_font  # 짧은 셀은 안 건드림
+    size, scale = layout.cell_font[(1, 1)]
+    assert size < layout.font_size or scale < layout.char_scale
+
+
 def test_cell_align_does_not_override_explicit_alignment(profile):
     right_cell = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄입니다")]) for i in range(5)],
                       align="right")

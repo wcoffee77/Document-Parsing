@@ -86,6 +86,17 @@ def test_existing_bullet_marker_in_list_item_is_not_duplicated():
     assert len(changes) == 1
 
 
+@pytest.mark.parametrize("dot", ["·", "ㆍ", "ᆞ", "‧", "∙", "•"])
+def test_all_middle_dot_lookalikes_are_stripped(dot):
+    """겉보기엔 같은 "가운뎃점"이라도 유니코드가 다른 문자가 여럿이다(U+00B7,
+    호환 자모 U+318D, 옛 아래아 자모 U+119E 등) — 실제 사용자 문서가 어느 걸
+    썼는지 몰라 전부 넣었다(2026-09-29 사용자가 U+318D/U+119E로 재보고)."""
+    doc = Document(blocks=[ListItem(depth=0, runs=[Run(f"{dot} 테스트내용")])])
+    folded, changes = fold_headings_into_levels(doc, ["·", "ㆍ", "ᆞ", "‧", "∙", "•"])
+    assert folded.blocks[0].runs[0].text == "테스트내용"
+    assert len(changes) == 1
+
+
 def test_leading_negative_number_is_not_mistaken_for_a_dash_marker():
     """"-5%" 처럼 마커 뒤에 공백이 없으면 음수로 보고 그대로 둔다."""
     doc = Document(blocks=[ListItem(depth=0, runs=[Run("-5%p 개선")])])
@@ -102,13 +113,14 @@ def test_without_strip_markers_configured_nothing_is_stripped():
 
 
 def test_bracket_caption_above_table_is_moved_to_table_caption():
-    """표 위 "[사업현황]" 같은 꺾쇠 문단은 Table.caption으로 옮겨 제목 접기에서
-    "- [사업현황]"처럼 말머리가 붙지 않게 한다 (2026-09-29 사용자 요청)."""
-    doc = Document(blocks=[Paragraph(runs=[Run("[사업현황]")]), Table(rows=[])])
+    """표 위 "【사업현황】" 같은 꺾쇠 문단은 Table.caption으로 옮겨 제목 접기에서
+    "- 【사업현황】"처럼 말머리가 붙지 않게 한다 — 꺾쇠 자체는 원문 그대로 유지한다
+    (2026-09-29 사용자 요청: 꺾쇠는 원형 유지, 앞의 "-"만 없앨 것)."""
+    doc = Document(blocks=[Paragraph(runs=[Run("【사업현황】")]), Table(rows=[])])
     result, changes = attach_table_captions(doc)
     assert len(result.blocks) == 1
     assert isinstance(result.blocks[0], Table)
-    assert result.blocks[0].caption == "사업현황"
+    assert result.blocks[0].caption == "【사업현황】"
     assert len(changes) == 1
 
 

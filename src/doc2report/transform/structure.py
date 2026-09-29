@@ -113,31 +113,31 @@ _BRACKET_PAIRS = [("[", "]"), ("［", "］"), ("【", "】"), ("〔", "〕"), ("
 
 
 def attach_table_captions(doc: Document) -> tuple[Document, list[Change]]:
-    """표 바로 위, "[사업현황]"처럼 꺾쇠로 감싼 문단을 Table.caption으로 옮긴다.
+    """표 바로 위, "【사업현황】"처럼 꺾쇠로 감싼 문단을 Table.caption으로 옮긴다.
 
-    옮기지 않으면 제목 접기에서 그 단계의 ListItem이 되어 "- [사업현황]"처럼
+    옮기지 않으면 제목 접기에서 그 단계의 ListItem이 되어 "- 【사업현황】"처럼
     프로파일 말머리(-)가 또 붙는다 — 표 제목이지 항목이 아니므로 attach_table_notes와
     같은 이유로 접기 **전에** 빼 둔다(표 뒤 대신 표 앞이라는 점만 다르다).
+    꺾쇠 자체는 원문 그대로 남긴다 — 뗄 건 그 앞에 붙던 "-" 뿐이다
+    (2026-09-29 사용자 요청: "꺾쇠는 원형 유지, 앞의 '-'만 제외").
     """
     blocks: list[Block] = []
     changes: list[Change] = []
     for block in doc.blocks:
         if isinstance(block, Table) and blocks and isinstance(blocks[-1], Paragraph) and not block.caption:
             text = plain(blocks[-1].runs).strip()
-            caption = _bracket_caption(text)
-            if caption is not None:
+            if _is_bracket_caption(text):
                 blocks.pop()
-                block.caption = caption
-                changes.append(Change(text, caption, "표 제목"))
+                block.caption = text
+                changes.append(Change(text, text, "표 제목(말머리 제외)"))
         blocks.append(block)
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
 
-def _bracket_caption(text: str) -> str | None:
-    for open_c, close_c in _BRACKET_PAIRS:
-        if text.startswith(open_c) and text.endswith(close_c) and len(text) > len(open_c) + len(close_c):
-            return text[len(open_c):-len(close_c)].strip()
-    return None
+def _is_bracket_caption(text: str) -> bool:
+    return any(text.startswith(open_c) and text.endswith(close_c)
+              and len(text) > len(open_c) + len(close_c)
+              for open_c, close_c in _BRACKET_PAIRS)
 
 
 # ── 표 주석 ─────────────────────────────────────────────────────────────

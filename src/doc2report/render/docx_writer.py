@@ -397,19 +397,22 @@ class DocxRenderer:
                 if (end_row, end_col) != (r, col):
                     target = target.merge(table.cell(end_row, end_col))
                 self._fill_cell(target, cell, layout,
-                                sum(layout.col_widths[col : end_col + 1]))
+                                sum(layout.col_widths[col : end_col + 1]),
+                                font_override=layout.cell_font.get((r, index)))
                 col = end_col + 1
 
-    def _fill_cell(self, docx_cell, cell: Cell, layout: TableLayout, width: int) -> None:
+    def _fill_cell(self, docx_cell, cell: Cell, layout: TableLayout, width: int,
+                  *, font_override: tuple[int, float] | None = None) -> None:
         oxml.set_cell_width(docx_cell, width)
         oxml.set_vertical_align(docx_cell, self.profile.tables.valign)
         if cell.is_header and self.profile.tables.header_shading:
             oxml.shade_cell(docx_cell, self.profile.tables.header_shading)
 
+        size, scale = font_override or (layout.font_size, layout.char_scale)
         spec = self.profile.font("table_header" if cell.is_header else "table")
-        spec = spec.resized(layout.font_size)
-        if layout.char_scale != (spec.char_scale or 1.0):
-            spec = spec.model_copy(update={"char_scale": layout.char_scale})
+        spec = spec.resized(size)
+        if scale != (spec.char_scale or 1.0):
+            spec = spec.model_copy(update={"char_scale": scale})
         if cell.align:
             spec = spec.model_copy(update={"align": cell.align})
 
