@@ -201,3 +201,21 @@ def test_left_align_applies_to_whole_column_when_any_cell_is_long(profile):
     assert [layout.cell_align.get((r, 1)) for r in (1, 2, 3)] == ["left"] * 3
     assert (0, 1) not in layout.cell_align  # 머리행
     assert all((r, 0) not in layout.cell_align for r in (1, 2, 3))  # 다른 열은 그대로
+
+
+def test_shrunk_font_applies_to_whole_column_not_just_one_cell(profile):
+    """정렬처럼 글자 크기도 열 단위 — 한 셀만 줄면 그 열의 본문 셀 전부 같은 크기,
+    머리행과 다른 열은 그대로(2026-09-29 사용자)."""
+    many = Cell(blocks=[Paragraph(runs=[Run(f"{i}번째 줄")]) for i in range(6)])
+    table = Table(rows=[Row(cells=[cell("구분", header=True), cell("내용", header=True)]),
+                        Row(cells=[cell("가"), cell("짧음")]),
+                        Row(cells=[cell("나"), many]),
+                        Row(cells=[cell("다"), cell("짧음2")])],
+                  header_rows=1)
+    layout = fit_table(table, profile, profile.page.usable_width)
+    fonts = [layout.cell_font.get((r, 1)) for r in (1, 2, 3)]
+    assert fonts[0] is not None and fonts[0] == fonts[1] == fonts[2]
+    assert fonts[0][0] < layout.font_size
+    assert all((r, 0) not in layout.cell_font for r in (1, 2, 3))  # 다른 열
+    assert (0, 1) not in layout.cell_font  # 머리행
+    assert any("열 2" in note for note in layout.notes)

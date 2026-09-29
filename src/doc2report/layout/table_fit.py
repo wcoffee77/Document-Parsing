@@ -63,8 +63,39 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     _abbreviate_headers(table, profile, layout)
     _left_align_long_cells(table, profile, layout)
     _shrink_long_cells(table, profile, layout)
+    _unify_column_fonts(table, layout)
     _balance_table_font(profile, layout)
+    _drop_redundant_cell_fonts(layout)
     return layout
+
+
+def _unify_column_fonts(table: Table, layout: TableLayout) -> None:
+    """글자 크기도 정렬처럼 **열 단위**로 맞춘다(2026-09-29 사용자 요청). 같은 열에서 셀마다
+    크기가 다르면 들쭉날쭉해 보인다 — 열에 줄인 셀이 하나라도 있으면 그 열의 본문 셀 전부가
+    그 열에서 가장 작은 크기를 쓴다. 머리행은 행 단위로 표 크기를 유지하고, 여러 열에 걸친
+    병합 셀은 열 전체를 좌우하지 못하게 자기 값만 쓴다."""
+    if not layout.cell_font:
+        return
+    body = [(ri, ci, col) for ri, ci, cell, col, span in _iter_grid_indexed(table)
+            if not cell.is_header and span == 1]
+    smallest: dict[int, tuple[int, float]] = {}
+    for ri, ci, col in body:
+        step = layout.cell_font.get((ri, ci))
+        if step is not None and (col not in smallest
+                                 or step[0] * step[1] < smallest[col][0] * smallest[col][1]):
+            smallest[col] = step
+    for ri, ci, col in body:
+        if col in smallest:
+            layout.cell_font[(ri, ci)] = smallest[col]
+    for col, (size, _) in sorted(smallest.items()):
+        layout.notes.append(f"열 {col + 1}: 글자 크기를 {fmt_pt(size)}로 열 전체 통일")
+
+
+def _drop_redundant_cell_fonts(layout: TableLayout) -> None:
+    """표 전체 크기가 내려가서 표 크기와 같거나 커진 셀별 크기는 뺀다(표 크기가 곧 그 값)."""
+    base = layout.font_size * layout.char_scale
+    for key in [k for k, (size, scale) in layout.cell_font.items() if size * scale >= base]:
+        del layout.cell_font[key]
 
 
 def _balance_table_font(profile: Profile, layout: TableLayout) -> None:

@@ -186,3 +186,40 @@ def test_table_itself_is_right_aligned(built):
 
     _, docx = built
     assert docx.tables[0].alignment == WD_TABLE_ALIGNMENT.RIGHT
+
+
+def test_confluence_does_not_bold_sentences_that_were_not_bold(tmp_path):
+    """1.·□ 단계의 bold가 그 문장 전체를 굵게 해서, 원문에서 굵지 않던 글씨까지 굵게 나왔다
+    (2026-09-29 사용자). Confluence는 원문 굵은 글씨와 제목만 굵게."""
+    from doc2report.ir import Document, Heading, Paragraph, Run
+    from doc2report.render.docx_writer import DocxRenderer
+    from doc2report.transform.structure import fold_headings_into_levels
+
+    profile = load_profile("confluence")
+    doc = Document(blocks=[Heading(level=2, runs=[Run("추진 배경")]),
+                           Paragraph(runs=[Run("굵지 않은 "), Run("굵은 부분", bold=True),
+                                           Run(" 그리고 평문")]),
+                           Paragraph(runs=[Run("두 번째 평문")])])
+    doc, _ = fold_headings_into_levels(doc, profile.text.leading_markers, keep=True)
+    out = tmp_path / "b.docx"
+    DocxRenderer(profile).save(doc, out)
+    paragraphs = {p.text.split("\t")[-1]: p for p in DocxDocument(str(out)).paragraphs if p.text}
+    assert all(r.bold for r in paragraphs["추진 배경"].runs)  # 제목은 굵게
+    plain_runs = paragraphs["굵지 않은 굵은 부분 그리고 평문"].runs
+    assert [bool(r.bold) for r in plain_runs[1:]] == [False, True, False]  # 첫 run은 말머리
+    assert not any(r.bold for r in paragraphs["두 번째 평문"].runs)
+
+
+def test_default_profile_still_bolds_whole_level_sentences(tmp_path):
+    from doc2report.ir import Document, Heading, Paragraph, Run
+    from doc2report.render.docx_writer import DocxRenderer
+    from doc2report.transform.structure import fold_headings_into_levels
+
+    profile = load_profile("default")
+    doc = Document(blocks=[Heading(level=2, runs=[Run("추진 배경")]),
+                           Paragraph(runs=[Run("본문 문장")])])
+    doc, _ = fold_headings_into_levels(doc, profile.text.leading_markers, keep=True)
+    out = tmp_path / "d.docx"
+    DocxRenderer(profile).save(doc, out)
+    para = [p for p in DocxDocument(str(out)).paragraphs if "본문 문장" in p.text][0]
+    assert all(r.bold for r in para.runs)  # 사내 규격: □ 문장은 굵은체

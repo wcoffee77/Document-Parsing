@@ -177,5 +177,6 @@ def _uniform(runs: list[Run]) -> bool:
 def _rebuild(block: Paragraph | ListItem, runs: list[Run]) -> Block:
     if isinstance(block, ListItem):
         return ListItem(depth=block.depth, runs=runs, ordered=block.ordered,
-                        number=block.number, marker=block.marker)
+                        number=block.number, marker=block.marker,
+                        from_heading=block.from_heading)
     return Paragraph(runs=runs, align=block.align)

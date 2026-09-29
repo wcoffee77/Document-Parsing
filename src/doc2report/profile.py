@@ -267,6 +267,10 @@ class TextRules(_Base):
     note_size_delta: int | None = None
     # 참고사항 표시(※ 등)로 시작하는 문단·항목은 본문보다 이만큼 작게 쓴다(2026-09-29 사용자:
     # "당구장 표시는 참고사항이니 항상 본문보다 2pt 작게"). 표 바로 아래 주석은 별개(fonts.table_note).
+    level_bold: bool = True
+    # true: numbering[].bold가 그 단계 문장 **전체**를 굵게 한다(사내 규격의 "1.·□ 문장은 굵은체").
+    # false: 단계 굵게를 안 쓴다 — 굵은 글씨는 원문에서 굵었던 것과 제목에서 온 항목만
+    #        (2026-09-29 사용자: Confluence에서 굵지 않던 글씨까지 굵게 나옴).
     table_captions: bool = False
     # 표 바로 위에 "[사업현황]"처럼 꺾쇠로 감싼 문단이 있으면 Table.caption으로 옮긴다.
     # 안 옮기면 제목 접기에서 ListItem이 되어 "- [사업현황]"처럼 말머리가 붙는다 —

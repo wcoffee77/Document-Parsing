@@ -65,7 +65,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         if isinstance(block, Heading):
             depth = max(0, block.level - HEADING_BASE)
             heading_depth = depth
-            blocks.append(item(depth, block.runs))
+            blocks.append(item(depth, block.runs, from_heading=True))
         elif isinstance(block, ListItem):
             blocks.append(item(heading_depth + 1 + block.depth, block.runs, block.marker,
                                ordered=block.ordered, number=block.number))
@@ -317,4 +317,5 @@ def _merge_items(group: list[ListItem]) -> ListItem:
     template = first.runs[0] if first.runs else Run("")
     merged_text = " 및 ".join(plain(g.runs) for g in group)
     return ListItem(depth=first.depth, runs=[template.copy_with(merged_text)],
-                    ordered=first.ordered, number=first.number, marker=first.marker)
+                    ordered=first.ordered, number=first.number, marker=first.marker,
+                    from_heading=first.from_heading)

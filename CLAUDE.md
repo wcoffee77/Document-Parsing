@@ -118,7 +118,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 200개
+uv run pytest                           # 203개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -347,6 +347,21 @@ water-filling 쪽을 구체적 수치와 함께 다시 요청할 것.
 - **표 전체는 오른쪽 정렬**(`tables.align: right`). 셀 안 글자 정렬(`fonts.table`)과는 별개.
 - **장평은 100% 고정, 글자 크기만 줄인다**(`tables.char_scale_ladder: [100%]`). 90%도 95%도 보기
   안 좋다는 사용자 판단. 장평 기능은 남겨 뒀다(프로파일에 `[100%, 95%]`를 넣으면 다시 쓴다).
+
+**2026-09-29 여덟 번째 라운드:**
+
+- **원문에 없던 굵은 글씨가 생김 — 원인은 `numbering[].bold`.** 프로파일의 `1.`·`□` 단계는
+  `bold: true`이고 렌더러(`_list_item`)는 이를 말머리가 아니라 **그 항목 문장 전체**에 적용한다.
+  Confluence는 제목 아래 일반 문단도 `headings_as_levels` 때문에 □ 단계 항목이 되고, 원문 말머리가
+  `1.`이면 0 단계가 되어, 굵지 않던 문장이 통째로 굵게 나왔다. `text.level_bold`(기본 true =
+  사내 규격 그대로)를 새로 두고 `confluence.yaml`에서 false로 끈다. 끄면 굵은 글씨는 **원문에서
+  굵던 run**과 **제목에서 접힌 항목**(`ListItem.from_heading`, IR 새 필드)뿐이다. `_rebuild`·
+  `_merge_items`가 `from_heading`을 챙기지 않으면 조용히 사라지니 ListItem을 새로 만들 때 주의.
+- **표 글자 크기도 열 단위**(`table_fit.py::_unify_column_fonts`): 정렬과 같은 원칙. 열에 줄인 셀이
+  하나라도 있으면 그 열의 본문 셀 전부가 그 열의 가장 작은 크기를 쓴다(머리행·병합 셀·다른 열 제외).
+  `_balance_table_font`(표 전체 ↔ 가장 작은 셀 2pt 차이) 보다 **먼저** 돌고, 표 크기가 내려가
+  표 크기와 같아진 셀 값은 `_drop_redundant_cell_fonts`가 뺀다. `--report`에 "열 N: 글자 크기를
+  Xpt로 열 전체 통일"이 남는다.
 
 ## Confluence 연동 (2026-09-28 재작업)
 

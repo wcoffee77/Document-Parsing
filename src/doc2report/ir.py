@@ -76,6 +76,7 @@ class ListItem:
     ordered: bool = False
     number: int | None = None  # ordered일 때 원본 번호
     marker: str | None = None  # 원문에 문자로 쳐 둔 말머리("ㆍ", "①", "1.") — 있으면 그대로 쓴다
+    from_heading: bool = False  # 제목을 접어 만든 항목 (단계 굵게를 끈 프로파일에서도 굵게 둔다)
 
 
 @dataclass
