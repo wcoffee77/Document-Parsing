@@ -30,3 +30,9 @@ $env:CONFLUENCE_API_TOKEN = "여기에_PAT"
 # 온프렘 LLM 연동 때 HTTP_PROXY가 사내 Squid로 요청을 우회시켜 막힌 적이 있었다
 # (scripts/onprem_env.ps1 참고). Confluence 접속도 안 되면 이 호스트를 추가해 본다.
 # $env:NO_PROXY = "api.confluence.samsungds.net," + $env:NO_PROXY
+
+# ── 4. 사내망에서 httpx가 403으로 막힐 때 (2026-09-29 실측) ───────────────
+# doc2report는 httpx가 403을 받으면 Windows에서 자동으로 PowerShell
+# (Invoke-WebRequest)로 한 번 더 시도한다 — 보통은 아래를 켤 필요가 없다.
+# 자동 대체도 안 통하면 이 줄의 주석을 풀어 처음부터 PowerShell만 쓰게 한다.
+# $env:DOC2REPORT_CONFLUENCE_TRANSPORT = "powershell"

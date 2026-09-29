@@ -105,7 +105,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 141개
+uv run pytest                           # 146개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -173,8 +173,31 @@ REST 경로에 들어가 404가 났을 것 — 실제 사내 인스턴스로 시
 못 알아보는 URL(단축 링크 등)은 조용히 엉뚱한 요청을 보내는 대신 바로
 명확한 에러를 낸다.
 
+**API 토큰 승인 완료, REST 연결 확인됨(2026-09-29).** `CONFLUENCE_URL`은 실제로
+`http://api.confluence.samsungds.net/rest/api/`(REST 전용 게이트웨이, 브라우저
+위키 주소와 다른 서브도메인)로 확인됐다.
+
+**사내망에서 httpx가 403으로 막히는 문제 발견·대응**: 같은 사내 PC에서 다른
+에이전트(CodeMate/Roo)가 Confluence 페이지를 읽다가, httpx 요청은 403으로
+거부되고 PowerShell의 `Invoke-WebRequest`(원시 바이트 스트림을 UTF-8로 디코딩)는
+통과하는 걸 확인했다. **원인은 확정하지 못했다** — 그 에이전트는 "사내 커스텀
+인증서 문제"라고 진단했지만, httpx가 SSL 에러가 아니라 정상적인 HTTP 403 *응답*을
+받았다는 점에서(TLS 신뢰 실패라면 애초에 응답까지 못 갔을 것) 사내 보안
+게이트웨이가 요청 형태(User-Agent 등)로 판별해 차단했을 가능성도 있다. 원인을
+추측해 httpx 쪽을 계속 고치는 대신 **검증된 경로를 그대로 재현**했다:
+`sources/confluence.py`가 httpx로 403을 받으면 Windows에서만 자동으로
+PowerShell(`subprocess` + `Invoke-WebRequest -UseBasicParsing`, 바이너리 안전을
+위해 Base64로 주고받음)로 한 번 더 시도하고, 성공하면 --report에 남긴다.
+`DOC2REPORT_CONFLUENCE_TRANSPORT=powershell`로 처음부터 강제할 수도 있다.
+PowerShell 스크립트 자체는 **이 세션(Linux 샌드박스)에서 실행해 볼 수 없어서
+Windows에서 실제로 검증된 적은 아직 없다** — Python 쪽 분기·재시도·오류 처리
+로직만 `tests/test_confluence_source.py`에서 `subprocess.run`을 흉내 내 검증했다.
+
 **아직 검증되지 않은 것 — 실제 사내 Confluence로 다음에 확인할 것:**
 
+- **PowerShell 대체 경로 자체가 실제 Windows에서 동작하는지.** 특히 헤더 해시테이블
+  리터럴 문법(세미콜론 구분), 토큰에 작은따옴표가 들어갈 때의 이스케이프, 첨부파일
+  같은 바이너리 응답의 Base64 왕복.
 - 이 코드는 `tests/test_confluence_storage.py`(파서, 고정 XHTML 픽스처),
   `tests/test_confluence_source.py`(REST 클라이언트, `httpx.MockTransport`로 흉내),
   `tests/test_confluence_pipeline.py`(파서→변환→렌더 전 과정)로 검증했지만, 셋 다
@@ -184,7 +207,13 @@ REST 경로에 들어가 404가 났을 것 — 실제 사내 인스턴스로 시
   꼭 확인해야 한다.
 - 인증 방식 분기(Cloud/Server 판별을 USERNAME 유무로)가 실제 사내 Confluence 배포
   형태와 맞는지 확인 필요.
+- 첨부 이미지 다운로드 경로(`_links.download`)가 REST 게이트웨이 호스트와 다를 수
+  있어 응답의 `_links.base`를 우선 쓰도록 방금 고쳤는데, 실제 응답에 그 필드가
+  있는지·값이 맞는지 확인 필요.
 - 글꼴 선택지는 사용자 요청에 따라 **바탕체·맑은 고딕 둘로 한정**했다.
+
+**다음에 할 일**: 실제 Confluence 페이지 URL로 `doc2report convert`를 돌려
+`.docx`까지 나오는지 확인 — 순서는 `docs/confluence-first-run.md` 4번부터.
 
 ## 온프렘 LLM 연동 (검증 완료 — thinkingcap)
 

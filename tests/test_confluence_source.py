@@ -7,10 +7,19 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import subprocess
+
 import httpx
 import pytest
 
-from doc2report.sources.confluence import _normalize_base_url, load_confluence, page_id_from_url
+from doc2report.sources.confluence import (
+    _normalize_base_url,
+    _ps_escape,
+    load_confluence,
+    page_id_from_url,
+)
 
 
 @pytest.mark.parametrize("url,expected", [
@@ -151,3 +160,107 @@ def test_missing_credentials_raise_clear_error(monkeypatch):
     monkeypatch.delenv("CONFLUENCE_API_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="환경변수"):
         load_confluence("123")
+
+
+# ── PowerShell 대체 경로 (2026-09-29, 사내망에서 httpx가 403으로 막히는 문제) ──
+#
+# 실제 PowerShell을 실행하지 않고 subprocess.run만 흉내 낸다 — 여기서 검증하는 건
+# "403을 받으면 PowerShell로 재시도하고, 그 결과를 올바르게 파싱하는가"이지 PowerShell
+# 스크립트 자체의 정확성이 아니다(그건 Windows에서만 실측 가능).
+
+
+def _fake_ps_run(monkeypatch, stdout: str = "", returncode: int = 0, stderr: str = ""):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr("doc2report.sources.confluence.subprocess.run", fake_run)
+    return calls
+
+
+def _b64_json(data: dict) -> str:
+    return base64.b64encode(json.dumps(data).encode("utf-8")).decode()
+
+
+def test_403_on_windows_falls_back_to_powershell_and_succeeds(monkeypatch):
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setattr("doc2report.sources.confluence.platform.system", lambda: "Windows")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # httpx는 뭘 보내든 사내망처럼 403으로 막는다.
+        return httpx.Response(403, text="blocked by gateway")
+
+    _patch_client(monkeypatch, handler)
+    responses = iter([
+        _b64_json({"title": "분기 보고", "body": {"storage": {"value": "<p>내용</p>"}}}),
+        _b64_json({"results": []}),
+    ])
+    calls = _fake_ps_run(monkeypatch, stdout="")
+    monkeypatch.setattr(
+        "doc2report.sources.confluence.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=next(responses), stderr=""),
+    )
+
+    loaded = load_confluence("123")
+
+    assert "<p>내용</p>" in loaded.text
+    assert any("PowerShell" in note for note in loaded.notes)
+
+
+def test_forced_powershell_transport_never_calls_httpx(monkeypatch):
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setenv("DOC2REPORT_CONFLUENCE_TRANSPORT", "powershell")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("httpx로 요청이 가면 안 된다 — transport가 강제돼 있음")
+
+    _patch_client(monkeypatch, handler)
+    responses = iter([
+        _b64_json({"title": "t", "body": {"storage": {"value": "<p>x</p>"}}}),
+        _b64_json({"results": []}),
+    ])
+    monkeypatch.setattr(
+        "doc2report.sources.confluence.subprocess.run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=next(responses), stderr=""),
+    )
+
+    loaded = load_confluence("123")
+    assert "<p>x</p>" in loaded.text
+
+
+def test_403_without_windows_does_not_try_powershell(monkeypatch):
+    """이 테스트 환경(Linux)에서는 기본적으로 PowerShell을 시도하지 않는다."""
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="denied")
+
+    _patch_client(monkeypatch, handler)
+    calls = _fake_ps_run(monkeypatch)
+    with pytest.raises(RuntimeError, match="접근 권한"):
+        load_confluence("123")
+    assert calls == []
+
+
+def test_powershell_fallback_failure_still_surfaces_original_403(monkeypatch):
+    monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
+    monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
+    monkeypatch.setattr("doc2report.sources.confluence.platform.system", lambda: "Windows")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="blocked")
+
+    _patch_client(monkeypatch, handler)
+    _fake_ps_run(monkeypatch, returncode=1, stderr="powershell.exe를 찾을 수 없음")
+
+    with pytest.raises(RuntimeError, match="접근 권한"):
+        load_confluence("123")
+
+
+def test_ps_escape_handles_embedded_single_quotes():
+    assert _ps_escape("Bearer it's-a-token") == "Bearer it''s-a-token"

@@ -8,29 +8,28 @@
 > 오프라인 설치, `--offline --no-sync`, PowerShell 인코딩 문제 등 공통되는
 > 부분은 그 문서를 그대로 참고하면 된다 — 여기서는 Confluence 쪽만 다룬다.
 
-## 지금 상태 (2026-09-28)
+## 지금 상태 (2026-09-29)
 
-API 토큰 발급에 **사내 승인 절차가 필요해 진행 중**이다. 그 결과만 기다리면
-되고, 나머지(주소 확정, 코드 수정)는 이미 끝나 있다.
+**토큰 승인 완료, REST API 연결 확인됨.** 0~3번은 끝났다 — 이제 4번(실제
+`.docx` 변환)부터 하면 된다.
 
-**승인이 나서 토큰을 받으면, 이 문서 나머지는 안 보고 아래만 하면 된다:**
+**사내망 우회를 코드에 반영함(중요)**: 다른 에이전트(CodeMate/Roo)가 같은 사내
+PC에서 Confluence 페이지를 읽어 보다가, httpx 요청이 403으로 막히고
+PowerShell의 `Invoke-WebRequest`(원시 바이트를 UTF-8로 디코딩)는 통과하는 걸
+확인했다. 원인은 확정되지 않았다(인증서 신뢰 저장소 차이일 수도, 사내 보안
+게이트웨이가 요청 형태로 걸러내는 것일 수도) — 원인을 추측해 고치는 대신
+**검증된 그 경로를 그대로 코드에 넣었다**: `doc2report`가 httpx로 403을 받으면
+Windows에서는 자동으로 PowerShell로 한 번 더 시도하고, 성공하면 그 결과를 쓰며
+`--report`에 "PowerShell로 재시도해 성공함"이라고 남긴다. 그래서 4번을 그냥
+실행하면 되고, 따로 뭘 더 설정할 필요는 없다.
 
+혹시 자동 대체가 안 통하면(예: httpx가 403이 아니라 다른 방식으로 막히는 경우)
+아래 환경변수로 처음부터 PowerShell만 쓰게 강제할 수 있다:
 ```powershell
-notepad scripts\confluence_env.ps1
+$env:DOC2REPORT_CONFLUENCE_TRANSPORT = "powershell"
 ```
-파일이 없다면(아직 한 번도 안 만들었다면) 먼저
-`copy scripts\confluence_env.example.ps1 scripts\confluence_env.ps1`.
-파일을 열면 이 줄이 보인다 — 따옴표 안을 받은 토큰으로 바꾸고 저장:
-```powershell
-$env:CONFLUENCE_API_TOKEN = "여기에_PAT"
-```
-저장 후 같은 PowerShell 창에서:
-```powershell
-. .\scripts\confluence_env.ps1
-```
-여기까지가 **토큰을 입력하는 전부**다. 이어서 검증하려면 3번(REST API 직접
-확인)부터 이어서 하면 된다. 아래 0~2번은 이미 끝났으므로 다시 안 해도 된다
-(맨 처음 실행이거나 확인차 다시 보고 싶을 때만 참고).
+
+아래 0~3번은 이미 끝났으므로 다시 안 해도 된다(확인차 다시 보고 싶을 때만 참고).
 
 ## 0. 사전 준비물
 
@@ -45,9 +44,7 @@ $env:CONFLUENCE_API_TOKEN = "여기에_PAT"
       1번에서 Personal Access Token 발급 메뉴가 보이면 Server/DC, 안 보이고
       Atlassian 계정 자체의 API tokens 메뉴만 있으면 Cloud.
 - [ ] 테스트로 변환해 볼 **실제 접근 권한이 있는 페이지** 하나(URL 또는 페이지 ID)
-- [ ] **API 토큰 — 사내 승인 절차 진행 중.** Server/DC면 개인 액세스 토큰(PAT)만,
-      Cloud면 계정 이메일 + API 토큰. (발급 방법은 1번 참고. **받으면 위
-      "지금 상태" 박스에 적힌 대로 입력.**)
+- [x] **API 토큰 — 승인 완료, 입력 및 REST API 연결 확인됨** (2026-09-29).
 
 ## 1. 인증 정보 발급
 
@@ -133,10 +130,15 @@ Invoke-RestMethod -Uri "$base/content/123456?expand=body.storage" -Headers $head
 > 태그가 제대로 보이는지만 보면 되고, 한글 내용 자체는 4번(실제 변환) 결과인
 > `.docx`로 확인하면 된다 — 그쪽은 이 인코딩 문제와 무관하다.
 >
-> 401이 나오면 토큰/인증 방식(Cloud vs Server-DC) 다시 확인, 403이면 그
-> 페이지에 대한 접근 권한 확인, 404면 페이지 ID나 `CONFLUENCE_URL`(끝에
-> `/wiki` 필요 여부) 확인, 아예 응답이 없으면(타임아웃) 프록시 문제일 수
-> 있다 — 2번 끝의 `NO_PROXY` 참고.
+> 401이 나오면 토큰/인증 방식(Cloud vs Server-DC) 다시 확인, 404면 페이지
+> ID나 `CONFLUENCE_URL`(끝에 `/wiki` 필요 여부) 확인, 아예 응답이 없으면
+> (타임아웃) 프록시 문제일 수 있다 — 2번 끝의 `NO_PROXY` 참고.
+>
+> **403이면 이 명령(`Invoke-RestMethod`)만으로는 권한 문제인지 사내망 차단인지
+> 구분이 안 된다** — 이 스크립트는 PowerShell 자동 대체 로직이 없는 순수
+> 확인용이기 때문이다(맨 위 "지금 상태" 참고). `doc2report`(4번)는 이 403을
+> 자동으로 PowerShell로 재시도하므로, 여기서 403이 나도 당황하지 말고 4번을
+> 그냥 실행해 본다 — 거기서도 안 되면 진짜 권한 문제다.
 
 ## 4. 실제 변환
 
@@ -185,6 +187,10 @@ ID만 뽑아내고, 실제 요청은 `CONFLUENCE_URL` 쪽으로 보낸다. 지�
 - `out/변경내역.md`에 남은 "지원하지 않는 매크로" 계열 노트 — 어떤 페이지의
   어떤 내용이었는지도 같이 (매크로 이름만으로는 어떻게 펼쳐야 할지 판단하기
   어려운 경우가 많다)
+- **PowerShell 대체가 됐는지**: `변경내역.md` 맨 위 노트에 "PowerShell로
+  재시도해 성공함"이 있는지 없는지(있으면 자동 대체가 동작한 것, 없으면
+  httpx가 바로 성공한 것 — 둘 다 정상). 만약 둘 다 실패해서 에러가 났다면
+  "PowerShell 대체 시도도 실패" 뒤에 붙는 메시지도 같이
 
 이 정보가 있으면 `src/doc2report/sources/confluence.py`,
 `src/doc2report/parsers/confluence_storage.py`를 그 자리에서 고칠 수 있다.
