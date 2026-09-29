@@ -149,12 +149,25 @@ $d.ExportAsFixedFormat("...\out\x.pdf", 17); $d.ComputeStatistics(2); $d.Close(0
 간격으로 잠정), 표 글자 11~12pt + 장평 90%, 표 주석 `* ` 10pt, 명사 종결(제목 포함),
 짧은 항목 "및" 병합(둘씩만).
 
-**브랜치가 두 개로 갈라져 있었다가(서식 수정 vs 온프렘 LLM 연동) 2026-09-28에 이
-브랜치(`claude/confluence-document-conversion-dtygn4`)로 합쳤다** — 서로의 커밋을
-모르는 채로 나뉘어 작업되다가, 사내 PC가 온프렘 LLM 브랜치로 실행하는 바람에 서식
-수정이 안 보여서 "개선 안 됨"으로 보고된 적이 있다. **지금부터는 이 브랜치 하나만
-pull하면 둘 다 받는다.** 아직 `main`에는 합쳐지지 않았다 — 사용자가 PR 병합 여부를
-정하기로 함.
+**브랜치가 두 개로 갈라져 있었다가(서식 수정 vs 온프렘 LLM 연동) 2026-09-28에
+`claude/confluence-document-conversion-dtygn4`로 합쳤고, 이후 사용자 요청으로
+`main`을 이 브랜치까지 fast-forward해 2026-09-29부터는 `main` 하나로 작업한다.**
+**지금부터 모든 작업은 `main`에 직접 커밋·푸시한다** — 더 이상 다른 브랜치를 새로
+안 만든다.
+
+같은 종류의 혼란이 한 번 더 있었다: 사내 PC의 로컬 체크아웃이 여전히
+`claude/confluence-document-conversion-dtygn4`(그것도 옛 커밋)에 남아 있어서,
+`git pull`이 `origin/main`은 갱신해도(그 출력만 보고 최신인 줄 착각) 실제
+작업 디렉터리(체크아웃된 브랜치)는 하나도 안 바뀐 채로 계속 옛날 코드를
+돌리고 있었다(2026-09-29). `git checkout main && git pull origin main`으로
+해결. **다음에 이 PC에서 이상하게 "고친 게 반영 안 됨"이 또 나오면 제일 먼저
+`git branch -vv`로 지금 어느 브랜치에 체크아웃돼 있는지부터 확인할 것** —
+`git log -1`만 보면 마치 최신인지 옛날인지 헷갈릴 수 있다.
+
+**2026-09-29 사내 PC 실측으로 확인 완료**: `main`을 pull해서 `doc2report convert`
+정상 동작, Confluence REST API로 실제 페이지를 불러와 처리하는 것까지 확인됨.
+문구 다듬기(`stylize_ko`/`llm_polish`) 결과가 실제 Confluence 문서에 잘 맞는지는
+**사용자가 계속 테스트 중** — 아직 구체적 이슈 보고는 없음.
 
 ## Confluence 연동 (2026-09-28 재작업)
 
@@ -236,8 +249,11 @@ HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 cert
   있는지·값이 맞는지 확인 필요.
 - 글꼴 선택지는 사용자 요청에 따라 **바탕체·맑은 고딕 둘로 한정**했다.
 
-**다음에 할 일**: 실제 Confluence 페이지 URL로 `doc2report convert`를 돌려
-`.docx`까지 나오는지 확인 — 순서는 `docs/confluence-first-run.md` 4번부터.
+**확인 완료(2026-09-29)**: 실제 Confluence 페이지 URL로 `doc2report convert`를 돌려
+`.docx`까지 나오는 것까지 사내 PC에서 검증됨. **다음에 할 일**: 실제 문서로 문구
+다듬기(개조식 변환·LLM polish) 결과가 괜찮은지 세밀 확인 — 사용자가 진행 중이며
+아직 구체적 문제는 보고되지 않음. 위 "아직 검증되지 않은 것" 목록(레이아웃 매크로,
+인증 방식 분기, 첨부 이미지 경로)은 여전히 미확인 상태.
 
 ## 온프렘 LLM 연동 (검증 완료 — thinkingcap)
 
