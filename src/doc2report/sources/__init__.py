@@ -19,15 +19,16 @@ class LoadedSource:
     format: str = "markdown"  # "markdown" | "confluence_storage" | "docx" — pipeline이 파서를 고를 때 씀
     title: str | None = None  # Confluence 페이지 제목처럼 본문과 별도로 오는 제목
     path: Path | None = None  # docx처럼 텍스트가 아닌 입력의 파일 경로
+    linked: object | None = None  # Confluence: 연결 페이지를 불러올 LinkedPages (없으면 안 불러옴)
 
 
-def load_source(source: str) -> LoadedSource:
+def load_source(source: str, *, linked: bool = True) -> LoadedSource:
     if source == "-":
         return LoadedSource(text=sys.stdin.read(), name="<stdin>", base_dir=Path.cwd())
     if source.startswith(("http://", "https://")):
         from .confluence import load_confluence
 
-        return load_confluence(source)
+        return load_confluence(source, linked=linked)
     path = Path(source)
     if not path.exists():
         raise FileNotFoundError(f"입력 파일을 찾을 수 없음: {path}")

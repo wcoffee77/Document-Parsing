@@ -90,7 +90,8 @@ class JobRunner:
             name = source.name if isinstance(source, LoadedSource) else source
             job.say(f"입력 읽는 중 ({index}/{len(sources)}): {name}")
             try:
-                doc, source_notes = load_document(source)
+                doc, source_notes = load_document(source, linked=options.get("linked", True),
+                                                  progress=job.say)
             except Exception as exc:
                 raise RuntimeError(f"{index}번 입력({name}) 읽기 실패: {exc}") from exc
             docs.append(doc)

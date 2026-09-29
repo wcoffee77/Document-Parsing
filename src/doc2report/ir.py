@@ -157,6 +157,23 @@ class Document:
     source: str | None = None  # 원본 경로/URL — 로그·머리말용
 
 
+def resolve_image_paths(blocks: list, base) -> None:
+    """상대 경로 이미지를 base 폴더 기준 절대 경로로(표 셀·패널 안쪽까지)."""
+    from pathlib import Path
+
+    for block in blocks:
+        if isinstance(block, Image) and not block.src.startswith(("http://", "https://")):
+            path = Path(block.src)
+            if not path.is_absolute():
+                block.src = str((Path(base) / path).resolve())
+        inner = getattr(block, "blocks", None)
+        if inner:
+            resolve_image_paths(inner, base)
+        for row in getattr(block, "rows", None) or []:
+            for cell in row.cells:
+                resolve_image_paths(cell.blocks, base)
+
+
 def iter_tables(doc: Document):
     """중첩(Callout, 표 셀) 안쪽까지 포함해 모든 Table을 순회."""
 

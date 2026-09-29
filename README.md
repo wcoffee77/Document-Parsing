@@ -131,6 +131,20 @@ Server/Data Center(사내 자체 호스팅)면 `CONFLUENCE_USERNAME`은 비우�
 자동으로 PowerShell(`Invoke-WebRequest`)로 재시도한다 — `DOC2REPORT_CONFLUENCE_
 TRANSPORT=powershell`로 처음부터 강제할 수도 있다.
 
+**연결 페이지 한 번에 불러오기**(기본 켜짐): 본문 페이지 안에서 다른 페이지·첨부를 끌어다 붙인
+매크로를 따라가 그 내용까지 한 문서로 변환한다. 끄려면 CLI `--no-linked`, 웹 화면은 Confluence 탭의
+"본문에 연결된 페이지도 함께 불러오기" 체크 해제.
+
+| 매크로 | 불러오는 내용 |
+|---|---|
+| 페이지 포함(`include`) | 그 페이지 본문 전체(펼치기 `expand` 안에 있어도 — 펼치기 제목은 굵은 줄로 남김) |
+| 발췌 포함(`excerpt-include`) | 그 페이지의 발췌(`excerpt`) 부분만 |
+| 하위 페이지(`children`)·페이지 트리(`pagetree`) | 하위 페이지마다 제목 + 본문(스페이스 전체 `@home` 트리는 제외) |
+| 첨부 보기(`view-file` 등) | Word(.docx)는 내용째, 그 밖의 파일은 "※ 첨부: 파일명" 한 줄 |
+
+상한: 연결 페이지 40개, 연결의 연결 4단계. 서로 포함하는 순환은 한 번만 넣는다. 불러온 것·못 불러온 것은
+전부 `--report`에 남는다. 표 칸 안의 페이지 포함은 표가 깨지지 않게 "(포함 페이지 '제목')"만 남긴다.
+
 사내 PC에서 처음 연결할 때 확인할 체크리스트와 흔한 오류 대응은
 [docs/confluence-first-run.md](docs/confluence-first-run.md)에 정리해 뒀다.
 

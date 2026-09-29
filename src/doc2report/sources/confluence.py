@@ -76,7 +76,7 @@ def page_id_from_url(url: str) -> str | None:
     return None
 
 
-def load_confluence(url_or_id: str) -> LoadedSource:
+def load_confluence(url_or_id: str, *, linked: bool = True) -> LoadedSource:
     base_url = _normalize_base_url(_require("CONFLUENCE_URL"))
     page_id = page_id_from_url(url_or_id)
     if page_id is None:
@@ -101,6 +101,8 @@ def load_confluence(url_or_id: str) -> LoadedSource:
         notes.insert(0, f"Confluence 페이지 '{title}'를 REST API로 읽음 (id={page_id})")
         notes.extend(_download_attachments(client, page_id, out_dir, notes))
 
+    space = (page.get("space") or {}).get("key")
+    resolver = LinkedPages(base_url, page_id, space, out_dir) if linked else None
     return LoadedSource(
         text=storage,
         name=url_or_id,
@@ -108,7 +110,164 @@ def load_confluence(url_or_id: str) -> LoadedSource:
         notes=notes,
         format="confluence_storage",
         title=title,
+        linked=resolver,
     )
+
+
+# ── 연결 페이지 (페이지 포함·발췌 포함·하위 페이지·첨부 보기 매크로) ─────────
+#
+# 2026-09-29 사용자: Confluence 문서를 여러 페이지로 나눠 두고 본문에서 "+로 펼쳐" 보게 연결해 둔다 —
+# 본문 하나만 주면 연결된 페이지까지 한 번에 변환하고 싶다. 파서가 그 자리에 PageRef를 남기면 여기서
+# REST로 대상 페이지를 가져와 파싱한 블록으로 바꾼다(대상 페이지 안의 연결도 재귀로, 단 순환·폭주 방지).
+
+MAX_LINKED_PAGES = 40   # 한 번 변환에 더 불러올 페이지 수 상한
+MAX_LINK_DEPTH = 4      # 연결의 연결… 몇 단계까지
+
+
+class LinkedPages:
+    def __init__(self, base_url: str, page_id: str, space: str | None, out_dir: Path):
+        self.base_url = base_url
+        self.root = (page_id, space, out_dir)
+        self.visited = {page_id}
+        self.loaded = 0
+
+    def expand(self, blocks: list, notes: list[str], *, progress=None) -> list:
+        from ..parsers.confluence_storage import PageRef
+
+        if not _has_ref(blocks, PageRef):
+            return blocks
+        self.say = progress or (lambda message: None)
+        with _client(self.base_url, notes) as client:
+            return self._expand(client, blocks, notes, self.root, depth=0)
+
+    # 한 페이지(ctx = (id, space, 첨부 폴더))의 블록에서 PageRef를 채운다
+    def _expand(self, client, blocks: list, notes: list[str], ctx, depth: int) -> list:
+        from ..ir import Callout, Paragraph, Run, Table
+        from ..parsers.confluence_storage import PageRef, drop_page_refs
+
+        out: list = []
+        for block in blocks:
+            if isinstance(block, PageRef):
+                out.extend(self._resolve(client, block, notes, ctx, depth))
+            elif isinstance(block, Callout):
+                block.blocks = self._expand(client, block.blocks, notes, ctx, depth)
+                out.append(block)
+            elif isinstance(block, Table):
+                for row in block.rows:  # 표 칸 안에 페이지 통째로는 넣지 않는다 — 이름만 남김
+                    for cell in row.cells:
+                        cell.blocks = [Paragraph(runs=[Run(f"({b.describe()})")])
+                                       if isinstance(b, PageRef) else b for b in cell.blocks]
+                        cell.blocks = drop_page_refs(cell.blocks, notes)
+                out.append(block)
+            else:
+                out.append(block)
+        return out
+
+    def _resolve(self, client, ref, notes: list[str], ctx, depth: int) -> list:
+        from ..ir import Paragraph, Run
+
+        page_id, space, folder = ctx
+        if ref.kind == "attachment":
+            return self._attachment(ref, notes, folder)
+        if depth >= MAX_LINK_DEPTH:
+            notes.append(f"{ref.describe()}: 연결이 {MAX_LINK_DEPTH}단계를 넘어 불러오지 않음")
+            return []
+        try:
+            if ref.kind == "children":
+                parent = page_id
+                if ref.title:
+                    parent = self._find(client, ref.title, ref.space or space, notes)["id"]
+                return self._children(client, parent, notes, depth, levels=ref.depth or MAX_LINK_DEPTH)
+            page = self._find(client, ref.title, ref.space or space, notes)
+        except Exception as exc:
+            notes.append(f"{ref.describe()}을(를) 불러오지 못함: {exc}")
+            return [Paragraph(runs=[Run(f"({ref.describe()} — 불러오지 못함)")])]
+        return self._page_blocks(client, page, notes, depth, excerpt=ref.kind == "excerpt")
+
+    def _page_blocks(self, client, page: dict, notes: list[str], depth: int, *,
+                     excerpt: bool = False, heading_level: int | None = None) -> list:
+        from ..ir import Heading, Run, resolve_image_paths
+        from ..parsers.confluence_storage import parse_confluence_storage
+
+        pid, title = str(page.get("id")), page.get("title") or ""
+        if pid in self.visited:
+            notes.append(f"페이지 '{title}'는 이미 넣었으므로 다시 넣지 않음(순환 연결 방지)")
+            return []
+        if self.loaded >= MAX_LINKED_PAGES:
+            notes.append(f"연결 페이지가 {MAX_LINKED_PAGES}개를 넘어 '{title}'부터는 불러오지 않음")
+            return []
+        self.visited.add(pid)
+        self.loaded += 1
+        self.say(f"연결 페이지 불러오는 중 ({self.loaded}): {title}")
+        storage = ((page.get("body") or {}).get("storage") or {}).get("value") or ""
+        parsed = parse_confluence_storage(storage, source=title, title=title, keep_refs=True,
+                                          excerpt_only=excerpt)
+        notes.extend(parsed.notes)
+        folder = self.root[2] / pid
+        folder.mkdir(parents=True, exist_ok=True)
+        notes.extend(_download_attachments(client, pid, folder, notes))
+        blocks = parsed.document.blocks
+        resolve_image_paths(blocks, folder)
+        space = (page.get("space") or {}).get("key") or self.root[1]
+        blocks = self._expand(client, blocks, notes, (pid, space, folder), depth + 1)
+        notes.append(f"연결 페이지 '{title}'를 함께 불러옴 (id={pid})")
+        if heading_level:  # 하위 페이지는 제목을 절 제목으로
+            return [Heading(level=heading_level, runs=[Run(title)])] + blocks
+        return blocks
+
+    def _children(self, client, parent: str, notes: list[str], depth: int, *, levels: int,
+                  level: int = 2) -> list:
+        out: list = []
+        resp = _get(client, f"/rest/api/content/{parent}/child/page", notes,
+                    params={"limit": 200, "expand": "body.storage,space"})
+        _raise_for_status(resp, parent)
+        for child in resp.json().get("results", []):
+            out.extend(self._page_blocks(client, child, notes, depth, heading_level=min(level, 6)))
+            if levels > 1 and self.loaded < MAX_LINKED_PAGES:
+                out.extend(self._children(client, str(child.get("id")), notes, depth + 1,
+                                          levels=levels - 1, level=level + 1))
+        return out
+
+    def _find(self, client, title: str, space: str | None, notes: list[str]) -> dict:
+        params = {"title": title, "expand": "body.storage,space", "limit": 1}
+        if space:
+            params["spaceKey"] = space
+        resp = _get(client, "/rest/api/content", notes, params=params)
+        _raise_for_status(resp, title)
+        results = resp.json().get("results") or []
+        if not results:
+            raise RuntimeError(f"'{title}' 페이지를 찾을 수 없음(스페이스 {space or '전체'})")
+        return results[0]
+
+    def _attachment(self, ref, notes: list[str], folder: Path) -> list:
+        """첨부 보기 매크로: Word(.docx)면 내용을 그 자리에 넣고, 그 밖의 파일은 이름만 남긴다."""
+        from ..ir import Paragraph, Run
+
+        path = folder / (ref.filename or "")
+        if path.suffix.lower() == ".docx" and path.is_file():
+            from ..parsers.docx_reader import parse_docx
+
+            try:
+                parsed = parse_docx(path, image_dir=folder / (path.stem + "_images"))
+            except Exception as exc:  # 문서보안(DRM)이 걸린 첨부 등
+                notes.append(f"첨부 '{ref.filename}'를 읽지 못함: {exc}")
+            else:
+                notes.append(f"첨부 Word 파일 '{ref.filename}'의 내용을 함께 넣음")
+                return parsed.document.blocks
+        notes.append(f"첨부 파일 '{ref.filename}'은 내용을 넣을 수 없어 이름만 남김")
+        return [Paragraph(runs=[Run(f"※ 첨부: {ref.filename}")])]
+
+
+def _has_ref(blocks: list, ref_type) -> bool:
+    for block in blocks:
+        if isinstance(block, ref_type):
+            return True
+        if _has_ref(getattr(block, "blocks", None) or [], ref_type):
+            return True
+        for row in getattr(block, "rows", None) or []:
+            if any(_has_ref(cell.blocks, ref_type) for cell in row.cells):
+                return True
+    return False
 
 
 def confluence_status() -> dict:

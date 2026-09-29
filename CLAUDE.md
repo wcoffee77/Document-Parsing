@@ -129,7 +129,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 249개
+uv run pytest                           # 254개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -502,6 +502,27 @@ HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 cert
 다듬기(개조식 변환·LLM polish) 결과가 괜찮은지 세밀 확인 — 사용자가 진행 중이며
 아직 구체적 문제는 보고되지 않음. 위 "아직 검증되지 않은 것" 목록(레이아웃 매크로,
 인증 방식 분기, 첨부 이미지 경로)은 여전히 미확인 상태.
+
+**연결 페이지 한 번에 불러오기 (2026-09-29 사용자 요청)** — "본문 하나만 넣으면 매크로로 붙여 +로
+펼쳐 보게 해 둔 페이지까지 한 번에 변환". 파서와 네트워크를 떼어 두려고 두 단계로 나눴다.
+- `parsers/confluence_storage.py`는 네트워크를 모른다: `include`/`excerpt-include`/`children`/`pagetree`/
+  `view-file` 계열을 만나면 **자리표시 블록 `PageRef`**(IR 밖, 파서 모듈 안의 dataclass)를 남긴다
+  (`keep_refs=True`일 때만). 기본값(False)이면 `drop_page_refs`가 "…을(를) 불러오지 않음" 노트로 바꿔
+  빼므로 **PageRef가 렌더러까지 새는 일은 없다** — 다른 호출자(테스트·예전 경로)는 그대로.
+  `excerpt_only=True`는 `excerpt` 매크로 몸통만 읽는다(발췌 포함용). `expand`는 이제 제목 파라미터를
+  굵은 문단으로 앞에 넣는다(펼치기 제목이 사라지면 어떤 내용이 붙었는지 알 수 없어서).
+- `sources/confluence.py::LinkedPages`가 PageRef를 REST로 풀어 블록으로 바꾼다: 제목 검색
+  `/rest/api/content?title=&spaceKey=`(스페이스 지정 없으면 **그 매크로가 있던 페이지의 스페이스**),
+  하위 페이지 `/child/page?expand=body.storage,space`, 첨부는 기존 첨부 목록 경로. 불러온 페이지도
+  같은 방식으로 다시 풀고(재귀), 이미지는 `out_dir/<page id>/`에 받아 경로를 절대 경로로 고정한다.
+  **상한 `MAX_LINKED_PAGES=40`, `MAX_LINK_DEPTH=4`, 방문한 id 집합으로 순환 차단.** 표 칸 안의 PageRef는
+  "(포함 페이지 '제목')" 문단으로만 바꾼다 — 표 안에 페이지 전체를 넣으면 표 폭 계산이 무의미해진다.
+- `pipeline.load_document(linked=True, progress=)`, CLI `--no-linked`, 웹 `#cf-linked`(옵션 `linked`).
+- **실제 사내 Confluence로 확인 못 한 것**: 제목 검색 API가 사내 게이트웨이에서 되는지, `space` expand가
+  오는지, 하위 페이지 순서가 화면의 순서(수동 정렬)와 같은지(REST 기본은 position 순으로 알려져 있으나
+  **확인 필요**), 사용자의 "+" 구성이 실제로 `expand`+`include`인지 `children`인지. 사용자가 말한
+  "책갈피"가 **앵커 링크나 일반 페이지 링크(`<ac:link>`)라면 지금은 따라가지 않는다** — 링크는 본문
+  일부가 아니라 참조라서 일부러 뺐다. 필요하면 그 페이지 storage XHTML을 받아 판단할 것.
 
 ## 온프렘 LLM 연동 (검증 완료 — thinkingcap)
 

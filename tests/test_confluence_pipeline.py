@@ -122,7 +122,7 @@ def test_confluence_url_gets_confluence_profile_and_keeps_text(tmp_path, monkeyp
 
     xhtml = ("<h2>1. 추진 배경</h2><p>응답 지연이 지속적으로 발생하였습니다.</p>"
              "<p>ㆍ입사예정시기는 10월입니다</p>")
-    monkeypatch.setattr(pipeline, "load_source", lambda source: LoadedSource(
+    monkeypatch.setattr(pipeline, "load_source", lambda source, **kw: LoadedSource(
         text=xhtml, name=source, format="confluence_storage", title="보고"))
     assert pipeline.auto_profile("https://wiki/pages/1") == "confluence"
 

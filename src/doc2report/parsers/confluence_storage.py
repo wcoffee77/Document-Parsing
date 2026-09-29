@@ -9,6 +9,12 @@ Confluence는 표 폭에 제약이 없어(자유롭게 열을 늘리고 줄을 �
 매크로(`ac:structured-macro`)는 이름으로 분기한다: info/note/warning류는 Callout,
 code는 CodeBlock, 나머지는 알려진 하위 구조(rich-text-body)가 있으면 그 안만 펼치고
 없으면 건너뛴다 (노트에 남긴다).
+
+**다른 페이지·첨부를 끌어오는 매크로**(페이지 포함 include, 발췌 포함 excerpt-include, 하위 페이지
+children, 페이지 트리 pagetree, 첨부 보기 view-file 등)는 이 파서가 직접 불러올 수 없다(네트워크는
+sources/의 일). 그래서 그 자리에 `PageRef` 자리표시를 남기고(keep_refs=True), sources/confluence.py의
+`LinkedPages`가 실제 페이지를 가져와 채운다(2026-09-29 사용자: "+로 펼쳐 보게 연결해 둔 페이지를 한 번에").
+PageRef는 IR 블록이 아니다 — 채우지 않을 거면(keep_refs=False) 여기서 바로 노트로 바꿔 없앤다.
 """
 
 from __future__ import annotations
@@ -48,19 +54,54 @@ _INLINE_TAGS = {"strong", "b", "em", "i", "u", "code", "a", "span", "br", "sup",
 
 
 @dataclass
+class PageRef:
+    """다른 페이지(또는 첨부 파일)를 끌어오는 매크로의 자리. IR이 아니라 파서↔소스 사이 임시 표식."""
+
+    kind: str                 # include | excerpt | children | attachment
+    title: str | None = None  # 대상 페이지 제목 (children: 없으면 이 페이지의 하위 페이지)
+    space: str | None = None  # 대상 스페이스 키 (없으면 이 페이지와 같은 스페이스)
+    filename: str | None = None  # attachment: 첨부 파일 이름
+    depth: int | None = None  # children/pagetree: 몇 단계 아래까지
+
+    def describe(self) -> str:
+        if self.kind == "attachment":
+            return f"첨부 파일 '{self.filename}'"
+        if self.kind == "children":
+            return f"'{self.title}'의 하위 페이지" if self.title else "하위 페이지 목록"
+        return f"{'발췌 포함' if self.kind == 'excerpt' else '포함 페이지'} '{self.title}'"
+
+
+_VIEW_FILE_MACROS = {"view-file", "viewdoc", "viewpdf", "viewxls", "viewppt", "viewfile"}
+
+
+@dataclass
 class ParsedConfluence:
     document: Document
     notes: list[str] = field(default_factory=list)  # 건너뛴 매크로·요소 (--report에 남긴다)
 
 
 def parse_confluence_storage(
-    xhtml: str, *, source: str | None = None, title: str | None = None
+    xhtml: str, *, source: str | None = None, title: str | None = None,
+    keep_refs: bool = False, excerpt_only: bool = False,
 ) -> ParsedConfluence:
     """title을 주면 그대로 문서 제목으로 쓴다 (Confluence 페이지 제목은 본문과 별도
     메타데이터라 storage XHTML 안에 없는 게 보통이다). 안 주면 본문 첫 H1을 제목으로
     승격한다 — Markdown 문서와 동일한 규칙."""
     root = _fragment_root(xhtml)
-    blocks, notes = _children_blocks(root)
+    excerpts = [m for m in root.iter(f"{{{AC_NS}}}structured-macro")
+                if _macro_name(m) == "excerpt"] if excerpt_only else []
+    if excerpts:  # 발췌 포함: 대상 페이지의 excerpt 매크로 안쪽만
+        blocks, notes = [], []
+        for macro in excerpts:
+            body = _macro_child(macro, "rich-text-body")
+            if body is not None:
+                sub, sub_notes = _children_blocks(body)
+                blocks.extend(sub)
+                notes.extend(sub_notes)
+    else:
+        blocks, notes = _children_blocks(root)
+    if not keep_refs:
+        blocks = drop_page_refs(blocks, notes)
     if title is None and blocks and isinstance(blocks[0], Heading) and blocks[0].level == 1:
         title = plain(blocks[0].runs)
         blocks = blocks[1:]
@@ -140,9 +181,89 @@ def _block(el) -> tuple[list[Block], list[str]]:
     return [], [f"알 수 없는 요소를 건너뜀: <{tag}>"]
 
 
+def drop_page_refs(blocks: list, notes: list[str], *, reason: str = "연결 페이지 불러오기를 끔") -> list:
+    """채우지 않은 PageRef를 없애고 노트로 남긴다(표 셀·패널 안쪽까지)."""
+    out = []
+    for block in blocks:
+        if isinstance(block, PageRef):
+            notes.append(f"{block.describe()}을(를) 불러오지 않음 — {reason}")
+            continue
+        if isinstance(block, Callout):
+            block.blocks = drop_page_refs(block.blocks, notes, reason=reason)
+        elif isinstance(block, Table):
+            for row in block.rows:
+                for cell in row.cells:
+                    cell.blocks = drop_page_refs(cell.blocks, notes, reason=reason)
+        out.append(block)
+    return out
+
+
+def _macro_name(el) -> str:
+    return el.get("ac:name") or el.get("{%s}name" % AC_NS) or ""
+
+
+def _param(el, name: str):
+    for param in el.findall(f"{{{AC_NS}}}parameter"):
+        if (param.get("{%s}name" % AC_NS) or param.get("ac:name") or "") == name:
+            return param
+    return None
+
+
+def _page_link(el) -> tuple[str | None, str | None]:
+    """매크로 매개변수 안의 <ac:link><ri:page ri:content-title=… ri:space-key=…/></ac:link>."""
+    page = next(el.iter(f"{{{RI_NS}}}page"), None) if el is not None else None
+    if page is None:
+        return None, None
+    return (page.get(f"{{{RI_NS}}}content-title") or page.get("ri:content-title"),
+            page.get(f"{{{RI_NS}}}space-key") or page.get("ri:space-key"))
+
+
+def _link_macro(el, name: str) -> tuple[list, list[str]] | None:
+    """다른 페이지·첨부를 끌어오는 매크로면 PageRef, 아니면 None."""
+    if name in ("include", "excerpt-include"):
+        param = _param(el, "")  # lxml 요소는 자식이 없으면 거짓이라 `or`로 이으면 안 된다
+        title, space = _page_link(param if param is not None else el)
+        if not title:
+            return [], [f"매크로 '{name}'의 대상 페이지를 찾지 못해 건너뜀"]
+        return [PageRef("excerpt" if name == "excerpt-include" else "include", title, space)], []
+    if name in ("children", "pagetree"):
+        root = _param(el, "root") if name == "pagetree" else _param(el, "page")
+        title, space = _page_link(root)
+        text = (root.text or "").strip() if root is not None else ""
+        if name == "pagetree" and not title and text not in ("@self",):
+            # 기본값(@home)은 스페이스 전체 — 너무 많아 불러오지 않는다
+            return [], [f"페이지 트리({text or '@home'})는 스페이스 전체라 불러오지 않음"]
+        depth_param = _param(el, "depth")
+        try:
+            depth = int((depth_param.text or "").strip()) if depth_param is not None else None
+        except ValueError:
+            depth = None
+        if depth is None and name == "children":
+            all_param = _param(el, "all")
+            depth = None if all_param is not None and (all_param.text or "").strip() == "true" else 1
+        return [PageRef("children", title, space, depth=depth)], []
+    if name in _VIEW_FILE_MACROS:
+        attachment = next(el.iter(f"{{{RI_NS}}}attachment"), None)
+        filename = attachment.get(f"{{{RI_NS}}}filename") if attachment is not None else None
+        return ([PageRef("attachment", filename=filename)] if filename else []), []
+    return None
+
+
 def _macro(el) -> tuple[list[Block], list[str]]:
-    name = el.get("ac:name") or el.get("{%s}name" % AC_NS) or ""
+    name = _macro_name(el)
     body = _macro_child(el, "rich-text-body")
+
+    linked = _link_macro(el, name)
+    if linked is not None:
+        return linked
+
+    if name == "expand" and body is not None:
+        # 펼치기(+) 매크로: 접힌 제목도 살린다 — 없으면 무엇을 펼친 내용인지 모른다.
+        inner, notes = _children_blocks(body)
+        title_param = _param(el, "title")
+        title = (title_param.text or "").strip() if title_param is not None else ""
+        head = [Paragraph(runs=[Run(title, bold=True)])] if title else []
+        return head + inner, notes
 
     if name in _KIND_BY_MACRO:
         inner, notes = _children_blocks(body) if body is not None else ([], [])

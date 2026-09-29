@@ -235,6 +235,7 @@ function collectOptions() {
     text,
     tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
     merge: radio("merge") || "continuous",
+    linked: $("#cf-linked").checked,
     title: $("#doc-title").value.trim(),
     date: dateMode === "pick" ? $("#date-pick").value : dateMode,
     date_mode: dateMode,
@@ -268,6 +269,7 @@ function restoreOptions() {
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
   setRadio("merge", o.merge || (o.page_breaks ? "pages" : "continuous"));
+  $("#cf-linked").checked = o.linked !== false;
   setRadio("date", o.date_mode ?? "");
   if (o.date_mode === "pick" && o.date) $("#date-pick").value = o.date;
   $("#out-pdf").checked = (o.formats || []).includes("pdf");

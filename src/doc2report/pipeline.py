@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .ir import Document, Heading, Image, PageBreak, Run
+from .ir import Document, Heading, PageBreak, Run, resolve_image_paths
 from .layout.flow import FlowPlan, plan_flow
 from .layout.table_fit import TableLayout, plan_tables
 from .parsers.markdown import parse_markdown
@@ -66,16 +66,26 @@ def auto_profile(source: str | LoadedSource) -> str:
     return "confluence" if source.startswith(("http://", "https://")) else "default"
 
 
-def load_document(source: str | LoadedSource) -> tuple[Document, list[str]]:
-    """입력 하나를 읽어 IR로. (문서, 리포트에 남길 노트)"""
-    loaded = source if isinstance(source, LoadedSource) else load_source(source)
+def load_document(source: str | LoadedSource, *, linked: bool = True,
+                  progress=None) -> tuple[Document, list[str]]:
+    """입력 하나를 읽어 IR로. (문서, 리포트에 남길 노트)
+
+    linked: Confluence 페이지 안의 "페이지 포함·하위 페이지·첨부 보기" 매크로가 가리키는 페이지를
+    함께 불러와 그 자리에 넣는다(sources/confluence.py::LinkedPages)."""
+    loaded = source if isinstance(source, LoadedSource) else load_source(source, linked=linked)
     notes = list(loaded.notes)
     if loaded.format == "confluence_storage":
         from .parsers.confluence_storage import parse_confluence_storage
 
-        parsed = parse_confluence_storage(loaded.text, source=loaded.name, title=loaded.title)
+        resolver = loaded.linked if linked else None
+        parsed = parse_confluence_storage(loaded.text, source=loaded.name, title=loaded.title,
+                                          keep_refs=resolver is not None)
         doc = parsed.document
         notes.extend(parsed.notes)
+        if resolver is not None:
+            if loaded.base_dir:
+                _resolve_image_paths(doc, loaded.base_dir)  # 본 페이지 이미지는 본 페이지 폴더 기준
+            doc.blocks = resolver.expand(doc.blocks, notes, progress=progress)
     elif loaded.format == "docx":
         import tempfile
 
@@ -140,6 +150,7 @@ def convert(
     *,
     polish: str | None = None,
     date: str | None = None,
+    linked: bool = True,
 ) -> ConvertResult:
     """source(파일 경로 / Confluence URL / '-') → output(.docx).
 
@@ -147,7 +158,7 @@ def convert(
     polish: 안 주면 프로파일의 text.polish(없으면 "rules").
     date: 제목 아래에 넣을 날짜. "today"(또는 "오늘")면 오늘 날짜를 프로파일 형식으로 넣는다.
     """
-    return convert_many([source], output, profile, polish=polish, date=date)
+    return convert_many([source], output, profile, polish=polish, date=date, linked=linked)
 
 
 def convert_many(
@@ -161,6 +172,7 @@ def convert_many(
     section_titles: bool = True,
     page_breaks: bool = False,
     progress=None,
+    linked: bool = True,
 ) -> ConvertResult:
     """여러 입력을 읽어 한 문서로 합친 뒤 변환한다. progress(메시지)는 진행 상황 알림(웹 화면용)."""
     if not sources:
@@ -175,7 +187,7 @@ def convert_many(
     for index, source in enumerate(sources, 1):
         name = source.name if isinstance(source, LoadedSource) else source
         say(f"입력 읽는 중 ({index}/{len(sources)}): {name}")
-        doc, source_notes = load_document(source)
+        doc, source_notes = load_document(source, linked=linked, progress=say)
         docs.append(doc)
         notes.extend(source_notes)
     doc = merge_documents(docs, title=title, section_titles=section_titles, page_breaks=page_breaks)
@@ -283,20 +295,4 @@ def _insert_dateline(doc: Document, date: str, profile: Profile) -> None:
 
 
 def _resolve_image_paths(doc: Document, base: Path) -> None:
-    def walk(blocks):
-        for block in blocks:
-            if isinstance(block, Image) and not block.src.startswith(("http://", "https://")):
-                path = Path(block.src)
-                if not path.is_absolute():
-                    block.src = str((base / path).resolve())
-            for attr in ("blocks",):
-                inner = getattr(block, attr, None)
-                if inner:
-                    walk(inner)
-            rows = getattr(block, "rows", None)
-            if rows:
-                for row in rows:
-                    for cell in row.cells:
-                        walk(cell.blocks)
-
-    walk(doc.blocks)
+    resolve_image_paths(doc.blocks, base)
