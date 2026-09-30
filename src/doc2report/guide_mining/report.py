@@ -17,6 +17,7 @@ def to_markdown(s: dict) -> str:
     lines += _section("글꼴 (글자 수 가중)", [
         _dist_rows("본문 글꼴", fonts["body"]["east_asia"]), _dist_rows("본문 크기(pt)", fonts["body"]["size_pt"]),
         _dist_rows("본문 장평(%)", fonts["body"]["char_scale_pct"]),
+        _dist_rows("본문 글자 색", fonts["body"]["color"]),
         _dist_rows("표 글꼴", fonts["table"]["east_asia"]), _dist_rows("표 크기(pt)", fonts["table"]["size_pt"]),
         [f"- 본문 굵은 글자 비중 {fonts['body_bold_share']}"],
     ])
@@ -63,6 +64,24 @@ def to_markdown(s: dict) -> str:
         [f"- {label}: 글 있음 {hf[k]['with_text_share']}, 쪽번호 필드 {hf[k]['page_field_share']}, 정렬 {hf[k]['align']}"
          for k, label in (("header", "머리말"), ("footer", "꼬리말"))],
         [f"- 첫 쪽 머리말·꼬리말이 다른 문서 {hf['title_page_docs']}건"]])
+    an = s["annotations"]
+    lines += _section("주석 상자 (텍스트 상자)", [
+        [f"- 상자 {an['boxes']}개, 있는 문서 {an['docs_with_boxes']}건, 문서당 {_fmt(an['per_doc'])}, "
+         f"떠 있는 상자 비율 {an['floating_share']}",
+         f"- 상자당 문단 {_fmt(an['paragraphs_per_box'])}, 글자 수 {_fmt(an['box_chars'])}",
+         f"- 크기(mm): 너비 {_fmt(an['width_mm'])}, 높이 {_fmt(an['height_mm'])}"],
+        _dist_rows("배치", an["placement"]), _dist_rows("줄바꿈 방식", an["wrap"]),
+        _dist_rows("테두리", an["border"]), _dist_rows("상자 배경색", an["fill"]),
+        _dist_rows("글꼴", an["east_asia"]), _dist_rows("크기(pt)", an["size_pt"]),
+        _dist_rows("글자 색", an["color"]), _dist_rows("줄간격", an["line"]),
+        _dist_rows("정렬", an["align"]),
+        [f"- 굵은 글자 비중 {an['bold_share']}"],
+        _dist_rows("상자 안 말머리", an["marker_inside"]),
+        _dist_rows("종결 형태", an["ending_class"]), _dist_rows("끝 두 글자", an["ending_tail"]),
+        [f"- 마침표로 끝난 문장 {an['period_ended_share']}"],
+        _dist_rows("붙은 문단의 위치", an["anchor_where"]),
+        _dist_rows("붙은 문단의 말머리", an["anchor_marker"]),
+        [f"- 붙은 문단 글자 수 {_fmt(an['anchor_text_len'])}"]])
     st = s["structure"]
     lines += _section("문서 구성 요소", [[
         f"- 목차 있는 문서 {st['toc_docs']}건, 텍스트 상자가 있는 문서 {st['textbox_docs']}건 "

@@ -34,6 +34,11 @@ _TYPED_MARKER = re.compile(
 )
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+_WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
+_WPS = "{http://schemas.microsoft.com/office/word/2010/wordprocessingShape}"
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+_VML = "{urn:schemas-microsoft-com:vml}"
+_VML_SHAPES = {"shape", "rect", "roundrect", "oval", "line"}
 
 
 # ── 결과 자료형 ─────────────────────────────────────────────────────────
@@ -48,6 +53,7 @@ class Fmt:
     bold: bool | None = None
     italic: bool | None = None
     char_scale_pct: int | None = None
+    color: str | None = None         # RRGGBB, 테마색은 "theme:accent1", 자동이면 None
 
 
 @dataclass
@@ -77,6 +83,32 @@ class ParaProbe:
     page_break_before: bool
     has_page_break: bool
     text_runs: int
+    box: int | None = None           # where == "textbox"이면 DocProbe.textboxes의 번호
+
+
+@dataclass
+class TextBoxProbe:
+    """텍스트 상자 하나(주석 상자). 글 자체는 여기 없고 글 서식은 where == "textbox" 문단에 있다."""
+    kind: str                        # drawingml | vml | unknown
+    floating: bool                   # False = 글자처럼 줄 안에 놓임
+    h_rel: str | None = None
+    h_offset_mm: float | None = None
+    h_align: str | None = None
+    v_rel: str | None = None
+    v_offset_mm: float | None = None
+    v_align: str | None = None
+    width_mm: float | None = None
+    height_mm: float | None = None
+    wrap: str | None = None
+    border: str = "unspecified"      # none | line | unspecified
+    border_color: str | None = None
+    fill: str = "unspecified"        # none | RRGGBB | unspecified
+    paragraphs: int = 0
+    text_len: int = 0
+    anchor_where: str | None = None  # 상자가 붙은 문단의 위치(body | table)
+    anchor_marker: str | None = None # 붙은 문단의 말머리
+    anchor_text_len: int = 0
+    placement: str = ""              # "가로 구역 / 세로 기준" 요약
 
 
 @dataclass
@@ -127,6 +159,7 @@ class DocProbe:
     tables: list[TableProbe] = field(default_factory=list)
     headers_footers: list[HeaderFooterProbe] = field(default_factory=list)
     textbox_count: int = 0
+    textboxes: list[TextBoxProbe] = field(default_factory=list)
     toc: bool = False
     page_breaks: int = 0
     notes: list[str] = field(default_factory=list)
@@ -158,6 +191,7 @@ class _Prober:
     def __init__(self, docx, probe: DocProbe):
         self.docx = docx
         self.probe = probe
+        self._para_of: dict = {}   # w:p 요소 → ParaProbe (상자가 붙은 문단을 찾는 용도)
         self.styles = {
             s.get(qn("w:styleId")): s
             for s in docx.styles.element.findall(qn("w:style"))
@@ -252,6 +286,7 @@ class _Prober:
         if para.page_break_before or para.has_page_break:
             self.probe.page_breaks += 1
         self.probe.paragraphs.append(para)
+        self._para_of[p] = para
         return para
 
     # ── 서식 풀기 ───────────────────────────────────────────────────────
@@ -345,6 +380,16 @@ class _Prober:
             scale = rpr.find(qn("w:w"))
             if scale is not None and scale.get(qn("w:val")):
                 fmt.char_scale_pct = int(scale.get(qn("w:val")))
+            color = rpr.find(qn("w:color"))
+            if color is not None:
+                value = color.get(qn("w:val"))
+                theme = color.get(qn("w:themeColor"))
+                if value and value != "auto":
+                    fmt.color = value.upper()
+                elif theme:
+                    fmt.color = f"theme:{theme}"
+                else:
+                    fmt.color = None
         return fmt
 
     def _heading_level(self, p, style) -> int | None:
@@ -484,8 +529,23 @@ class _Prober:
             if _inside_fallback(box):
                 continue  # mc:AlternateContent의 Fallback은 같은 상자의 사본
             self.probe.textbox_count += 1
+            index = len(self.probe.textboxes)
+            made = []
             for p in box.findall(qn("w:p")):
-                self._paragraph(p, "textbox")
+                para = self._paragraph(p, "textbox")
+                para.box = index
+                made.append(para)
+            info = _box_geometry(box)
+            info.paragraphs = sum(1 for x in made if not x.blank)
+            info.text_len = sum(x.text_len for x in made if not x.blank)
+            anchor = _anchor_paragraph(box)
+            anchor_para = self._para_of.get(anchor) if anchor is not None else None
+            if anchor_para is not None:
+                info.anchor_where = anchor_para.where
+                info.anchor_marker = anchor_para.marker
+                info.anchor_text_len = anchor_para.text_len
+            info.placement = _placement(info, self.probe.sections[0] if self.probe.sections else None)
+            self.probe.textboxes.append(info)
 
     def _has_toc(self, body) -> bool:
         for sdt in body.iter(qn("w:sdt")):
@@ -556,6 +616,154 @@ def _inside_fallback(el) -> bool:
             return True
         parent = parent.getparent()
     return False
+
+
+def _box_shape(box):
+    """txbxContent를 감싼 도형 요소(DrawingML wp:anchor·wp:inline 또는 VML v:shape 등)."""
+    node = box.getparent()
+    while node is not None and isinstance(node.tag, str):
+        if node.tag in (_WP + "anchor", _WP + "inline"):
+            return node
+        if node.tag.startswith(_VML) and node.tag[len(_VML):] in _VML_SHAPES:
+            return node
+        if node.tag == qn("w:body"):
+            break
+        node = node.getparent()
+    return None
+
+
+def _anchor_paragraph(box):
+    """상자가 붙어 있는 본문·표 문단(상자 안의 문단이 아니라 상자를 품은 바깥 문단)."""
+    shape = _box_shape(box)
+    node = shape.getparent() if shape is not None else box.getparent()
+    while node is not None and isinstance(node.tag, str):
+        if node.tag == qn("w:p"):
+            return node
+        node = node.getparent()
+    return None
+
+
+def _css_mm(value: str | None) -> float | None:
+    """VML style의 길이("12pt", "3cm")를 mm로. 단위가 없으면 px로 본다."""
+    if not value:
+        return None
+    m = re.fullmatch(r"\s*(-?[0-9.]+)\s*(pt|in|cm|mm|px)?\s*", value)
+    if not m:
+        return None
+    number = float(m.group(1))
+    factor = {"pt": 25.4 / 72, "in": 25.4, "cm": 10.0, "mm": 1.0, "px": 25.4 / 96}[m.group(2) or "px"]
+    return round(number * factor, 1)
+
+
+def _box_geometry(box) -> TextBoxProbe:
+    shape = _box_shape(box)
+    if shape is None:
+        return TextBoxProbe(kind="unknown", floating=False)
+    if shape.tag.startswith(_WP):
+        return _drawingml_geometry(shape)
+    return _vml_geometry(shape)
+
+
+def _emu_mm(text: str | None) -> float | None:
+    try:
+        return round(int(text) / EMU_PER_MM, 1) if text else None
+    except ValueError:
+        return None
+
+
+def _drawingml_geometry(shape) -> TextBoxProbe:
+    info = TextBoxProbe(kind="drawingml", floating=shape.tag == _WP + "anchor")
+    for axis in ("H", "V"):
+        pos = shape.find(f"{_WP}position{axis}")
+        if pos is None:
+            continue
+        off, align = pos.find(_WP + "posOffset"), pos.find(_WP + "align")
+        key = axis.lower()
+        setattr(info, f"{key}_rel", pos.get("relativeFrom"))
+        setattr(info, f"{key}_offset_mm", _emu_mm(off.text) if off is not None else None)
+        setattr(info, f"{key}_align", align.text if align is not None else None)
+    extent = shape.find(_WP + "extent")
+    if extent is not None:
+        info.width_mm, info.height_mm = _emu_mm(extent.get("cx")), _emu_mm(extent.get("cy"))
+    for child in shape:
+        if isinstance(child.tag, str) and child.tag.startswith(_WP + "wrap"):
+            info.wrap = child.tag[len(_WP + "wrap"):]
+    sppr = next(shape.iter(_WPS + "spPr"), None)
+    if sppr is not None:
+        line = sppr.find(_A + "ln")
+        if line is not None:
+            if line.find(_A + "noFill") is not None:
+                info.border = "none"
+            else:
+                info.border = "line"
+                color = line.find(f"{_A}solidFill/{_A}srgbClr")
+                info.border_color = color.get("val").upper() if color is not None and color.get("val") else None
+        if sppr.find(_A + "noFill") is not None:
+            info.fill = "none"
+        else:
+            color = sppr.find(f"{_A}solidFill/{_A}srgbClr")
+            if color is not None and color.get("val"):
+                info.fill = color.get("val").upper()
+    return info
+
+
+def _vml_geometry(shape) -> TextBoxProbe:
+    style = {}
+    for part in (shape.get("style") or "").split(";"):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            style[k.strip()] = v.strip()
+    info = TextBoxProbe(kind="vml", floating=style.get("position") == "absolute")
+    info.h_rel = style.get("mso-position-horizontal-relative")
+    info.v_rel = style.get("mso-position-vertical-relative")
+    info.h_align = style.get("mso-position-horizontal")
+    info.v_align = style.get("mso-position-vertical")
+    info.h_offset_mm = _css_mm(style.get("margin-left", style.get("left")))
+    info.v_offset_mm = _css_mm(style.get("margin-top", style.get("top")))
+    info.width_mm, info.height_mm = _css_mm(style.get("width")), _css_mm(style.get("height"))
+    wrap = shape.find("{urn:schemas-microsoft-com:office:word}wrap")
+    info.wrap = wrap.get("type") if wrap is not None else None
+    if (shape.get("stroked") or "").lower() in ("f", "false"):
+        info.border = "none"
+    elif shape.get("stroked") is not None or shape.get("strokecolor"):
+        info.border = "line"
+        info.border_color = (shape.get("strokecolor") or "").lstrip("#").upper() or None
+    if (shape.get("filled") or "").lower() in ("f", "false"):
+        info.fill = "none"
+    elif shape.get("fillcolor"):
+        info.fill = shape.get("fillcolor").lstrip("#").upper()
+    return info
+
+
+def _placement(info: TextBoxProbe, page: PageProbe | None) -> str:
+    """'가로 구역 / 세로 기준' 한 줄 요약. 본문 문장의 옆 여백인지 아래인지를 가른다."""
+    if not info.floating:
+        return "줄 안(인라인)"
+    horizontal = "가로 불명"
+    if info.h_align:
+        horizontal = f"가로 {info.h_align}"
+    elif info.h_offset_mm is not None and page is not None:
+        start = {"page": 0.0, "margin": page.left_mm, "column": page.left_mm, "leftMargin": 0.0,
+                 "rightMargin": page.width_mm - page.right_mm, "character": page.left_mm,
+                 "insideMargin": page.left_mm, "outsideMargin": page.left_mm}.get(info.h_rel or "")
+        if start is not None:
+            x = start + info.h_offset_mm
+            width = info.width_mm or 0.0
+            if x >= page.width_mm - page.right_mm - 1:
+                horizontal = "오른쪽 여백"
+            elif x + width <= page.left_mm + 1:
+                horizontal = "왼쪽 여백"
+            else:
+                horizontal = "본문 영역 안"
+    vertical = "세로 불명"
+    if info.v_align:
+        vertical = f"세로 {info.v_align}"
+    elif info.v_offset_mm is not None:
+        if info.v_rel in ("paragraph", "line", "text"):
+            vertical = "문단 기준 아래" if info.v_offset_mm >= 0 else "문단 기준 위"
+        else:
+            vertical = f"{info.v_rel or '쪽'} 기준"
+    return f"{horizontal} / {vertical}"
 
 
 def _attrs(el) -> dict[str, str]:

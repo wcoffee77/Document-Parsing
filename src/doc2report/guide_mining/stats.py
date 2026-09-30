@@ -49,6 +49,7 @@ def summarize(probes: list[DocProbe]) -> dict:
         "tables": _tables(probes),
         "headers_footers": _headers_footers(probes),
         "structure": _structure(probes),
+        "annotations": _annotations(probes),
     }
 
 
@@ -102,6 +103,7 @@ def _fonts(probes) -> dict:
             "east_asia": _top(collect(where, lambda x: x.fmt.east_asia or "(기본)")),
             "size_pt": _top(collect(where, lambda x: x.fmt.size_pt if x.fmt.size_pt is not None else "(기본)")),
             "char_scale_pct": _top(collect(where, lambda x: x.fmt.char_scale_pct or 100)),
+            "color": _top(collect(where, lambda x: x.fmt.color or "(자동)")),
         }
     bold = [x for p in probes for x in _body(p) if not x.blank]
     out["body_bold_share"] = _ratio(sum(x.text_len for x in bold if x.fmt.bold), sum(x.text_len for x in bold))
@@ -176,7 +178,10 @@ def _markers(probes) -> dict:
             "period_ended_share": _ratio(sum(1 for t in sentences if t.rstrip().endswith(".")), len(sentences)),
         })
     # 층 순서 = 왼쪽 들여쓰기가 얕은 것부터. 층 이름을 코드에 두지 않고 말뭉치의 말머리·들여쓰기에서 얻는다.
-    rows.sort(key=lambda r: (r["left_mm_median"] if r["left_mm_median"] is not None else 0, -r["count"]))
+    # 들여쓰기를 앞 공백으로 친 문서는 left_mm이 모두 0이라, 같으면 앞 공백 수로 깊이를 가른다.
+    rows.sort(key=lambda r: (r["left_mm_median"] if r["left_mm_median"] is not None else 0,
+                             r["leading_spaces_median"] if r["leading_spaces_median"] is not None else 0,
+                             -r["count"]))
     return {
         "by_marker": rows,
         "auto_numbering_share": _ratio(
@@ -247,6 +252,49 @@ def _headers_footers(probes) -> dict:
         }
     out["title_page_docs"] = sum(1 for p in probes if any(s.title_page for s in p.sections))
     return out
+
+
+def _annotations(probes) -> dict:
+    """텍스트 상자 = 본문 문장 옆·아래에 붙이는 주석. 상자 서식·배치·글 형태를 본문과 따로 본다."""
+    boxes = [b for p in probes for b in p.textboxes]
+    paras = [x for p in probes for x in p.paragraphs if x.where == "textbox" and not x.blank]
+    sentences = [s for x in paras for s in _SENTENCE_SPLIT.split(x.text.strip()) if s.strip()]
+
+    def weighted(pick: Callable) -> Counter:
+        counter: Counter = Counter()
+        for x in paras:
+            counter[pick(x)] += x.text_len
+        return counter
+
+    return {
+        "boxes": len(boxes),
+        "docs_with_boxes": sum(1 for p in probes if p.textboxes),
+        "per_doc": _dist([len(p.textboxes) for p in probes]),
+        "floating_share": _ratio(sum(1 for b in boxes if b.floating), len(boxes)),
+        "placement": _top(Counter(b.placement for b in boxes)),
+        "wrap": _top(Counter(b.wrap or "(없음)" for b in boxes)),
+        "width_mm": _dist([b.width_mm for b in boxes if b.width_mm is not None]),
+        "height_mm": _dist([b.height_mm for b in boxes if b.height_mm is not None]),
+        "border": _top(Counter((b.border, b.border_color or "-") for b in boxes),
+                       label=lambda k: f"{k[0]} {k[1]}"),
+        "fill": _top(Counter(b.fill for b in boxes)),
+        "paragraphs_per_box": _dist([b.paragraphs for b in boxes]),
+        "box_chars": _dist([b.text_len for b in boxes]),
+        "east_asia": _top(weighted(lambda x: x.fmt.east_asia or "(기본)")),
+        "size_pt": _top(weighted(lambda x: x.fmt.size_pt if x.fmt.size_pt is not None else "(기본)")),
+        "color": _top(weighted(lambda x: x.fmt.color or "(자동)")),
+        "bold_share": _ratio(sum(x.text_len for x in paras if x.fmt.bold), sum(x.text_len for x in paras)),
+        "line": _top(Counter((x.line_rule, x.line_value) for x in paras),
+                     label=lambda k: f"{k[1]}배" if k[0] == "auto" else f"{k[1]}pt({k[0]})"),
+        "align": _top(Counter(x.align or "(기본 왼쪽)" for x in paras)),
+        "marker_inside": _top(Counter(x.marker or "(없음)" for x in paras), n=6),
+        "ending_class": _top(Counter(_ending_class(s) for s in sentences)),
+        "ending_tail": _top(Counter(_tail(s) for s in sentences if _tail(s)), n=15),
+        "period_ended_share": _ratio(sum(1 for s in sentences if s.rstrip().endswith(".")), len(sentences)),
+        "anchor_where": _top(Counter(b.anchor_where or "(알 수 없음)" for b in boxes)),
+        "anchor_marker": _top(Counter(b.anchor_marker or "(말머리 없음)" for b in boxes)),
+        "anchor_text_len": _dist([b.anchor_text_len for b in boxes if b.anchor_text_len]),
+    }
 
 
 def _structure(probes) -> dict:

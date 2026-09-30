@@ -182,3 +182,78 @@ def test_cli_probe(sample, tmp_path):
     assert result.exit_code == 0, result.output
     assert "1건 분석" in result.output
     assert json.loads((tmp_path / "res" / "probe_summary.json").read_text(encoding="utf-8"))["docs"]["count"] == 1
+
+
+_WPS_NS = 'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"'
+_NOTE_RUN = (
+    '<w:p><w:pPr><w:jc w:val="left"/></w:pPr><w:r><w:rPr><w:rFonts w:eastAsia="바탕체"/>'
+    '<w:color w:val="0000ff"/><w:sz w:val="20"/></w:rPr>'
+    '<w:t>※ 최근 평가 상위, 영어회화 2급 이상</w:t></w:r></w:p>')
+
+
+def _note_doc(path, *, vml: bool):
+    """본문 문장 아래·오른쪽 여백에 붙은 주석 상자(바탕체 10pt, 파란 글씨)."""
+    doc = Document()
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Mm(210), Mm(297)
+    sec.left_margin = sec.right_margin = Mm(20)
+    p = doc.add_paragraph("□ 핵심인력 선정")
+    if vml:
+        shape = (
+            f'<w:r {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml"><w:pict>'
+            '<v:shape style="position:absolute;margin-left:10pt;margin-top:8pt;width:85pt;height:30pt;'
+            'mso-position-horizontal-relative:margin;mso-position-vertical-relative:text" '
+            'stroked="f" filled="f"><v:textbox><w:txbxContent>' + _NOTE_RUN +
+            '</w:txbxContent></v:textbox></v:shape></w:pict></w:r>')
+    else:
+        shape = (
+            f'<w:r {nsdecls("w", "wp", "a")} {_WPS_NS}><w:drawing><wp:anchor behindDoc="0">'
+            '<wp:positionH relativeFrom="page"><wp:posOffset>7020000</wp:posOffset></wp:positionH>'
+            '<wp:positionV relativeFrom="paragraph"><wp:posOffset>216000</wp:posOffset></wp:positionV>'
+            '<wp:extent cx="540000" cy="360000"/><wp:wrapSquare wrapText="bothSides"/>'
+            '<a:graphic><a:graphicData><wps:wsp><wps:spPr><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>'
+            '<wps:txbx><w:txbxContent>' + _NOTE_RUN +
+            '</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic>'
+            '</wp:anchor></w:drawing></w:r>')
+    p._p.append(parse_xml(shape))
+    doc.save(path)
+
+
+def test_annotation_box_drawingml(tmp_path):
+    path = tmp_path / "note.docx"
+    _note_doc(path, vml=False)
+    probe = probe_docx(path)
+    box = probe.textboxes[0]
+    assert box.kind == "drawingml" and box.floating
+    assert box.placement == "오른쪽 여백 / 문단 기준 아래"
+    assert (box.width_mm, box.height_mm, box.wrap) == (15.0, 10.0, "Square")
+    assert (box.border, box.fill) == ("none", "none")
+    assert (box.anchor_where, box.anchor_marker) == ("body", "□")
+    note = next(p for p in probe.paragraphs if p.where == "textbox")
+    assert (note.fmt.east_asia, note.fmt.size_pt, note.fmt.color) == ("바탕체", 10.0, "0000FF")
+    assert note.box == 0
+    ann = summarize([probe])["annotations"]
+    assert ann["color"][0]["value"] == "0000FF" and ann["size_pt"][0]["value"] == 10.0
+    assert ann["anchor_marker"][0]["value"] == "□"
+    assert json.dumps(probe.to_dict())  # 글 없이도 직렬화된다
+    assert "영어회화" not in json.dumps(probe.to_dict(), ensure_ascii=False)
+
+
+def test_annotation_box_vml(tmp_path):
+    path = tmp_path / "note_vml.docx"
+    _note_doc(path, vml=True)
+    box = probe_docx(path).textboxes[0]
+    assert box.kind == "vml" and box.floating
+    assert box.border == "none" and box.fill == "none"
+    assert box.v_rel == "text" and box.placement.endswith("문단 기준 아래")
+    assert box.width_mm == pytest.approx(30.0, abs=0.1)   # 85pt
+
+
+def test_layers_with_equal_indent_are_ordered_by_leading_spaces(tmp_path):
+    path = tmp_path / "spaces.docx"
+    doc = Document()
+    for text in ("   - 세부", " □ 큰항목", "□ 다른항목", "   - 세부2"):
+        doc.add_paragraph(text)
+    doc.save(path)
+    rows = summarize([probe_docx(path)])["markers"]["by_marker"]
+    assert [r["marker"] for r in rows] == ["글자 □", "글자 -"]
