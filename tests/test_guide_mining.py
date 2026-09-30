@@ -257,3 +257,73 @@ def test_layers_with_equal_indent_are_ordered_by_leading_spaces(tmp_path):
     doc.save(path)
     rows = summarize([probe_docx(path)])["markers"]["by_marker"]
     assert [r["marker"] for r in rows] == ["글자 □", "글자 -"]
+
+
+def _rich_doc(path, heading="1. 추진 배경"):
+    doc = Document()
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Mm(210), Mm(297)
+    sec.left_margin = sec.right_margin = Mm(20)
+    doc.add_paragraph("보고서 제목").alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph("2026. 9. 30.").alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph(heading)
+    p = doc.add_paragraph()
+    p.add_run("□ ")
+    p.add_run("핵심인력: ").bold = True          # 말머리 뒤 앞부분만 굵게
+    p.add_run("조건을 충족한 인원")
+    doc.add_paragraph("【현황】")
+    table = doc.add_table(rows=2, cols=2)
+    for r, row in enumerate(("구분", "내용"), start=0):
+        table.cell(0, r).text = row
+    table.cell(1, 0).text = "현황"
+    table.cell(1, 1).text = "양호함"
+    for r in (0, 1):                                 # 첫 열만 음영
+        table.cell(r, 0)._tc.get_or_add_tcPr().append(
+            parse_xml(f'<w:shd {nsdecls("w")} w:val="clear" w:fill="D9D9D9"/>'))
+    doc.add_paragraph("※ 표 주석")
+    doc.save(path)
+
+
+def test_bold_pattern_table_context_and_shape(tmp_path):
+    path = tmp_path / "rich.docx"
+    _rich_doc(path)
+    probe = probe_docx(path)
+    item = next(x for x in probe.paragraphs if x.marker == "□")
+    assert item.bold_pattern == "prefix"
+    table = probe.tables[0]
+    assert (table.before_kind, table.after_kind) == ("꺾쇠 제목", "※ 주석")
+    assert table.fill_first_col_share == 1.0 and table.fill_first_row_share == 0.5   # 첫 열은 1행 이후만 센다
+    assert table.fill_other_share == 0.0 and table.fill_colors == ["D9D9D9"]
+    cells = {x.text: (x.cell_row, x.cell_col) for x in probe.paragraphs if x.where == "table"}
+    assert cells["구분"] == (0, 0) and cells["양호함"] == (1, 1)
+    s = summarize([probe])
+    assert s["dates"]["shapes"][0]["value"] == "9999. 9. 99."
+    assert s["skeleton"]["first"][0]["shapes"][0]["value"].startswith("center·")
+    assert any("날짜형" in r["value"] for r in s["skeleton"]["first"][1]["shapes"])
+    assert s["table_cells"]["첫 열(1행 이후)"]["count"] == 1
+
+
+def test_phrases_only_repeated_across_docs_and_optional(tmp_path):
+    a, b = tmp_path / "a.docx", tmp_path / "b.docx"
+    _rich_doc(a)
+    _rich_doc(b, heading="2. 비밀 사업명")
+    s = summarize([probe_docx(a), probe_docx(b)])
+    titles = {r["value"]: r["docs"] for r in s["phrases"]["section_titles"]}
+    assert "비밀 사업명" not in titles                       # 한 문서에만 있는 말은 싣지 않는다
+    assert {r["value"] for r in s["phrases"]["table_terms"]} >= {"구분", "현황"}
+    assert summarize([probe_docx(a)], phrases=False)["phrases"] is None
+
+
+def test_full_markdown_renders_all_new_sections(tmp_path):
+    a = tmp_path / "docs" / "a.docx"
+    a.parent.mkdir()
+    _rich_doc(a)
+    _note_doc(tmp_path / "docs" / "n.docx", vml=False)
+    result = CliRunner().invoke(app, ["probe", str(a.parent), "-o", str(tmp_path / "res")])
+    assert result.exit_code == 0, result.output
+    md = (tmp_path / "res" / "probe_summary.md").read_text(encoding="utf-8-sig")
+    for heading in ("말머리 없는 줄", "문서 첫머리·말미 구성", "주석 상자", "표 칸 서식", "여러 문서에 반복되는 말"):
+        assert heading in md
+    assert "핵심인력" not in md and "영어회화" not in md      # 원문 글자는 새지 않는다
+    off = CliRunner().invoke(app, ["probe", str(a.parent), "-o", str(tmp_path / "res2"), "--no-phrases"])
+    assert "여러 문서에 반복되는 말" not in (tmp_path / "res2" / "probe_summary.md").read_text(encoding="utf-8-sig")

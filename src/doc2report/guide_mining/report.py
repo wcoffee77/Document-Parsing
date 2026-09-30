@@ -40,7 +40,19 @@ def to_markdown(s: dict) -> str:
                     f"{(r['text_len'] or {}).get('p50')} | "
                     f"{_endings(r['ending_class'])} | "
                     f"{r['period_ended_share']} |")
-    lines += _section("말머리 체계 (계층별 실제 서식)", [rows, [
+    detail: list[str] = []
+    for r in mk["by_marker"]:
+        if r["count"] < 3:
+            continue
+        detail += [f"- **{r['marker']}** (n={r['count']})",
+                   *_dist_rows("  굵기 모양(말머리 뒤)", r["bold_pattern"]),
+                   *_dist_rows("  단락 앞(pt)", r["space_before_pt"]),
+                   *_dist_rows("  단락 뒤(pt)", r["space_after_pt"]),
+                   *_dist_rows("  줄간격", r["line"]),
+                   *_dist_rows("  글자 색", r["color"]),
+                   *_dist_rows("  끝 두 글자(2회 이상)", r["ending_tail"]),
+                   f"  - 밑줄 비율 {r['underline_share']}"]
+    lines += _section("말머리 체계 (계층별 실제 서식)", [rows, detail, [
         f"- 자동 번호 비율 {mk['auto_numbering_share']}, 말머리 없는 문단 비율 {mk['no_marker_paragraph_share']}, "
         f"Symbol/Wingdings 글머리가 든 문서 {mk['docs_with_pua_bullet']}건"]])
     text = s["text"]
@@ -53,17 +65,47 @@ def to_markdown(s: dict) -> str:
                   _dist_rows(f"{label} 끝 두 글자", t["ending_tail"])]
     lines += _section("문장 형태", parts)
     nt = s["notation"]
-    lines += _section("표기 관례", [[f"- 날짜: {nt['date_forms']}", f"- 수치: {nt['number_forms']}"]])
+    lines += _section("표기 관례", [[f"- 날짜: {nt['date_forms']}", f"- 수치: {nt['number_forms']}"],
+                                    _dist_rows("날짜 모양(숫자는 9로 가림)", s["dates"]["shapes"])])
     tb = s["tables"]
     lines += _section("표", [[f"- 문서당 표 수 {_fmt(tb['per_doc'])}, 행 {_fmt(tb['rows'])}, 열 {_fmt(tb['cols'])}",
                              f"- 병합 셀이 있는 표 비율 {tb['merged_share']}, 중첩 표 {tb['nested']}개"],
                             _dist_rows("표 정렬", tb["jc"]), _dist_rows("머리행 수", tb["header_rows"]),
-                            _dist_rows("머리행 음영", tb["header_fill"])])
+                            _dist_rows("머리행 음영(첫 칸 직접 음영)", tb["header_fill"]),
+                            [f"- 칸 직접 음영 비율(표 평균): 첫 행 {tb['fill_first_row_mean']}, "
+                             f"첫 열 {tb['fill_first_col_mean']}, 나머지 {tb['fill_other_mean']}"],
+                            _dist_rows("음영 색", tb["fill_colors"]),
+                            _dist_rows("표 스타일", tb["style"]),
+                            _dist_rows("표 스타일의 첫 행 음영", tb["style_first_row_fill"]),
+                            _dist_rows("표 스타일의 첫 행 굵게", tb["style_first_row_bold"]),
+                            _dist_rows("'첫 행 강조' 켬", tb["look_first_row"]),
+                            [f"- 표 너비 / 본문 폭: {_fmt(tb['width_vs_text'])}"],
+                            _dist_rows("표 왼쪽 들여쓰기(mm)", tb["indent_mm"]),
+                            _dist_rows("표 테두리", tb["borders"]),
+                            _dist_rows("표 바로 위 줄", tb["before_kind"]),
+                            _dist_rows("표 바로 아래 줄", tb["after_kind"])])
+    cell_blocks = []
+    for key, c in s["table_cells"].items():
+        cell_blocks += [[f"**{key}** — 문단 {c['count']}개, 글자 수 {_fmt(c['text_len'])}"],
+                        _dist_rows("정렬", c["align"]), _dist_rows("굵기 모양", c["bold_pattern"]),
+                        _dist_rows("크기(pt)", c["size_pt"]), _dist_rows("글자 색", c["color"])]
+    lines += _section("표 칸 서식", cell_blocks)
     hf = s["headers_footers"]
     lines += _section("머리말·꼬리말", [
         [f"- {label}: 글 있음 {hf[k]['with_text_share']}, 쪽번호 필드 {hf[k]['page_field_share']}, 정렬 {hf[k]['align']}"
          for k, label in (("header", "머리말"), ("footer", "꼬리말"))],
         [f"- 첫 쪽 머리말·꼬리말이 다른 문서 {hf['title_page_docs']}건"]])
+    un = s["unmarked"]
+    lines += _section("말머리 없는 줄", [
+        [f"- 말머리 없는 본문 줄 {un['count']}개, 글자 수 {_fmt(un['text_len'])}"],
+        _dist_rows("시작 모양", un["opener"]), _dist_rows("서식 (정렬·크기·굵기·들여쓰기)", un["profile"]),
+        _dist_rows("종결 형태", un["ending_class"])])
+    sk = s["skeleton"]
+    sk_rows = [f"- 앞에서 {e['position']}번째 줄: " + ", ".join(
+        f"{r['value']} ({r['share']:.0%}, {r['count']})" for r in e["shapes"]) for e in sk["first"]]
+    sk_rows += [f"- 뒤에서 {e['position']}번째 줄: " + ", ".join(
+        f"{r['value']} ({r['share']:.0%}, {r['count']})" for r in e["shapes"]) for e in sk["last"]]
+    lines += _section("문서 첫머리·말미 구성 (본문 기준, 빈 줄 제외)", [sk_rows])
     an = s["annotations"]
     lines += _section("주석 상자 (텍스트 상자)", [
         [f"- 상자 {an['boxes']}개, 있는 문서 {an['docs_with_boxes']}건, 문서당 {_fmt(an['per_doc'])}, "
@@ -87,6 +129,16 @@ def to_markdown(s: dict) -> str:
         f"- 목차 있는 문서 {st['toc_docs']}건, 텍스트 상자가 있는 문서 {st['textbox_docs']}건 "
         f"(문서당 {_fmt(st['textboxes_per_doc'])}), 쪽 나눔 {_fmt(st['page_breaks_per_doc'])}, "
         f"제목 스타일을 쓴 문서 {st['heading_style_docs']}건"]])
+    ph = s.get("phrases")
+    if ph is not None:
+        total = s["docs"]["count"]
+
+        def rows_of(items):
+            return [{"value": r["value"], "share": r["docs"] / total, "count": r["docs"]} for r in items]
+
+        lines += _section("여러 문서에 반복되는 말 (2건 이상 문서에 나온 것만, 괄호는 문서 수)", [
+            _dist_rows("1.·Ⅰ. 제목", rows_of(ph["section_titles"])),
+            _dist_rows("표 머리행·첫 열 용어", rows_of(ph["table_terms"]))])
     return "\n".join(lines) + "\n"
 
 

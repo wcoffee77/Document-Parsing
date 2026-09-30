@@ -49,11 +49,11 @@ def probe_all(files: list[Path]) -> tuple[list[DocProbe], list[str]]:
 
 
 def write_outputs(probes: list[DocProbe], skipped: list[str], out_dir: str | Path, *,
-                  keep_text: bool = False, keep_names: bool = False) -> Path:
+                  keep_text: bool = False, keep_names: bool = False, phrases: bool = True) -> Path:
     """probe_summary.json/.md 와 문서별 probe/<id>.json. 기본은 원문 글자·파일 이름을 뺀다."""
     out = Path(out_dir)
     (out / "probe").mkdir(parents=True, exist_ok=True)
-    summary = summarize(probes)
+    summary = summarize(probes, phrases=phrases)
     summary["docs"]["skipped"] = skipped
     (out / "probe_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

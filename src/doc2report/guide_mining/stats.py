@@ -36,7 +36,7 @@ _NUMBER_FORMS = {
 }
 
 
-def summarize(probes: list[DocProbe]) -> dict:
+def summarize(probes: list[DocProbe], *, phrases: bool = True) -> dict:
     return {
         "docs": _docs(probes),
         "page": _page(probes),
@@ -50,6 +50,11 @@ def summarize(probes: list[DocProbe]) -> dict:
         "headers_footers": _headers_footers(probes),
         "structure": _structure(probes),
         "annotations": _annotations(probes),
+        "unmarked": _unmarked(probes),
+        "skeleton": _skeleton(probes),
+        "dates": _dates(probes),
+        "table_cells": _table_cells(probes),
+        "phrases": _phrases(probes) if phrases else None,
     }
 
 
@@ -176,6 +181,15 @@ def _markers(probes) -> dict:
             # 층(말머리)마다 종결·길이가 다르다 — 같은 문장도 층에 따라 허용 여부가 갈린다
             "ending_class": _top(Counter(_ending_class(t) for t in sentences), n=4),
             "period_ended_share": _ratio(sum(1 for t in sentences if t.rstrip().endswith(".")), len(sentences)),
+            "bold_pattern": _top(Counter(x.bold_pattern for x in items), n=4),
+            "underline_share": _ratio(sum(1 for x in items if x.underline), len(items)),
+            "space_before_pt": _top(Counter(x.space_before_pt for x in items), n=3),
+            "space_after_pt": _top(Counter(x.space_after_pt for x in items), n=3),
+            "line": _top(Counter((x.line_rule, x.line_value) for x in items), n=3,
+                         label=lambda k: f"{k[1]}배" if k[0] == "auto" else f"{k[1]}pt({k[0]})"),
+            "color": _top(Counter(x.fmt.color or "(자동)" for x in items), n=3),
+            "ending_tail": [r for r in _top(Counter(_tail(t) for t in sentences if _tail(t)), n=8)
+                            if r["count"] >= 2],
         })
     # 층 순서 = 왼쪽 들여쓰기가 얕은 것부터. 층 이름을 코드에 두지 않고 말뭉치의 말머리·들여쓰기에서 얻는다.
     # 들여쓰기를 앞 공백으로 친 문서는 left_mm이 모두 0이라, 같으면 앞 공백 수로 깊이를 가른다.
@@ -228,6 +242,20 @@ def _notation(probes) -> dict:
 
 def _tables(probes) -> dict:
     tables = [t for p in probes for t in p.tables]
+    outer = [t for t in tables if not t.nested]
+    widths = []
+    for p in probes:
+        if not p.sections:
+            continue
+        s = p.sections[0]
+        text_width = s.width_mm - s.left_mm - s.right_mm
+        widths += [round(t.total_width_mm / text_width, 2) for t in p.tables
+                   if not t.nested and t.total_width_mm and text_width > 0]
+
+    def mean(values):
+        values = [v for v in values if v is not None]
+        return round(sum(values) / len(values), 2) if values else None
+
     return {
         "per_doc": _dist([len(p.tables) for p in probes]),
         "rows": _dist([t.rows for t in tables]),
@@ -237,6 +265,42 @@ def _tables(probes) -> dict:
         "header_fill": _top(Counter(t.header_fill or "(없음)" for t in tables)),
         "merged_share": _ratio(sum(1 for t in tables if t.merged_cells), len(tables)),
         "nested": sum(1 for t in tables if t.nested),
+        "style": _top(Counter(t.style_id or "(없음)" for t in tables)),
+        "style_first_row_fill": _top(Counter(t.style_first_row_fill or "(없음)" for t in tables)),
+        "style_first_row_bold": _top(Counter(t.style_first_row_bold for t in tables)),
+        "look_first_row": _top(Counter(t.look_first_row for t in tables)),
+        "fill_first_row_mean": mean(t.fill_first_row_share for t in tables),
+        "fill_first_col_mean": mean(t.fill_first_col_share for t in tables),
+        "fill_other_mean": mean(t.fill_other_share for t in tables),
+        "fill_colors": _top(Counter(c for t in tables for c in t.fill_colors)),
+        "width_vs_text": _dist(widths),
+        "indent_mm": _top(Counter(_r(t.indent_mm) for t in outer)),
+        "borders": _top(Counter(", ".join(f"{k} {v}" for k, v in sorted(t.borders.items())) or "(표 수준 지정 없음)"
+                                for t in tables), n=5),
+        "before_kind": _top(Counter(t.before_kind for t in outer)),
+        "after_kind": _top(Counter(t.after_kind or "(문서 끝)" for t in outer)),
+    }
+
+
+def _table_cells(probes) -> dict:
+    """표 칸 서식: 머리행(0행)·첫 열·나머지를 따로 본다."""
+    groups: dict[str, list[ParaProbe]] = {"머리행(0행)": [], "첫 열(1행 이후)": [], "나머지 칸": []}
+    for p in probes:
+        for x in p.paragraphs:
+            if x.where != "table" or x.blank or x.cell_row is None:
+                continue
+            key = "머리행(0행)" if x.cell_row == 0 else "첫 열(1행 이후)" if x.cell_col == 0 else "나머지 칸"
+            groups[key].append(x)
+    return {
+        key: {
+            "count": len(items),
+            "align": _top(Counter(x.align or "(기본 왼쪽)" for x in items), n=4),
+            "bold_pattern": _top(Counter(x.bold_pattern for x in items), n=3),
+            "size_pt": _top(Counter(x.fmt.size_pt if x.fmt.size_pt is not None else "(기본)" for x in items), n=4),
+            "color": _top(Counter(x.fmt.color or "(자동)" for x in items), n=3),
+            "text_len": _dist([x.text_len for x in items]),
+        }
+        for key, items in groups.items()
     }
 
 
@@ -295,6 +359,107 @@ def _annotations(probes) -> dict:
         "anchor_marker": _top(Counter(b.anchor_marker or "(말머리 없음)" for b in boxes)),
         "anchor_text_len": _dist([b.anchor_text_len for b in boxes if b.anchor_text_len]),
     }
+
+
+def _body_items(probe: DocProbe) -> list[ParaProbe]:
+    return [x for x in _body(probe) if not x.blank]
+
+
+_OPENERS = "[［【〔〈《「『"
+_DATE_ANY = re.compile(r"[’']?\d{2,4}\s*[.\-/년]\s*\d{1,2}\s*[.\-/월]\s*(?:\d{1,2}\s*[.일]?)?")
+
+
+def _opener_class(text: str) -> str:
+    t = text.strip()
+    if not t:
+        return "기타"
+    if t[0] in _OPENERS:
+        return "꺾쇠로 시작"
+    if t[0] in "(（":
+        return "괄호로 시작"
+    if _DATE_ANY.match(t):
+        return "날짜로 시작"
+    if t[0].isdigit():
+        return "숫자로 시작"
+    return "글자로 시작"
+
+
+def _unmarked(probes) -> dict:
+    """말머리 없는 본문 줄이 무엇인가 (제목·날짜·표 제목·부연 구분)."""
+    items = [x for p in probes for x in _body_items(p) if not x.marker_kind]
+    return {
+        "count": len(items),
+        "opener": _top(Counter(_opener_class(x.text) for x in items)),
+        "profile": _top(Counter((x.align or "(기본 왼쪽)", x.fmt.size_pt, x.bold_pattern, x.left_mm > 0)
+                                for x in items), n=8,
+                        label=lambda k: f"{k[0]} {k[1]}pt 굵기:{k[2]} {'들여씀' if k[3] else '들여쓰기 없음'}"),
+        "text_len": _dist([x.text_len for x in items]),
+        "ending_class": _top(Counter(_ending_class(x.text.strip().rstrip(_CLOSERS)) for x in items), n=5),
+    }
+
+
+def _shape(x: ParaProbe) -> str:
+    size = f"{x.fmt.size_pt:g}pt" if x.fmt.size_pt is not None else "기본크기"
+    length = "짧음(≤10)" if x.text_len <= 10 else "중간(≤30)" if x.text_len <= 30 else "긺"
+    return (f"{x.align or '왼쪽'}·{size}·굵기:{x.bold_pattern}{'·밑줄' if x.underline else ''}"
+            f"·{x.marker or '말머리없음'}·{length}{'·날짜형' if _DATE_ANY.search(x.text) else ''}")
+
+
+def _skeleton(probes) -> dict:
+    """문서 첫머리·말미 줄이 어떤 모양인가 (제목·날짜·부서·결문 위치 관례)."""
+    def at(position: int, from_end: bool = False):
+        counter: Counter = Counter()
+        for p in probes:
+            body = _body_items(p)
+            if len(body) > position:
+                counter[_shape(body[-1 - position] if from_end else body[position])] += 1
+        return _top(counter, n=4)
+
+    return {
+        "first": [{"position": i + 1, "shapes": at(i)} for i in range(6)],
+        "last": [{"position": i + 1, "shapes": at(i, from_end=True)} for i in range(3)],
+    }
+
+
+def _dates(probes) -> dict:
+    """날짜 표기 모양 — 숫자를 9로 가려 형식(점·공백·연도 자리수)만 센다."""
+    counter: Counter = Counter()
+    for p in probes:
+        for x in p.paragraphs:
+            if not x.blank:
+                for m in _DATE_ANY.finditer(x.text):
+                    counter[re.sub(r"\d", "9", m.group(0).strip())] += 1
+    return {"shapes": _top(counter, n=10)}
+
+
+def _phrases(probes) -> dict:
+    """여러 문서에 반복되는 짧은 말만 — 제목·표 머리 용어. 한 문서에만 있는 말은 싣지 않는다."""
+    def clean(x: ParaProbe) -> str:
+        t = x.text.strip()
+        if x.marker and t.startswith(x.marker):
+            t = t[len(x.marker):]
+        return re.sub(r"\s+", " ", t).strip()
+
+    titles: dict[str, set] = {}
+    terms: dict[str, set] = {}
+    for p in probes:
+        for x in p.paragraphs:
+            if x.blank:
+                continue
+            text = clean(x)
+            if not text:
+                continue
+            if (x.where == "body" and re.fullmatch(r"\d{1,2}\.|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]\.?", x.marker or "")
+                    and len(text) <= 20):
+                titles.setdefault(text, set()).add(p.doc_id)
+            if x.where == "table" and (x.cell_row == 0 or x.cell_col == 0) and len(text) <= 10:
+                terms.setdefault(text, set()).add(p.doc_id)
+
+    def repeated(groups: dict, n: int):
+        rows = sorted(((k, len(v)) for k, v in groups.items() if len(v) >= 2), key=lambda kv: (-kv[1], kv[0]))
+        return [{"value": k, "docs": c} for k, c in rows[:n]]
+
+    return {"section_titles": repeated(titles, 25), "table_terms": repeated(terms, 30)}
 
 
 def _structure(probes) -> dict:

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -54,6 +55,7 @@ class Fmt:
     italic: bool | None = None
     char_scale_pct: int | None = None
     color: str | None = None         # RRGGBB, 테마색은 "theme:accent1", 자동이면 None
+    underline: bool | None = None
 
 
 @dataclass
@@ -84,6 +86,10 @@ class ParaProbe:
     has_page_break: bool
     text_runs: int
     box: int | None = None           # where == "textbox"이면 DocProbe.textboxes의 번호
+    bold_pattern: str = "none"       # 말머리 뒤 글자 기준: all | none | prefix | suffix | mixed
+    underline: bool = False          # 말머리 뒤 글자의 과반이 밑줄
+    cell_row: int | None = None      # where == "table"이면 칸 위치
+    cell_col: int | None = None
 
 
 @dataclass
@@ -148,6 +154,19 @@ class TableProbe:
     merged_cells: int
     cell_margin_mm: dict[str, float]
     nested: bool
+    style_id: str | None = None
+    style_first_row_fill: str | None = None   # 표 스타일의 '첫 행' 조건부 서식(직접 음영이 없을 때 머리 음영이 여기 있다)
+    style_first_row_bold: bool | None = None
+    look_first_row: bool | None = None
+    total_width_mm: float = 0.0
+    indent_mm: float = 0.0
+    borders: dict[str, str] = field(default_factory=dict)   # 변 → "single/0.5pt"
+    fill_first_row_share: float | None = None  # 칸 직접 음영 비율: 첫 행 / 첫 열 / 나머지
+    fill_first_col_share: float | None = None
+    fill_other_share: float | None = None
+    fill_colors: list[str] = field(default_factory=list)
+    before_kind: str = ""            # 표 바로 위 줄의 종류
+    after_kind: str = ""             # 표 바로 아래 줄의 종류
 
 
 @dataclass
@@ -192,6 +211,8 @@ class _Prober:
         self.docx = docx
         self.probe = probe
         self._para_of: dict = {}   # w:p 요소 → ParaProbe (상자가 붙은 문단을 찾는 용도)
+        self._prev_body: ParaProbe | None = None   # 표 바로 위 본문 줄
+        self._last_table: TableProbe | None = None  # 아래 줄을 아직 못 채운 표
         self.styles = {
             s.get(qn("w:styleId")): s
             for s in docx.styles.element.findall(qn("w:style"))
@@ -283,11 +304,46 @@ class _Prober:
             has_page_break=_has_page_break(p),
             text_runs=len(p.findall(qn("w:r"))),
         )
+        offset = 0
+        if marker_kind == "typed":
+            offset = leading + len(marker or "") + (1 if sep in ("tab", "space") else 0)
+        para.bold_pattern, para.underline = self._bold_pattern(p, style, offset)
         if para.page_break_before or para.has_page_break:
             self.probe.page_breaks += 1
         self.probe.paragraphs.append(para)
         self._para_of[p] = para
+        if where == "body":
+            if self._last_table is not None:
+                self._last_table.after_kind = _neighbor_kind(para)
+                self._last_table = None
+            self._prev_body = para
         return para
+
+    def _bold_pattern(self, p, style, offset: int) -> tuple[str, bool]:
+        """말머리 뒤 글자의 굵기 모양(전부·앞부분만·뒷부분만·섞임)과 밑줄 여부."""
+        flags: list[bool] = []
+        underlined = 0
+        pos = 0
+        for run in p.findall(qn("w:r")):
+            text = _run_text(run)
+            if not text:
+                continue
+            fmt = self._run_fmt(run, style)
+            for ch in text:
+                if pos >= offset and not ch.isspace():
+                    flags.append(bool(fmt.bold))
+                    underlined += 1 if fmt.underline else 0
+                pos += 1
+        if not flags:
+            return "none", False
+        if all(flags):
+            pattern = "all"
+        elif not any(flags):
+            pattern = "none"
+        else:
+            changes = sum(1 for a, b in zip(flags, flags[1:]) if a != b)
+            pattern = "prefix" if flags[0] and changes == 1 else "suffix" if flags[-1] and changes == 1 else "mixed"
+        return pattern, underlined * 2 > len(flags)
 
     # ── 서식 풀기 ───────────────────────────────────────────────────────
 
@@ -377,6 +433,9 @@ class _Prober:
                 el = rpr.find(qn(f"w:{tag}"))
                 if el is not None:
                     setattr(fmt, attr, el.get(qn("w:val")) not in ("0", "false", "off"))
+            under = rpr.find(qn("w:u"))
+            if under is not None:
+                fmt.underline = under.get(qn("w:val")) != "none"
             scale = rpr.find(qn("w:w"))
             if scale is not None and scale.get(qn("w:val")):
                 fmt.char_scale_pct = int(scale.get(qn("w:val")))
@@ -488,15 +547,88 @@ class _Prober:
                     el = mar.find(qn("w:start" if side == "left" else "w:end"))
                 if el is not None and el.get(qn("w:w")):
                     margins[side] = round(_num(el.get(qn("w:w")), 0.0) / _TWIP_PER_MM, 2)
-        self.probe.tables.append(TableProbe(
+        info = TableProbe(
             rows=len(rows), cols=len(widths), col_widths_mm=widths,
             jc=jc.get(qn("w:val")) if jc is not None else None,
             header_rows=header_rows, header_fill=fill, merged_cells=merged,
             cell_margin_mm=margins, nested=nested,
-        ))
-        for tr in rows:
-            for tc in tr.findall(qn("w:tc")):
+            total_width_mm=round(sum(widths), 1),
+        )
+        self._table_style(tblpr, info)
+        self._table_fills(rows, info)
+        if not nested:
+            info.before_kind = (_neighbor_kind(self._prev_body) if self._prev_body is not None
+                                else "(없음·표 바로 뒤)")
+            self._prev_body = None
+            self._last_table = info
+        self.probe.tables.append(info)
+        for r, tr in enumerate(rows):
+            for c, tc in enumerate(tr.findall(qn("w:tc"))):
+                start = len(self.probe.paragraphs)
                 self._body(tc, where="table", nested=True)
+                for para in self.probe.paragraphs[start:]:
+                    if para.cell_row is None:   # 안쪽 표의 칸은 이미 자기 위치가 있다
+                        para.cell_row, para.cell_col = r, c
+
+    def _table_style(self, tblpr, info: TableProbe) -> None:
+        if tblpr is None:
+            return
+        ind = tblpr.find(qn("w:tblInd"))
+        if ind is not None:
+            info.indent_mm = round(_num(ind.get(qn("w:w")), 0.0) / _TWIP_PER_MM, 1)
+        look = tblpr.find(qn("w:tblLook"))
+        if look is not None:
+            first = look.get(qn("w:firstRow"))
+            if first is not None:
+                info.look_first_row = first in ("1", "true")
+            elif look.get(qn("w:val")):
+                info.look_first_row = bool(int(look.get(qn("w:val")), 16) & 0x0020)
+        borders = tblpr.find(qn("w:tblBorders"))
+        if borders is not None:
+            for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                el = borders.find(qn(f"w:{side}"))
+                if el is not None:
+                    size = _num(el.get(qn("w:sz")), 0.0) / 8
+                    info.borders[side] = f"{el.get(qn('w:val'))}/{size:g}pt"
+        ref = tblpr.find(qn("w:tblStyle"))
+        if ref is not None and ref.get(qn("w:val")) in self.styles:
+            info.style_id = ref.get(qn("w:val"))
+            for style in reversed(self._chain(self.styles[info.style_id])):
+                for cond in style.findall(qn("w:tblStylePr")):
+                    if cond.get(qn("w:type")) != "firstRow":
+                        continue
+                    shd = cond.find(f"{qn('w:tcPr')}/{qn('w:shd')}")
+                    if shd is not None and shd.get(qn("w:fill")) not in (None, "auto"):
+                        info.style_first_row_fill = shd.get(qn("w:fill")).upper()
+                    bold = cond.find(f"{qn('w:rPr')}/{qn('w:b')}")
+                    if bold is not None:
+                        info.style_first_row_bold = bold.get(qn("w:val")) not in ("0", "false", "off")
+
+    def _table_fills(self, rows, info: TableProbe) -> None:
+        """칸 직접 음영이 첫 행에 있는가, 첫 열에 있는가, 그 밖에 있는가."""
+        first_row = first_col = other = 0
+        n_first_row = n_first_col = n_other = 0
+        colors: Counter = Counter()
+        for r, tr in enumerate(rows):
+            for c, tc in enumerate(tr.findall(qn("w:tc"))):
+                shd = tc.find(f"{qn('w:tcPr')}/{qn('w:shd')}")
+                fill = shd.get(qn("w:fill")) if shd is not None else None
+                shaded = fill not in (None, "auto", "FFFFFF", "ffffff")
+                if shaded:
+                    colors[fill.upper()] += 1
+                if r == 0:
+                    n_first_row += 1
+                    first_row += shaded
+                elif c == 0:
+                    n_first_col += 1
+                    first_col += shaded
+                else:
+                    n_other += 1
+                    other += shaded
+        info.fill_first_row_share = round(first_row / n_first_row, 2) if n_first_row else None
+        info.fill_first_col_share = round(first_col / n_first_col, 2) if n_first_col else None
+        info.fill_other_share = round(other / n_other, 2) if n_other else None
+        info.fill_colors = [k for k, _ in colors.most_common(3)]
 
     # ── 쪽·머리말·텍스트 상자 ───────────────────────────────────────────
 
@@ -607,6 +739,37 @@ def _has_page_field(element) -> bool:
             return True
     return any((f.get(qn("w:instr")) or "").strip().upper().startswith(("PAGE", "NUMPAGES"))
                for f in element.iter(qn("w:fldSimple")))
+
+
+def _run_text(run) -> str:
+    out: list[str] = []
+    for child in run:
+        if child.tag == qn("w:t"):
+            out.append(child.text or "")
+        elif child.tag == qn("w:tab"):
+            out.append("\t")
+        elif child.tag in (qn("w:br"), qn("w:cr")) and child.get(qn("w:type")) != "page":
+            out.append("\n")
+    return "".join(out)
+
+
+_OPENERS = "[［【〔〈《「『"
+
+
+def _neighbor_kind(para: ParaProbe) -> str:
+    """표 바로 위·아래 줄이 어떤 줄인가 (표 제목·주석 관례를 본다)."""
+    text = para.text.strip()
+    if para.blank:
+        return "빈 줄"
+    if text.startswith(("<표", "〈표", "표 ")):
+        return "표 번호"
+    if text[:1] and text[0] in _OPENERS:
+        return "꺾쇠 제목"
+    if para.marker == "※" or text.startswith("*"):
+        return "※ 주석"
+    if para.marker_kind:
+        return f"말머리 {para.marker}"
+    return "문단(말머리 없음)"
 
 
 def _inside_fallback(el) -> bool:
