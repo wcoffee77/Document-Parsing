@@ -264,7 +264,8 @@ def test_forced_powershell_transport_never_calls_httpx(monkeypatch):
 
 
 def test_403_without_windows_does_not_try_powershell(monkeypatch):
-    """이 테스트 환경(Linux)에서는 기본적으로 PowerShell을 시도하지 않는다."""
+    """Windows가 아니면 PowerShell을 시도하지 않는다(CI는 Windows에서도 돌므로 OS를 못 박는다)."""
+    monkeypatch.setattr("doc2report.sources.confluence.platform.system", lambda: "Linux")
     monkeypatch.setenv("CONFLUENCE_URL", "https://wiki.company.com")
     monkeypatch.setenv("CONFLUENCE_API_TOKEN", "pat")
 
