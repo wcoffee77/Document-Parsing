@@ -86,4 +86,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/doc2report-windows-x64.zip --title "doc2report ${{ github.ref_name }}" --notes "압축을 풀고 start_webapp.bat을 실행하세요. 설치 안내: docs/team-setup.md"
+        run: |
+          gh release create "${{ github.ref_name }}" dist/doc2report-windows-x64.zip `
+            --title "doc2report ${{ github.ref_name }}" `
+            --notes "압축을 풀고 start_webapp.bat을 실행하세요. 설치 안내는 docs/team-setup.md"
