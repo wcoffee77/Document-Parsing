@@ -334,3 +334,15 @@ def test_broken_profile_file_does_not_break_the_screen(tmp_path, monkeypatch):
     monkeypatch.setattr(opts, "PROFILE_DIR", tmp_path)
     assert opts.profile_names() == ["confluence", "default"]
     assert [e.split(":")[0] for e in opts.profile_errors()] == ["망가진.yaml"]
+
+
+def test_confluence_and_word_inputs_keep_original_bold_even_with_report_rules():
+    """규칙 기본값을 '보고서'로 골라도 Confluence·Word 입력이면 1.·□ 문장 전체 굵게를 끈다
+    (2026-09-30 사용자: 원문에서 굵은 글씨만 굵게)."""
+    from doc2report.ir import Document
+    from doc2report.web.options import build_profile
+
+    opts = {"mode": "manual", "preset": "confluence", "rules_base": "default", "polish": "none", "text": {}}
+    for kinds, expected in ((["confluence"], False), (["docx"], False), (["text"], True)):
+        prof, *_ = build_profile(opts, [Document(blocks=[])], kinds, llm_ready=False)
+        assert prof.text.level_bold is expected

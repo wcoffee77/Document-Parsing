@@ -200,10 +200,11 @@ class DocxRenderer:
         spec = self.profile.font("body")
         if level.size:
             spec = spec.resized(level.size)
-        if self.profile.text.level_bold:
-            if level.bold is not None:
-                # 말머리뿐 아니라 그 항목 문장 전체에 적용된다 ("1. □로 시작하는 문장은 굵은체").
-                spec = spec.model_copy(update={"bold": level.bold})
+        if self.profile.text.level_bold and block.marker is None and level.bold is not None:
+            # 말머리뿐 아니라 그 항목 문장 전체에 적용된다 ("1. □로 시작하는 문장은 굵은체").
+            # **도구가 말머리를 붙인 항목에만** — 원문에 말머리가 있던 줄(Confluence·Word·직접 친 □)은
+            # 원문 굵기 그대로다(2026-09-30 사용자: 원문에서 굵은 글씨만 굵게).
+            spec = spec.model_copy(update={"bold": level.bold})
         elif block.from_heading:
             # 단계 굵게를 끈 프로파일: 굵은 건 원문 굵은 글씨(run)와 제목뿐이다.
             spec = spec.model_copy(update={"bold": True})

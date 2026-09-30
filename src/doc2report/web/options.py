@@ -197,6 +197,9 @@ def format_profile(options: dict) -> Profile:
                          "여백은 cm 숫자로 적어 주세요") from exc
 
 
+_ORIGINAL_FORMAT_KINDS = ("confluence", "docx")
+
+
 def manual_rules(prof: Profile, options: dict) -> tuple[Profile, str, bool]:
     """직접 선택 모드: "규칙 기본값" 프로파일의 규칙(text)에 체크박스 값을 덮어써 서식 프로파일에 끼운다.
     문장 다듬기: polish = none | rules(파이썬 규칙), llm = LLM 맞춤법·어조 다듬기(따로 켬)."""
@@ -225,10 +228,18 @@ def build_profile(options: dict, docs: list[Document], kinds: list[str], *,
     fmt = format_profile(options)
     if options.get("mode") == "manual":
         prof, polish, llm = manual_rules(fmt, options)
-        return prof, polish, llm, None
+        return _original_bold(prof, kinds), polish, llm, None
     decision = auto_decide(docs, kinds, allow_llm=bool(options.get("allow_llm")),
                            llm_ready=llm_ready, preset=fmt)
-    return decision.profile, decision.polish, decision.llm, decision
+    return _original_bold(decision.profile, kinds), decision.polish, decision.llm, decision
+
+
+def _original_bold(prof: Profile, kinds: list[str]) -> Profile:
+    """원문 서식이 있는 입력(Confluence·Word)이 있으면 "1.·□ 문장 전체 굵게"(보고서 규격)를 끈다 —
+    원문에서 굵은 글씨만 굵게(2026-09-30 사용자: 규칙 기본값을 '보고서'로 두자 본문이 전부 굵어짐)."""
+    if prof.text.level_bold and any(k in _ORIGINAL_FORMAT_KINDS for k in kinds):
+        return prof.model_copy(update={"text": prof.text.model_copy(update={"level_bold": False})})
+    return prof
 
 
 def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,

@@ -419,3 +419,20 @@ def test_ssl_error_with_powershell_also_failing_reports_both(monkeypatch):
 
     with pytest.raises(RuntimeError, match="PowerShell.*대체 시도도 실패"):
         load_confluence("123")
+
+
+def test_powershell_fallback_never_puts_the_token_on_the_command_line(monkeypatch):
+    """명령 문자열은 스크립트 블록 로깅·프로세스 목록에 남을 수 있어 토큰은 환경변수로만 넘긴다."""
+    from doc2report.sources.confluence import _powershell_get
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"], seen["env"] = cmd, kwargs.get("env") or {}
+        return subprocess.CompletedProcess(cmd, 0, stdout=base64.b64encode(b"ok").decode(), stderr="")
+
+    monkeypatch.setattr("doc2report.sources.confluence.subprocess.run", fake_run)
+    assert _powershell_get("https://wiki/x", {"Authorization": "Bearer top-secret-pat"}) == b"ok"
+    assert "top-secret-pat" not in " ".join(seen["cmd"])
+    assert "$env:D2R_HEADER_0" in seen["cmd"][-1]
+    assert seen["env"]["D2R_HEADER_0"] == "Bearer top-secret-pat"

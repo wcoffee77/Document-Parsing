@@ -15,6 +15,13 @@ FastAPI 같은 웹 프레임워크를 쓰지 않는 이유: 사내 PC는 인터�
 SO_REUSEADDR는 Windows에서 두 프로세스가 같은 포트를 나눠 잡게 해 요청이 예전 서버로 갈 수 있다)
 ② 포트가 이미 doc2report면 `/api/shutdown`으로 끄고 넘겨받는다 ③ 서버가 켜진 뒤 코드가 바뀌었으면
 `/api/status`의 `stale`로 화면에 "서버를 다시 켜세요"를 띄운다.
+
+**사용자 등록과 토큰 보호(2026-09-30, 팀 공유 준비)**: 토큰은 각자 등록해 이 PC 사용자 폴더에 암호화해
+둔다(`account.py`). 서버는 세 겹으로 막는다 — ① 127.0.0.1에서만 연다 ② **접속 열쇠**: 서버가 여는 주소
+(`/?k=…`)로 들어온 브라우저에만 쿠키를 주고, 쿠키가 없으면 화면만 보이고 API는 잠긴다(같은 PC의 다른
+Windows 사용자나 다른 프로그램이 내 서버로 내 토큰을 쓰지 못하게). 열쇠는 사용자 폴더에 두어 서버를 다시
+켜도 즐겨찾기가 그대로 된다 ③ **Host 확인**: 127.0.0.1/localhost가 아닌 이름으로 온 요청은 거절한다
+(외부 사이트가 자기 도메인을 127.0.0.1로 돌려 브라우저를 시키는 DNS 리바인딩 차단).
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ import json
 import mimetypes
 import os
 import platform
+import secrets
 import shutil
 import socket
 import subprocess
@@ -37,16 +45,17 @@ import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from ..sources.confluence import confluence_status, fetch_page_title
+from .. import account as account_mod
+from ..sources.confluence import confluence_status, confluence_whoami, fetch_page_title
 from ..transform.llm_polish import llm_status, llm_try
 from . import options as opts
 from .jobs import JobRunner, history
 
 STATIC = Path(__file__).parent / "static"
 PACKAGE = Path(__file__).resolve().parents[1]
-API_VERSION = 6  # 화면(app.js)과 서버가 주고받는 형식이 바뀌면 올린다 — app.js의 API_VERSION과 같아야 함
+API_VERSION = 7  # 화면(app.js)과 서버가 주고받는 형식이 바뀌면 올린다 — app.js의 API_VERSION과 같아야 함
 MAX_UPLOAD = 50 * 1024 * 1024
 _STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -62,7 +71,9 @@ _CONTENT_TYPES = {
 
 
 class App:
-    def __init__(self, output_dir: Path):
+    def __init__(self, output_dir: Path, access_key: str | None = None):
+        self.access_key = access_key  # None이면 열쇠 확인을 안 한다(테스트용 — serve()는 항상 켠다)
+        self.account = account_mod.load_and_apply()
         self.output_dir = output_dir.resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.upload_dir = Path(tempfile.mkdtemp(prefix="doc2report-uploads-"))
@@ -76,8 +87,43 @@ class App:
 
         return {"version": API_VERSION, "stale": code_fingerprint() != self.fingerprint,
                 "confluence": confluence_status(), "llm": llm_status(),
+                "account": account_mod.summary(self.account),
                 "pdf": pdf_engine(), "output_dir": str(self.output_dir),
                 "profile_errors": opts.profile_errors()}
+
+    def save_account(self, form: dict) -> dict:
+        """등록·수정. Confluence 토큰이 있으면 Confluence에 물어 토큰 주인을 확인한다."""
+        account = account_mod.update(form, self.account)
+        account_mod.apply(account)
+        error = self._verify(account) if not account.verified_as else ""
+        account_mod.save(account)
+        self.account = account
+        return {"ok": True, "account": account_mod.summary(account), "verify_error": error}
+
+    def verify_account(self) -> dict:
+        if not self.account:
+            raise ValueError("등록된 사용자가 없습니다")
+        self.account.verified_as = ""
+        error = self._verify(self.account)
+        account_mod.save(self.account)
+        return {"ok": True, "account": account_mod.summary(self.account), "verify_error": error}
+
+    def delete_account(self) -> dict:
+        account_mod.delete()
+        self.account = None
+        return {"ok": True, "account": account_mod.summary(None)}
+
+    @staticmethod
+    def _verify(account) -> str:
+        if not (account.values.get("confluence_url") and account.values.get("confluence_token")):
+            return ""
+        try:
+            account.verified_as = confluence_whoami()
+            account.verified_at = account_mod._now()
+            return ""
+        except Exception as exc:
+            account.verified_as = account.verified_at = ""
+            return f"토큰 주인을 확인하지 못했습니다: {exc}"
 
     def output_file(self, name: str) -> Path:
         """저장 폴더 바로 아래 파일만 — "../" 같은 경로로 폴더 밖을 못 가리키게."""
@@ -97,8 +143,16 @@ def make_handler(app: App):
         # ── GET ─────────────────────────────────────────────────────────
 
         def do_GET(self):
-            path = urlparse(self.path).path
+            url = urlparse(self.path)
+            path = url.path
+            if not self._host_ok():
+                return self._error(403, "허용되지 않은 주소입니다 — http://127.0.0.1 로 여세요")
             try:
+                key = (parse_qs(url.query).get("k") or [""])[0]
+                if path == "/" and key and app.access_key and secrets.compare_digest(key, app.access_key):
+                    return self._send(302, b"", "text/plain", cache=False, extra={
+                        "Location": "/", "Set-Cookie": f"{self._cookie_name()}={app.access_key}; "
+                        "Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000"})
                 if path == "/favicon.ico":
                     return self._static("favicon.svg")
                 if path in ("/", "/index.html"):
@@ -106,7 +160,11 @@ def make_handler(app: App):
                 if path.startswith("/static/"):
                     return self._static(path[len("/static/"):])
                 if path == "/api/status":
+                    if not self._authorized():  # 잠김: 버전만(예전 서버 인계 확인용)
+                        return self._json({"version": API_VERSION, "locked": True})
                     return self._json(app.status())
+                if not self._authorized():
+                    return self._locked()
                 if path == "/api/profiles":
                     return self._json({"profiles": [opts.profile_info(n) for n in opts.profile_names()],
                                        "schema": opts.schema()})
@@ -125,8 +183,10 @@ def make_handler(app: App):
 
         def do_POST(self):
             path = urlparse(self.path).path
-            if self.headers.get("X-Doc2Report") != "1":
+            if self.headers.get("X-Doc2Report") != "1" or not self._host_ok():
                 return self._error(403, "허용되지 않은 요청입니다")
+            if path != "/api/shutdown" and not self._authorized():
+                return self._locked()
             try:
                 if path == "/api/upload":
                     return self._upload()
@@ -144,6 +204,12 @@ def make_handler(app: App):
                     app.handed_over = True
                     threading.Thread(target=app.server.shutdown, daemon=True).start()
                     return None
+                if path == "/api/account":
+                    return self._json(app.save_account(body))
+                if path == "/api/account/verify":
+                    return self._json(app.verify_account())
+                if path == "/api/account/delete":
+                    return self._json(app.delete_account())
                 if path == "/api/open":
                     return self._json(_open(app, body.get("name", ""), folder=bool(body.get("folder"))))
                 return self._error(404, "없는 주소입니다")
@@ -151,6 +217,31 @@ def make_handler(app: App):
                 return self._json({"ok": False, "error": str(exc) or exc.__class__.__name__}, 400)
 
         # ── 도우미 ──────────────────────────────────────────────────────
+
+        def _host_ok(self) -> bool:
+            bound = app.server.server_address[0] if app.server else "127.0.0.1"
+            if bound not in ("127.0.0.1", "localhost", "::1"):
+                return True  # 사용자가 --host로 일부러 연 경우
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+            return host in ("127.0.0.1", "localhost", "::1")
+
+        def _cookie_name(self) -> str:
+            port = app.server.server_address[1] if app.server else 0
+            return f"d2r_key_{port}"  # 쿠키는 포트를 가리지 않으므로 이름에 포트를 넣는다
+
+        def _authorized(self) -> bool:
+            if not app.access_key:
+                return True
+            wanted = self._cookie_name() + "="
+            for part in (self.headers.get("Cookie") or "").split(";"):
+                part = part.strip()
+                if part.startswith(wanted):
+                    return secrets.compare_digest(part[len(wanted):], app.access_key)
+            return False
+
+        def _locked(self):
+            return self._json({"ok": False, "locked": True,
+                               "error": "잠긴 화면입니다 — 서버 창에 표시된 주소로 여세요"}, 401)
 
         def _upload(self):
             length = int(self.headers.get("Content-Length") or 0)
@@ -258,11 +349,29 @@ class _Server(ThreadingHTTPServer):
         super().server_bind()
 
 
-def create_server(host: str, port: int, output_dir: Path) -> tuple[ThreadingHTTPServer, App]:
-    app = App(output_dir)
+def create_server(host: str, port: int, output_dir: Path,
+                  access_key: str | None = None) -> tuple[ThreadingHTTPServer, App]:
+    app = App(output_dir, access_key)
     server = _Server((host, port), make_handler(app))
     app.server = server
     return server, app
+
+
+def access_key() -> str:
+    """접속 열쇠 — 사용자 폴더에 두어 서버를 다시 켜도 같은 값(즐겨찾기·쿠키가 그대로 된다).
+    사용자 폴더(%APPDATA%)는 다른 Windows 사용자가 읽을 수 없다."""
+    file = account_mod.home() / "access.key"
+    try:
+        value = file.read_text(encoding="utf-8").strip()
+        if len(value) >= 32:
+            return value
+    except OSError:
+        pass
+    value = secrets.token_urlsafe(32)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(value, encoding="utf-8")
+    account_mod._owner_only(file)
+    return value
 
 
 def _take_over(port: int) -> str:
@@ -288,13 +397,14 @@ def _take_over(port: int) -> str:
 def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: Path | None = None,
           open_browser: bool = True) -> None:
     output_dir = output_dir or Path(os.environ.get("DOC2REPORT_OUTPUT_DIR") or Path.cwd() / "out" / "webapp")
+    key = access_key()
     try:
-        server, app = create_server(host, port, output_dir)
+        server, app = create_server(host, port, output_dir, key)
     except OSError:
         result = _take_over(port)
         if result == "stopped":
             print(f"이미 켜져 있던 doc2report 서버(포트 {port})를 끄고 새로 시작합니다.")
-            server, app = create_server(host, port, output_dir)
+            server, app = create_server(host, port, output_dir, key)
         else:
             reason = ("예전 버전의 doc2report 서버" if result == "old"
                       else "다른 프로그램")
@@ -303,8 +413,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: Path | None = N
             print("  - 창을 찾기 어려우면 작업 관리자에서 python.exe / uv.exe 를 끝내세요.")
             print(f"  - 또는 다른 포트로: start_webapp.bat --port {port + 1}")
             sys.exit(1)
-    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{server.server_address[1]}/"
+    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{server.server_address[1]}/?k={key}"
     print(f"doc2report 웹 화면: {url}")
+    print("  (주소 끝의 k=… 는 이 PC 사용자만 쓰는 접속 열쇠입니다 — 다른 사람에게 알려 주지 마세요)")
+    who = app.account.name if app.account else "미등록 — 화면에서 사용자 등록"
+    print(f"  사용자: {who}")
     print(f"  결과 저장 폴더: {app.output_dir}")
     print("  끝내려면 이 창에서 Ctrl+C")
     if open_browser:

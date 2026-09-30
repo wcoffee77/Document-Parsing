@@ -60,6 +60,9 @@ def convert(
     follow_links: bool = typer.Option(False, "--follow-links",
                                       help="Confluence 본문 링크(다른 페이지의 책갈피 포함)가 가리키는 내용도 불러옴"),
 ) -> None:
+    from .account import load_and_apply
+
+    load_and_apply()  # 웹 화면에서 등록한 사용자의 토큰·LLM 설정(있으면 환경변수보다 우선)
     out = output or Path(_default_output(source))
     profile = profile or auto_profile(source)
     base = load_profile(profile)

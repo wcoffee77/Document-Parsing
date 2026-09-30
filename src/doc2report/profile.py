@@ -286,6 +286,9 @@ class TextRules(_Base):
     no_marker_openers: list[str] = Field(default_factory=list)
     # 이 꺾쇠·괄호로 시작하는 제목·문단·항목에는 프로파일 말머리(□, - 등)를 붙이지 않는다
     # (2026-09-29 사용자: "【사업현황】" 앞에 □가 붙음 — 모든 문서 공통). 문서 어디서나 적용.
+    page_title_strip: list[str] = Field(default_factory=list)
+    # 쪽 제목(불러온 연결 문서·입력마다 새 쪽)의 앞에서 떼어 낼 정규식 — "(첨부 1) 세부 계획" → "세부 계획"
+    # (2026-09-30 사용자). 떼고 나면 빈 제목이 되는 경우는 그대로 둔다.
     note_indent: int | None = None
     # ※ 참고사항 문단은 바로 윗줄 문단의 들여쓰기보다 이만큼 더 들여쓴다(2026-09-29 사용자: +0.4cm).
 

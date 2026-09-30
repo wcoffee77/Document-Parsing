@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 6;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 7;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -34,6 +34,7 @@ async function api(path, body, extraHeaders) {
   const res = await fetch(path, init);
   let data;
   try { data = await res.json(); } catch (e) { data = { ok: false, error: `응답 오류 (${res.status})` }; }
+  if (data.locked && res.status === 401) throw new Locked();
   if (!res.ok || data.ok === false) throw new Error(data.error || `요청 실패 (${res.status})`);
   return data;
 }
@@ -56,6 +57,7 @@ function toast(message, bad) {
 async function loadStatus() {
   const st = await api("/api/status");
   state.status = st;
+  if (st.locked) throw new Locked();
   if (st.version !== API_VERSION) {
     // 예전 서버가 새 화면 파일을 내보내는 중 — 이대로면 서식·옵션이 비어 보인다(2026-09-29 사용자 PC)
     throw new StaleServer("서버 프로그램이 이 화면보다 예전 버전입니다.");
@@ -66,17 +68,7 @@ async function loadStatus() {
   if (st.profile_errors && st.profile_errors.length) {
     banner("읽지 못한 서식 파일이 있습니다 — 그 서식만 빼고 보여 줍니다.", " " + st.profile_errors.join(" / "), true);
   }
-  const cf = $("#st-confluence");
-  cf.textContent = st.confluence.configured ? "Confluence 연결 설정됨" : "Confluence 미설정";
-  cf.className = "chip " + (st.confluence.configured ? "ok" : "warn");
-  cf.title = st.confluence.configured
-    ? `${st.confluence.url} · ${st.confluence.auth} · 전송 ${st.confluence.transport}`
-    : "CONFLUENCE_URL / CONFLUENCE_API_TOKEN 환경변수가 없습니다 — scripts\\confluence_env.ps1 을 채우고 start_webapp 으로 다시 켜세요";
-  const llm = $("#st-llm");
-  llm.textContent = st.llm.configured ? `LLM: ${st.llm.model || st.llm.backend}` : "LLM 미설정";
-  llm.className = "chip " + (st.llm.configured ? "ok" : "warn");
-  llm.title = st.llm.configured ? `${st.llm.backend} ${st.llm.endpoint}` :
-    "DOC2REPORT_LLM_BASE_URL / DOC2REPORT_MODEL 이 없습니다 — scripts\\onprem_env.ps1";
+  renderAccount(st);
   const pdf = $("#st-pdf");
   pdf.textContent = st.pdf.available ? `PDF: ${st.pdf.engine}` : "PDF 변환기 없음";
   pdf.className = "chip " + (st.pdf.available ? "ok" : "bad");
@@ -87,6 +79,96 @@ async function loadStatus() {
     $("#use-llm").closest("label").classList.add("disabled");
   }
 }
+
+// ── 사용자 (2026-09-30: 팀 공유 — 누구의 토큰·어떤 API를 쓰는지 늘 보이게) ─────────────
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch (e) { return url || ""; }
+}
+
+function renderAccount(st) {
+  const acc = st.account, cfInfo = acc.confluence, llmInfo = acc.llm;
+  const user = $("#st-user");
+  user.textContent = acc.registered ? `사용자: ${acc.name}` : "사용자 미등록 — 등록하기";
+  user.className = "chip user " + (acc.registered ? "ok" : "warn");
+
+  const cf = $("#st-confluence");
+  if (st.confluence.configured) {
+    const mismatch = acc.registered && cfInfo.verified_as && !cfInfo.verified_as.includes(acc.name);
+    cf.textContent = cfInfo.verified_as ? `Confluence: ${cfInfo.verified_as}의 토큰 ${cfInfo.secret}`
+      : `Confluence 토큰 ${cfInfo.secret} (주인 확인 안 됨)`;
+    cf.className = "chip " + (!cfInfo.verified_as || mismatch ? "warn" : "ok");
+    cf.title = `${cfInfo.source} · ${hostOf(cfInfo.url)} · ${st.confluence.auth} · 전송 ${st.confluence.transport}` +
+      (cfInfo.verified_at ? ` · ${cfInfo.verified_at} 확인` : "") +
+      (mismatch ? " · 등록한 이름과 토큰 주인이 다릅니다!" : "");
+  } else {
+    cf.textContent = "Confluence 토큰 없음";
+    cf.className = "chip warn";
+    cf.title = "사용자 등록에서 Confluence 주소와 개인 토큰을 넣으세요";
+  }
+
+  const llm = $("#st-llm");
+  llm.textContent = st.llm.configured ? `LLM: ${st.llm.model} @ ${hostOf(st.llm.endpoint) || st.llm.backend}` : "LLM 미설정";
+  llm.className = "chip " + (st.llm.configured ? "ok" : "warn");
+  llm.title = st.llm.configured ? `${llmInfo.source || st.llm.backend} · ${st.llm.endpoint}` +
+    (llmInfo.secret ? ` · API 키 ${llmInfo.secret}` : "") : "사용자 등록에서 온프렘 LLM 주소·모델명을 넣으세요";
+}
+
+function openAccount() {
+  const acc = state.status.account, d = acc.defaults;
+  $("#acc-protection").textContent = acc.protection;
+  $("#acc-name").value = acc.name || "";
+  $("#acc-cf-url").value = d.confluence_url || "";
+  $("#acc-cf-user").value = d.confluence_username || "";
+  $("#acc-llm-url").value = d.llm_base_url || "";
+  $("#acc-llm-model").value = d.llm_model || "";
+  $("#acc-cf-token").value = $("#acc-llm-key").value = "";
+  const hasToken = acc.registered && acc.confluence.secret;
+  $("#acc-cf-token").placeholder = hasToken ? `저장됨 ${acc.confluence.secret} — 바꿀 때만 입력`
+    : "Confluence 프로필 → 개인 액세스 토큰에서 발급";
+  $("#acc-llm-key").placeholder = acc.llm.secret ? `저장됨 ${acc.llm.secret} — 바꿀 때만 입력` : "";
+  $("#acc-llm-clear-row").classList.toggle("hidden", !acc.llm.secret);
+  $("#acc-llm-clear").checked = false;
+  $("#acc-cf-state").textContent = acc.confluence.verified_as
+    ? `토큰 주인(Confluence 확인): ${acc.confluence.verified_as} · ${acc.confluence.verified_at}` : "";
+  $("#acc-verify").classList.toggle("hidden", !hasToken);
+  $("#acc-delete").classList.toggle("hidden", !acc.registered);
+  $("#acc-error").textContent = "";
+  $("#account-dlg").showModal();
+}
+
+async function accountAction(path, body, button) {
+  button.disabled = true;
+  $("#acc-error").textContent = "";
+  try {
+    const r = await api(path, body);
+    await loadStatus();
+    if (r.verify_error) {
+      openAccount();
+      $("#acc-error").textContent = r.verify_error + "\n(저장은 되었습니다 — 주소·토큰을 고친 뒤 다시 저장하세요)";
+      return;
+    }
+    $("#account-dlg").close();
+    toast(path.endsWith("delete") ? "등록을 지웠습니다" : `저장했습니다 — ${r.account.confluence.verified_as || r.account.name}`);
+  } catch (e) {
+    $("#acc-error").textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("#st-user").addEventListener("click", () => state.status && !state.status.locked && openAccount());
+$("#acc-close").addEventListener("click", () => $("#account-dlg").close());
+$("#acc-save").addEventListener("click", (ev) => accountAction("/api/account", {
+  name: $("#acc-name").value, confluence_url: $("#acc-cf-url").value,
+  confluence_username: $("#acc-cf-user").value, confluence_token: $("#acc-cf-token").value,
+  llm_base_url: $("#acc-llm-url").value, llm_model: $("#acc-llm-model").value,
+  llm_api_key: $("#acc-llm-key").value, clear_llm_key: $("#acc-llm-clear").checked,
+}, ev.target));
+$("#acc-verify").addEventListener("click", (ev) => accountAction("/api/account/verify", {}, ev.target));
+$("#acc-delete").addEventListener("click", (ev) => {
+  if (confirm("이 PC에 저장된 내 토큰·API 설정을 지울까요?")) accountAction("/api/account/delete", {}, ev.target);
+});
 
 // ── 프로파일·옵션 ────────────────────────────────────────────────────────
 
@@ -332,7 +414,7 @@ $("#cf-add").addEventListener("click", async () => {
   renderInputs();
   await Promise.all(added.map(async (item) => {
     if (!state.status || !state.status.confluence.configured) {
-      item.detail = url_short(item.url) + " · 연결 설정이 없어 제목 확인 못 함";
+      item.detail = url_short(item.url) + " · Confluence 토큰이 없어 제목 확인 못 함 — 위의 사용자 등록에서 넣으세요";
       return;
     }
     try {
@@ -515,6 +597,7 @@ document.addEventListener("change", (ev) => {
 });
 
 class StaleServer extends Error {}
+class Locked extends Error {}
 
 (async function init() {
   renderInputs();
@@ -522,6 +605,13 @@ class StaleServer extends Error {}
     await loadStatus();
     await loadProfiles();
   } catch (e) {
+    if (e instanceof Locked) {
+      document.body.classList.add("locked");
+      $("#st-user").textContent = "잠김";
+      banner("이 화면은 잠겨 있습니다.", " 서버 창(검은 창)에 표시된 주소(끝에 ?k=… 가 붙은 주소)로 여세요 — " +
+        "start_webapp.bat을 실행하면 자동으로 열립니다. 다른 사람이 내 토큰으로 변환하지 못하게 막는 장치입니다.", true);
+      return;
+    }
     if (e instanceof StaleServer) banner(e.message, " " + RESTART_HELP);
     else if (e instanceof TypeError && /fetch/i.test(e.message)) banner("서버에 연결할 수 없습니다.", " 서버 창이 떠 있는지 확인하고, 없으면 start_webapp.bat을 실행하세요.");
     else banner("화면 정보를 불러오지 못했습니다: " + e.message, " " + RESTART_HELP);
@@ -535,4 +625,5 @@ class StaleServer extends Error {}
     restoreOptions();
   }
   loadHistory().catch(() => {});
+  if (!state.status.account.registered) openAccount();  // 처음 쓰는 사람: 사용자 등록부터
 })();

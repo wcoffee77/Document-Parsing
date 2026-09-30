@@ -5,6 +5,7 @@
 #
 # scripts\confluence_env.ps1(Confluence 토큰)과 scripts\onprem_env.ps1(온프렘 LLM)이 있으면
 # 먼저 불러온 뒤 서버를 띄운다 — PowerShell 창마다 ". .\scripts\..."를 다시 칠 필요가 없다.
+# 팀원은 이 스크립트 없이 웹 화면의 '사용자 등록'으로 각자 토큰을 넣는다(등록 정보가 있으면 그쪽이 우선).
 # 서버는 이 PC(127.0.0.1)에서만 접속된다. 끄려면 이 창에서 Ctrl+C.
 # (이 파일은 한글이 깨지지 않도록 UTF-8 BOM으로 저장해 둔다 — Windows PowerShell 5.1)
 

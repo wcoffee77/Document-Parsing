@@ -190,3 +190,22 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 }
 .banner b { display: block; margin-bottom: 2px; }
 .banner.warn { background: var(--warn-soft); color: var(--warn); border-color: #f0dc9c; }
+
+/* 사용자 등록 */
+.chip.user { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+.dlg { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; width: min(560px, 92vw); }
+.dlg::backdrop { background: rgba(20, 24, 31, .45); }
+.dlg h2 { margin: 0 0 6px; font-size: 18px; }
+.dlg label { display: block; margin: 8px 0; font-size: 13px; }
+.dlg input:not([type=checkbox]) {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 4px; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 8px; font: inherit;
+}
+.dlg label.check { display: flex; }
+.dlg fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 6px 12px 10px; }
+.dlg legend { font-weight: 600; font-size: 13px; }
+.dlg .err { color: var(--bad); font-size: 13px; min-height: 1em; white-space: pre-wrap; }
+.dlg-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.btn.danger { color: var(--bad); }
+.btn.danger:hover { border-color: var(--bad); }
+body.locked main.layout { opacity: .35; pointer-events: none; }

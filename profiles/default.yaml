@@ -221,6 +221,9 @@ text:
   auto_markers: true        # 원문에 말머리가 없는 제목·문단에 1. □ - 를 붙임 (false면 안 붙임 — confluence)
   note_marks: ["※"]
   note_indent: 4mm          # ※ 문단은 윗줄 문단보다 0.4cm 더 들여씀
+  page_title_strip:               # 불러온 문서 제목 앞의 "(첨부 1)" "[첨부2]" "첨부 3." 같은 번호표는 뗌
+    - '^\s*[\(\[<【〈［（]\s*첨부\s*[0-9#]*\s*[\)\]>】〉］）]\s*[.:·\-]?\s*'
+    - '^\s*첨부\s*[0-9]+\s*[.:)\-]\s*'
   no_marker_openers: ["[", "［", "【", "〔", "〈", "《", "「", "『"]   # 이 꺾쇠로 시작하면 □/- 말머리를 안 붙임
   note_size_delta: 2pt      # ※ 참고사항은 본문보다 2pt 작게 (본문 14pt면 12pt, 12pt면 10pt)
   table_captions: true

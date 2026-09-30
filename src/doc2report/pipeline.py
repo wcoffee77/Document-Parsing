@@ -19,6 +19,7 @@ from .transform import Change, apply_text_rules
 from .transform.structure import (
     attach_table_captions,
     attach_table_notes,
+    clean_page_titles,
     drop_blank_blocks,
     fold_headings_into_levels,
     merge_short_list_items,
@@ -222,6 +223,8 @@ def convert_document(
         _insert_dateline(doc, date, prof)
 
     doc, changes = drop_blank_blocks(doc)  # 안 그러면 접을 때 "□"만 덜렁 찍힌 줄이 된다
+    doc, title_changes = clean_page_titles(doc, prof.text.page_title_strip)
+    changes.extend(title_changes)
     if polish != "none":
         transformed = apply_text_rules(doc, prof)
         doc = transformed.document

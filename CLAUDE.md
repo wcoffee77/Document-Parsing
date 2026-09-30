@@ -129,7 +129,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 263개
+uv run pytest                           # 279개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -571,6 +571,14 @@ HTTPS를 중계하는데 그 루트 인증서가 파이썬 기본 CA 번들 cert
   - 뒤 표 28.0~190.0mm(- 28.0), 제목 뒤 표 20.0~190.0mm. **Word 실측은 아직** — jc=right 표의 오른쪽 테두리가
   여백선에 정확히 붙는지 사내 PC에서 볼 것.
 
+- **(2026-09-30) 본문이 전부 굵게 나옴** — 재현: 웹 "직접 선택"에서 규칙 기본값을 '보고서'로 두면
+  `level_bold`(1.·□ 문장 전체 굵게, 보고서 규격)가 Confluence 원문 줄에도 걸렸다. 두 겹으로 막음: ① 렌더러는
+  **도구가 말머리를 붙인 항목(`marker is None`)에만** level_bold를 적용 — 원문 말머리 줄·말머리 없음("")은 원문
+  굵기 ② `web/options._original_bold`: 입력에 Confluence·Word가 있으면 규칙과 상관없이 level_bold를 끈다
+  (도구가 붙인 □ 줄까지 원문 굵기 — 사용자 원칙 "원문에서 굵은 글씨만 굵게"). 제목에서 접힌 항목은 계속 굵다.
+- **쪽 제목의 "(첨부 1)" 제거** — `text.page_title_strip`(정규식 목록, default.yaml) + `structure.clean_page_titles`
+  (drop_blank_blocks 직후). 쪽 제목(`page_title`)만 대상, 떼고 빈 제목이면 그대로. 리포트에 "쪽 제목 번호표 제거".
+
 ## 온프렘 LLM 연동 (검증 완료 — thinkingcap)
 
 **LLM 다듬기 온프렘 연동**(`--polish llm` + `DOC2REPORT_LLM_BASE_URL`)은 사내 PC에서
@@ -706,6 +714,34 @@ confluence.yaml을 이 값으로 바꿈 — CLI의 Confluence 변환도 같이 �
 지금 구조 그대로 배포 절차만 만들면 된다. **변환 규칙은 완벽하지 않고 사용하면서 계속 고칠 예정**
 (사용자) — 규칙은 계속 프로파일 값 + 작은 transform 함수로 추가하고, 화면 옵션은 `options.py` 목록에
 한 줄 넣는 방식을 유지할 것.
+
+**사용자 등록·토큰 보호 (2026-09-30, 팀 공유 1단계 — 설치형)** — 사용자: "git 주소를 공유해 각자 쓰게 하려 한다.
+개인 Confluence 토큰·온프렘 LLM은 각자 넣고, 화면 위에 누구의 토큰·어떤 API인지 보여야 한다(도용 방지)."
+**공용 서버가 아니라 각자 PC 설치형**을 택했다 — 토큰이 남의 PC·서버에 모이지 않고, 지금 구조(127.0.0.1 단일 사용자)를
+그대로 쓴다.
+- `account.py`: 등록 정보는 **사용자 폴더**(`%APPDATA%\doc2report\account.json`, `DOC2REPORT_HOME`으로 바꿈)에,
+  토큰·API 키는 **DPAPI**(ctypes, CurrentUser + 엔트로피)로 봉인. Windows 밖(개발용)은 "plain:" base64 + chmod 600,
+  화면에 "파일 권한만(암호화 없음)"으로 표시. 변환 코드는 그대로 환경변수를 읽고 `apply()`가 등록 값을 서버 프로세스
+  환경변수에 넣는다(스크립트 값보다 우선, 등록 삭제 시 켤 때 값으로 복원 — `_ORIGINAL_ENV`). CLI `convert`도
+  시작할 때 `load_and_apply()`. 비밀 칸을 비우고 저장하면 예전 값 유지, 토큰이 바뀌면 주인 확인을 다시 한다.
+- **토큰 주인 확인**: 저장 때 `confluence_whoami()`(`/rest/api/user/current`)로 Confluence가 아는 표시 이름을 받아
+  화면 위에 "홍길동 (hong.gd)의 토큰 …abcd"로 보인다. 등록 이름이 그 안에 없으면 노란 경고. Server/DC는 틀린 토큰에
+  401 대신 **익명 사용자**로 답하기도 해서 그 경우도 실패로 본다. (사내 게이트웨이에서 이 API가 열려 있는지 **미확인**.)
+- **서버 잠금**(web/server.py): ① **접속 열쇠** — `access.key`(사용자 폴더, 재시작해도 같은 값)를 `/?k=`로 받은
+  브라우저에만 쿠키(`d2r_key_<port>`, HttpOnly·SameSite=Strict·30일)를 주고, 쿠키 없으면 화면만 보이고 API는 401
+  (`/api/status`는 `{version, locked}`만 — 예전 서버 인계 확인용, `/api/shutdown`은 인계 때문에 열쇠 없이 허용).
+  같은 PC의 다른 Windows 사용자·다른 프로그램이 내 서버로 내 토큰을 쓰는 것을 막는다. ② **Host 확인** —
+  루프백으로 열었으면 Host가 127.0.0.1/localhost/::1이 아닌 요청은 403(DNS 리바인딩: 기존 X-Doc2Report 헤더 검사는
+  같은 출처가 된 리바인딩을 못 막는다). `create_server(access_key=None)`은 열쇠 검사를 안 한다 — 테스트용,
+  `serve()`는 항상 켠다. **API_VERSION 7.** 테스트는 `tests/conftest.py`가 `DOC2REPORT_HOME`을 임시 폴더로 돌린다
+  (개발자 PC의 실제 등록을 건드리지 않게).
+- **저장소가 public이다(2026-09-30 확인)** — 토큰 값은 이력에 없지만 사내 주소(게이트웨이 호스트·LLM IP·프록시 IP)가
+  CLAUDE.md·docs·scripts에 있다. 사용자에게 private 전환(또는 사내 git)을 권고함. 이력 정리(rewrite)는 사용자 결정 전 안 함.
+  **앞으로 사내 주소·IP를 새 파일에 적지 말 것.**
+- **PowerShell 대체 경로가 토큰을 `-Command` 문자열에 넣고 있었다** — 스크립트 블록 로깅(이벤트 4104)·보안 솔루션·
+  프로세스 목록에 토큰이 남을 수 있다. 이제 헤더 값은 자식 프로세스 환경변수(`D2R_HEADER_n`)로만 넘기고 스크립트는
+  `$env:D2R_HEADER_n`을 참조한다. 이 경로는 사내 PC에서 검증된 경로라 **바뀐 뒤 첫 실측 필요**.
+- 팀원 안내: [docs/team-setup.md](docs/team-setup.md).
 
 **다음 후보(제안만 함)**: 옵션 조합을 이름 붙여 저장(사용자 설정을 preset yaml로 저장), 결과 미리보기(HTML),
 변환 전 표 배치 미리보기(`check`).

@@ -335,6 +335,22 @@ def confluence_status() -> dict:
     }
 
 
+def confluence_whoami() -> str:
+    """이 토큰의 주인 — Confluence가 알려 주는 표시 이름(사용자 이름). 사용자 등록 때 화면 위에 "누구의
+    토큰인지"를 등록자가 적은 이름이 아니라 **Confluence가 확인한 이름**으로 보여 주려고
+    (2026-09-30 사용자: 토큰 도용 방지). 토큰이 틀리면 Server/DC는 401 대신 익명 사용자로 답하기도 한다."""
+    notes: list[str] = []
+    with _client(_normalize_base_url(_require("CONFLUENCE_URL")), notes) as client:
+        resp = _get(client, "/rest/api/user/current", notes)
+        _raise_for_status(resp, "user/current")
+        data = resp.json()
+    if data.get("type") == "anonymous" or not (data.get("displayName") or data.get("username")):
+        raise RuntimeError("토큰이 인정되지 않았습니다(익명 사용자로 응답) — 토큰을 다시 확인하세요")
+    name = data.get("displayName") or data.get("username")
+    login = data.get("username") or data.get("email") or data.get("publicName") or ""
+    return f"{name} ({login})" if login and login != name else name
+
+
 def fetch_page_title(url_or_id: str) -> tuple[str, str]:
     """본문 없이 제목만 가볍게 확인 — 입력 목록에 페이지를 추가할 때 주소가 맞는지 보여 주려고.
     (페이지 ID, 제목)"""
@@ -481,8 +497,8 @@ def _require(key: str) -> str:
     value = os.environ.get(key)
     if not value:
         raise RuntimeError(
-            "Confluence 인증 정보가 없습니다. 환경변수를 설정하세요: "
-            "CONFLUENCE_URL, CONFLUENCE_API_TOKEN (Cloud는 CONFLUENCE_USERNAME도 필요)"
+            "Confluence 인증 정보가 없습니다. 웹 화면 위의 '사용자 등록'에서 Confluence 주소와 개인 토큰을 "
+            "넣으세요 (명령줄만 쓴다면 환경변수 CONFLUENCE_URL, CONFLUENCE_API_TOKEN)"
         )
     return value
 
@@ -565,9 +581,14 @@ def _powershell_get(url: str, headers: dict[str, str]) -> bytes:
     """
     # PowerShell 해시테이블 리터럴은 항목을 쉼표가 아니라 세미콜론으로 구분한다
     # (쉼표를 쓰면 값이 배열로 묶여 버린다).
-    header_expr = "; ".join(
-        f"'{_ps_escape(k)}'='{_ps_escape(v)}'" for k, v in headers.items()
-    )
+    # 헤더 **값**(토큰)은 명령 문자열에 넣지 않고 자식 프로세스 환경변수로만 넘긴다 — 명령 문자열은
+    # PowerShell 스크립트 블록 로깅·보안 솔루션·프로세스 목록에 남을 수 있다(2026-09-30, 팀 공유 전 점검).
+    child_env = dict(os.environ)
+    parts = []
+    for index, (key, value) in enumerate(headers.items()):
+        child_env[f"D2R_HEADER_{index}"] = value
+        parts.append(f"'{_ps_escape(key)}'=$env:D2R_HEADER_{index}")
+    header_expr = "; ".join(parts)
     script = (
         "$ProgressPreference = 'SilentlyContinue'; "
         f"$r = Invoke-WebRequest -Uri '{_ps_escape(url)}' -Headers @{{{header_expr}}} "
@@ -576,7 +597,7 @@ def _powershell_get(url: str, headers: dict[str, str]) -> bytes:
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, env=child_env,
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise RuntimeError((result.stderr or result.stdout or "빈 응답").strip()[:300])

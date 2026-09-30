@@ -14,6 +14,7 @@
     <span class="sub">Confluence·Word·메모 → 사내 규격 보고서</span>
   </div>
   <div class="status" id="status">
+    <button class="chip user" id="st-user" type="button" title="사용자 등록·변경">사용자 확인 중…</button>
     <span class="chip" id="st-confluence">Confluence 확인 중…</span>
     <span class="chip" id="st-llm">LLM 확인 중…</span>
     <span class="chip" id="st-pdf">PDF 확인 중…</span>
@@ -196,6 +197,39 @@
     <p class="empty" id="history-empty">아직 만든 문서가 없습니다.</p>
   </section>
 </main>
+
+<!-- 사용자 등록 (2026-09-30: 팀 공유 — 토큰은 사람마다, 이 PC에만 암호화해 보관) -->
+<dialog id="account-dlg" class="dlg">
+  <form method="dialog" id="account-form" autocomplete="off">
+    <h2>사용자 등록</h2>
+    <p class="hint">토큰과 API 키는 이 PC의 내 Windows 계정 폴더에만 보관합니다 — 보호 방식: <b id="acc-protection"></b>.
+      저장소 폴더·git에는 들어가지 않고, 이 화면에도 끝 4자리만 보입니다. 토큰 주인은 저장할 때 Confluence에 물어
+      확인해 화면 위에 표시합니다.</p>
+    <label>사용자 이름 <input id="acc-name" required placeholder="예) 홍길동"></label>
+    <fieldset>
+      <legend>Confluence</legend>
+      <label>REST 주소 <input id="acc-cf-url" placeholder="예) http://api.confluence.회사/rest/api/"></label>
+      <label>개인 액세스 토큰(PAT) <input id="acc-cf-token" type="password" placeholder="Confluence 프로필 → 개인 액세스 토큰에서 발급"></label>
+      <label>로그인 이메일 <span class="hint">(Confluence Cloud만 — 사내 Server/DC는 비워 둠)</span>
+        <input id="acc-cf-user" placeholder=""></label>
+      <div class="hint" id="acc-cf-state"></div>
+    </fieldset>
+    <fieldset>
+      <legend>온프렘 LLM <span class="hint">(쓰지 않으면 비워 둠)</span></legend>
+      <label>API 주소 <input id="acc-llm-url" placeholder="예) http://서버:8000/v1"></label>
+      <label>모델명 <input id="acc-llm-model" placeholder="예) thinkingcap"></label>
+      <label>API 키 <span class="hint">(필요할 때만)</span> <input id="acc-llm-key" type="password"></label>
+      <label class="check hidden" id="acc-llm-clear-row"><input type="checkbox" id="acc-llm-clear"> 저장된 API 키 지우기</label>
+    </fieldset>
+    <div class="err" id="acc-error"></div>
+    <div class="row dlg-actions">
+      <button class="btn primary" id="acc-save" type="button">저장하고 토큰 확인</button>
+      <button class="btn" id="acc-verify" type="button">토큰 주인 다시 확인</button>
+      <button class="btn danger" id="acc-delete" type="button">등록 삭제</button>
+      <button class="btn" id="acc-close" type="button">닫기</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="toast" class="toast hidden"></div>
 <script src="/static/app.js"></script>

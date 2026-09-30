@@ -131,6 +131,30 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
 
+def clean_page_titles(doc: Document, patterns: list[str]) -> tuple[Document, list[Change]]:
+    """쪽 제목(`Heading.page_title` — 불러온 연결 문서·입력마다 새 쪽의 제목) 앞의 번호표를 뗀다.
+    Confluence에서 "(첨부 1) 세부 계획"처럼 페이지 제목에 붙여 둔 첨부 번호는 보고서에선 군더더기다
+    (2026-09-30 사용자). 규칙은 text.page_title_strip."""
+    if not patterns:
+        return doc, []
+    regexes = [re.compile(p) for p in patterns]
+    changes: list[Change] = []
+    blocks: list[Block] = []
+    for block in doc.blocks:
+        if isinstance(block, Heading) and block.page_title:
+            before = plain(block.runs)
+            after = before
+            for rx in regexes:
+                after = rx.sub("", after, count=1)
+            after = after.strip()
+            if after and after != before.strip():
+                changes.append(Change(before, after, "쪽 제목 번호표 제거"))
+                block = Heading(level=block.level, runs=[block.runs[0].copy_with(after)],
+                                section_title=block.section_title, page_title=True)
+        blocks.append(block)
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
 def drop_blank_blocks(doc: Document) -> tuple[Document, list[Change]]:
     """글자가 하나도 없는 제목·문단·항목을 뺀다. 접으면 프로파일 말머리만 덜렁 찍힌 줄("□")이 되기
     때문이다(2026-09-29 사용자 보고 — 두 번). 공백뿐인 것은 조용히 빼고, **보이지 않는 글자가 든

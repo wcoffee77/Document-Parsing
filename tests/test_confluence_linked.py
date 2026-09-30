@@ -275,3 +275,27 @@ def test_linked_pages_render_on_new_pages_without_extra_dates(confluence, tmp_pa
     page_title = next(p for p in paras if p.text == "세부 계획")
     assert page_title.paragraph_format.page_break_before
     assert sum(p.text == "2026. 9. 30" for p in paras) == 1   # 날짜는 문서 제목 아래에만
+
+
+@pytest.mark.parametrize("title", ["(첨부 1) 세부 계획", "[첨부2] 세부 계획", "【첨부 3】세부 계획",
+                                   "첨부 4. 세부 계획", "（첨부 #）세부 계획"])
+def test_attachment_number_is_removed_from_page_titles(title):
+    from doc2report.profile import load_profile
+    from doc2report.transform.structure import clean_page_titles
+    from doc2report.ir import Document, Run
+
+    doc = Document(blocks=[Heading(level=1, runs=[Run(title)], page_title=True)])
+    cleaned, changes = clean_page_titles(doc, load_profile("confluence").text.page_title_strip)
+    assert plain(cleaned.blocks[0].runs) == "세부 계획"
+    assert changes and changes[0].rule == "쪽 제목 번호표 제거"
+
+
+def test_attachment_word_in_middle_of_title_is_kept():
+    from doc2report.profile import load_profile
+    from doc2report.transform.structure import clean_page_titles
+    from doc2report.ir import Document, Run
+
+    for title in ("첨부 서류 목록", "(첨부)", "채용 첨부 1 안내"):
+        doc = Document(blocks=[Heading(level=1, runs=[Run(title)], page_title=True)])
+        cleaned, _ = clean_page_titles(doc, load_profile("default").text.page_title_strip)
+        assert plain(cleaned.blocks[0].runs) == title
