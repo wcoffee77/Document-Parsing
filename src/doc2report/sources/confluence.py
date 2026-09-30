@@ -125,9 +125,14 @@ MAX_LINK_DEPTH = 4      # 연결의 연결… 몇 단계까지
 
 
 class LinkedPages:
-    """follow_links: 본문 링크(다른 페이지, 또는 그 페이지의 책갈피)가 가리키는 내용도 링크가 든 문단
-    바로 뒤에 넣는다(2026-09-29 사용자: 책갈피=앵커로 다른 페이지 구간을 붙여 둔다). 참고용 링크까지
-    끌려 오므로 기본은 끔 — 켜면 책갈피 링크는 그 구간만, 책갈피 없는 링크는 페이지 전체."""
+    """불러온 문서(페이지 포함·하위 페이지·첨부 Word)는 **새 쪽에서 그 문서 제목과 함께** 시작한다
+    (2026-09-30 사용자: "아래로 쭉 붙어지는데 각각 새 쪽에서, 제목도"). 제목은 Confluence 페이지 제목
+    (첨부 Word는 파일 이름)을 쪽 제목 서식(`Heading.page_title` — 큰 글씨·가운데·밑줄)으로 쓴다.
+    발췌 포함·책갈피 구간은 문서가 아니라 조각이라 그 자리에 이어 붙이고, 패널(Callout) 안에서도
+    쪽을 나누지 않는다.
+
+    follow_links: 본문 링크(다른 페이지, 또는 그 페이지의 책갈피)가 가리키는 내용도 넣는다. 사용자
+    실측에서 매크로만으로 충분해(2026-09-30) 화면 옵션은 뺐고 CLI `--follow-links`로만 남겼다."""
 
     def __init__(self, base_url: str, page_id: str, space: str | None, out_dir: Path):
         self.base_url = base_url
@@ -138,27 +143,33 @@ class LinkedPages:
         self.follow_links = False
 
     def expand(self, blocks: list, notes: list[str], *, progress=None) -> list:
+        from ..ir import PageBreak
         from ..parsers.confluence_storage import PageRef, drop_page_refs
 
         if not self.follow_links:
             blocks = drop_page_refs(blocks, notes, kinds={"link"})
         if not _has_ref(blocks, PageRef):
-            return blocks
+            return drop_page_refs(blocks, notes)  # 남은 건 펼치기 제목(label)뿐 — 글자로 되돌린다
         self.say = progress or (lambda message: None)
         with _client(self.base_url, notes) as client:
-            return self._expand(client, blocks, notes, self.root, depth=0)
+            blocks = self._expand(client, blocks, notes, self.root, depth=0)
+        # 본문이 곧바로 불러온 문서로 시작하면(목차만 있는 페이지) 첫 쪽을 제목만 두고 비우지 않는다
+        while blocks and isinstance(blocks[0], PageBreak):
+            blocks.pop(0)
+        return blocks
 
     # 한 페이지(ctx = (id, space, 첨부 폴더))의 블록에서 PageRef를 채운다
-    def _expand(self, client, blocks: list, notes: list[str], ctx, depth: int) -> list:
+    def _expand(self, client, blocks: list, notes: list[str], ctx, depth: int, *,
+                inline: bool = False) -> list:
         from ..ir import Callout, Paragraph, Run, Table
         from ..parsers.confluence_storage import PageRef, drop_page_refs
 
         out: list = []
         for block in blocks:
             if isinstance(block, PageRef):
-                out.extend(self._resolve(client, block, notes, ctx, depth))
+                out.extend(self._resolve(client, block, notes, ctx, depth, inline=inline))
             elif isinstance(block, Callout):
-                block.blocks = self._expand(client, block.blocks, notes, ctx, depth)
+                block.blocks = self._expand(client, block.blocks, notes, ctx, depth, inline=True)
                 out.append(block)
             elif isinstance(block, Table):
                 for row in block.rows:  # 표 칸 안에 페이지 통째로는 넣지 않는다 — 이름만 남김
@@ -172,36 +183,43 @@ class LinkedPages:
                 out.append(block)
         return out
 
-    def _resolve(self, client, ref, notes: list[str], ctx, depth: int) -> list:
+    def _resolve(self, client, ref, notes: list[str], ctx, depth: int, *, inline: bool) -> list:
         from ..ir import Paragraph, Run
 
         page_id, space, folder = ctx
+        label = [Paragraph(runs=[Run(ref.label, bold=True)])] if ref.label else []
         if ref.kind == "attachment":
-            return self._attachment(ref, notes, folder)
+            return self._attachment(ref, notes, folder, label, inline=inline)
         if depth >= MAX_LINK_DEPTH:
             notes.append(f"{ref.describe()}: 연결이 {MAX_LINK_DEPTH}단계를 넘어 불러오지 않음")
-            return []
+            return label
         try:
             if ref.kind == "children":
                 parent = page_id
                 if ref.title:
                     parent = self._find(client, ref.title, ref.space or space, notes)["id"]
-                return self._children(client, parent, notes, depth, levels=ref.depth or MAX_LINK_DEPTH)
+                children = self._children(client, parent, notes, depth, inline=inline,
+                                          levels=ref.depth or MAX_LINK_DEPTH)
+                return children if children and not inline else label + children
             page = self._find(client, ref.title, ref.space or space, notes)
         except Exception as exc:
             notes.append(f"{ref.describe()}을(를) 불러오지 못함: {exc}")
             if ref.kind == "link":  # 링크 글자는 본문에 이미 있다
                 return []
-            return [Paragraph(runs=[Run(f"({ref.describe()} — 불러오지 못함)")])]
+            return label + [Paragraph(runs=[Run(f"({ref.describe()} — 불러오지 못함)")])]
         anchor = ref.anchor if ref.kind == "link" else None
-        return self._page_blocks(client, page, notes, depth, excerpt=ref.kind == "excerpt",
-                                 anchor=anchor)
+        # 문서 한 편(페이지 포함·책갈피 없는 링크)은 새 쪽, 조각(발췌·책갈피 구간)은 그 자리에
+        new_page = not inline and ref.kind != "excerpt" and not anchor
+        blocks = self._page_blocks(client, page, notes, depth, excerpt=ref.kind == "excerpt",
+                                   anchor=anchor, new_page=new_page)
+        # 새 쪽에는 페이지 제목이 붙으므로 펼치기 제목은 겹친다 — 조각일 때만 남긴다
+        return blocks if new_page and blocks else label + blocks
 
     def _page_blocks(self, client, page: dict, notes: list[str], depth: int, *,
-                     excerpt: bool = False, heading_level: int | None = None,
-                     anchor: str | None = None) -> list:
-        from ..ir import Heading, Run, resolve_image_paths
-        from ..parsers.confluence_storage import parse_confluence_storage
+                     excerpt: bool = False, anchor: str | None = None,
+                     new_page: bool = False) -> list:
+        from ..ir import resolve_image_paths
+        from ..parsers.confluence_storage import drop_page_refs, parse_confluence_storage
 
         pid, title = str(page.get("id")), page.get("title") or ""
         label = f"'{title}'" + (f"의 책갈피 '{anchor}'" if anchor else "")
@@ -228,26 +246,28 @@ class LinkedPages:
         resolve_image_paths(blocks, folder)
         space = (page.get("space") or {}).get("key") or self.root[1]
         if not self.follow_links:
-            from ..parsers.confluence_storage import drop_page_refs
-
             blocks = drop_page_refs(blocks, notes, kinds={"link"})
         blocks = self._expand(client, blocks, notes, (pid, space, folder), depth + 1)
-        notes.append(f"연결 페이지 {label}를 함께 불러옴 (id={pid})")
-        if heading_level:  # 하위 페이지는 제목을 절 제목으로
-            return [Heading(level=heading_level, runs=[Run(title)])] + blocks
-        return blocks
+        notes.append(f"연결 페이지 {label}를 함께 불러옴 (id={pid})"
+                     + (" — 새 쪽에서 시작" if new_page else ""))
+        return _new_page(title, blocks) if new_page else blocks
 
     def _children(self, client, parent: str, notes: list[str], depth: int, *, levels: int,
-                  level: int = 2) -> list:
+                  inline: bool = False) -> list:
+        from ..ir import Heading, Run
+
         out: list = []
         resp = _get(client, f"/rest/api/content/{parent}/child/page", notes,
                     params={"limit": 200, "expand": "body.storage,space"})
         _raise_for_status(resp, parent)
         for child in resp.json().get("results", []):
-            out.extend(self._page_blocks(client, child, notes, depth, heading_level=min(level, 6)))
+            blocks = self._page_blocks(client, child, notes, depth, new_page=not inline)
+            if inline and blocks:  # 패널 안: 쪽을 나누지 않고 제목만 굵게
+                blocks = [Heading(level=3, runs=[Run(child.get("title") or "")])] + blocks
+            out.extend(blocks)
             if levels > 1 and self.loaded < MAX_LINKED_PAGES:
                 out.extend(self._children(client, str(child.get("id")), notes, depth + 1,
-                                          levels=levels - 1, level=level + 1))
+                                          levels=levels - 1, inline=inline))
         return out
 
     def _find(self, client, title: str, space: str | None, notes: list[str]) -> dict:
@@ -261,8 +281,9 @@ class LinkedPages:
             raise RuntimeError(f"'{title}' 페이지를 찾을 수 없음(스페이스 {space or '전체'})")
         return results[0]
 
-    def _attachment(self, ref, notes: list[str], folder: Path) -> list:
-        """첨부 보기 매크로: Word(.docx)면 내용을 그 자리에 넣고, 그 밖의 파일은 이름만 남긴다."""
+    def _attachment(self, ref, notes: list[str], folder: Path, label: list, *,
+                    inline: bool) -> list:
+        """첨부 보기 매크로: Word(.docx)면 내용을 넣고(새 쪽, 파일 이름이 제목), 그 밖의 파일은 이름만."""
         from ..ir import Paragraph, Run
 
         path = folder / (ref.filename or "")
@@ -275,9 +296,20 @@ class LinkedPages:
                 notes.append(f"첨부 '{ref.filename}'를 읽지 못함: {exc}")
             else:
                 notes.append(f"첨부 Word 파일 '{ref.filename}'의 내용을 함께 넣음")
-                return parsed.document.blocks
+                blocks = parsed.document.blocks
+                if inline:
+                    return label + blocks
+                return _new_page(parsed.document.title or path.stem, blocks)
         notes.append(f"첨부 파일 '{ref.filename}'은 내용을 넣을 수 없어 이름만 남김")
-        return [Paragraph(runs=[Run(f"※ 첨부: {ref.filename}")])]
+        return label + [Paragraph(runs=[Run(f"※ 첨부: {ref.filename}")])]
+
+
+def _new_page(title: str, blocks: list) -> list:
+    """불러온 문서 한 편: 쪽 나눔 + 쪽 제목(문서 제목 서식) + 내용."""
+    from ..ir import Heading, PageBreak, Run
+
+    head = [Heading(level=1, runs=[Run(title)], page_title=True)] if title else []
+    return [PageBreak(), *head, *blocks]
 
 
 def _has_ref(blocks: list, ref_type) -> bool:

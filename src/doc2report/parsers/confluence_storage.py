@@ -64,6 +64,8 @@ class PageRef:
     filename: str | None = None  # attachment: 첨부 파일 이름
     depth: int | None = None  # children/pagetree: 몇 단계 아래까지
     anchor: str | None = None  # link: 대상 페이지 안의 책갈피(앵커) — 있으면 그 구간만
+    label: str | None = None  # 이 매크로를 감싼 펼치기(+)의 제목 — 불러온 문서가 새 쪽·제목을 가지면
+                              # 겹치므로 빼고, 조각이거나 못 불러오면 굵은 줄로 되살린다
 
     def describe(self) -> str:
         if self.kind == "link":
@@ -243,6 +245,8 @@ def drop_page_refs(blocks: list, notes: list[str], *, reason: str = "연결 페�
     out = []
     for block in blocks:
         if isinstance(block, PageRef) and (kinds is None or block.kind in kinds):
+            if block.label:
+                out.append(Paragraph(runs=[Run(block.label, bold=True)]))
             if block.kind != "link":
                 notes.append(f"{block.describe()}을(를) 불러오지 않음 — {reason}")
             continue
@@ -413,6 +417,11 @@ def _macro(el) -> tuple[list[Block], list[str]]:
         inner, notes = _children_blocks(body)
         title_param = _param(el, "title")
         title = (title_param.text or "").strip() if title_param is not None else ""
+        refs = [b for b in inner if isinstance(b, PageRef)]
+        if title and inner and len(refs) == len(inner) and refs[0].kind != "link":
+            # 펼치기 안이 연결 문서뿐이면 제목은 그 자리표시가 가져간다 (불러온 문서는 새 쪽·제목)
+            refs[0].label = title
+            return inner, notes
         head = [Paragraph(runs=[Run(title, bold=True)])] if title else []
         return head + inner, notes
 

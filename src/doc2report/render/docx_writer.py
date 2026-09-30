@@ -376,7 +376,9 @@ class DocxRenderer:
             spec = self.profile.font("caption")
             if block.caption_align:
                 spec = spec.model_copy(update={"align": block.caption_align})
-            self._paragraph([Run(block.caption)], spec, container)
+            caption = self._paragraph([Run(block.caption)], spec, container)
+            if layout.indent and container is None:  # 표 제목도 표와 같은 왼쪽 끝(가운데면 표 폭의 가운데)
+                caption.paragraph_format.left_indent = Emu(layout.indent)
 
         cols = block.col_count
         rows = len(block.rows)

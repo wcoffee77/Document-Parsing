@@ -12,7 +12,7 @@ import httpx
 import pytest
 from docx import Document as DocxDocument
 
-from doc2report.ir import Callout, Heading, Paragraph, Table, plain
+from doc2report.ir import Callout, Heading, PageBreak, Paragraph, Table, plain
 from doc2report.parsers.confluence_storage import PageRef, parse_confluence_storage
 from doc2report.pipeline import load_document
 
@@ -112,7 +112,14 @@ def _texts(blocks) -> list[str]:
 def test_linked_pages_are_loaded_into_one_document(confluence):
     doc, notes = load_document("https://wiki.company.com/pages/viewpage.action?pageId=100")
     texts = _texts(doc.blocks)
-    assert texts.index("세부 계획 펼치기") < texts.index("□ 세부 항목")  # 펼치기 제목 + 포함 페이지
+    # 불러온 문서는 새 쪽 + 페이지 제목(쪽 제목 서식). 펼치기 제목은 페이지 제목과 겹쳐 빠진다
+    assert "세부 계획 펼치기" not in texts
+    assert texts.index("세부 계획") < texts.index("□ 세부 항목")
+    titles = [plain(b.runs) for b in doc.blocks if isinstance(b, Heading) and b.page_title]
+    assert titles == ["세부 계획", "첨부보고", "하위 페이지 A"]   # 발췌는 조각이라 쪽을 안 나눔
+    for i, b in enumerate(doc.blocks):
+        if isinstance(b, Heading) and b.page_title:
+            assert isinstance(doc.blocks[i - 1], PageBreak)
     assert "발췌 안 문장" in texts and "발췌 밖 문장" not in texts   # 발췌 포함은 excerpt만
     assert "첨부 Word 문장" in texts                                   # 첨부 Word는 내용째
     assert "※ 첨부: 예산.xlsx" in texts                                 # 그 밖의 첨부는 이름만
@@ -246,3 +253,25 @@ def test_missing_bookmark_falls_back_to_whole_page():
     parsed = parse_confluence_storage(LINK_TARGET, title="세부 계획", anchor="없는책갈피")
     assert "기타 문장" in _texts(parsed.document.blocks)
     assert any("책갈피 '없는책갈피'를 찾지 못해" in n for n in parsed.notes)
+
+
+def test_hub_page_does_not_start_with_an_empty_first_page(confluence, monkeypatch):
+    """본문이 곧바로 연결 문서로 시작하면(목차뿐인 페이지) 첫 쪽을 비워 두지 않는다."""
+    hub = ('<ac:structured-macro ac:name="include"><ac:parameter ac:name=""><ac:link>'
+           '<ri:page ri:content-title="요약 페이지" ri:space-key="HR"/></ac:link></ac:parameter>'
+           '</ac:structured-macro>')
+    monkeypatch.setitem(PAGES, "본문", {**PAGES["본문"], "body": {"storage": {"value": hub}}})
+    doc, _ = load_document("https://wiki.company.com/pages/100")
+    assert not isinstance(doc.blocks[0], PageBreak)
+    assert isinstance(doc.blocks[0], Heading) and doc.blocks[0].page_title
+
+
+def test_linked_pages_render_on_new_pages_without_extra_dates(confluence, tmp_path):
+    from doc2report.pipeline import convert
+
+    out = tmp_path / "linked.docx"
+    convert("https://wiki.company.com/pages/100", out, date="2026. 9. 30")
+    paras = DocxDocument(str(out)).paragraphs
+    page_title = next(p for p in paras if p.text == "세부 계획")
+    assert page_title.paragraph_format.page_break_before
+    assert sum(p.text == "2026. 9. 30" for p in paras) == 1   # 날짜는 문서 제목 아래에만

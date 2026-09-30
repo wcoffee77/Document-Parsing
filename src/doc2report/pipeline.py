@@ -291,8 +291,11 @@ def _insert_dateline(doc: Document, date: str, profile: Profile) -> None:
         today = _date.today()
         text = fmt.format(y=today.year, m=today.month, d=today.day)
 
-    # 입력마다 새 쪽이면 쪽 제목마다 그 아래에, 아니면 문서 맨 앞(문서 제목 아래)에.
-    anchors = [i + 1 for i, b in enumerate(doc.blocks) if isinstance(b, Heading) and b.page_title] or [0]
+    # 입력마다 새 쪽이면 쪽 제목마다 그 아래에, 아니면 문서 맨 앞(문서 제목 아래)에. 문서 제목이 있으면
+    # 쪽 제목은 불러온 연결 문서의 제목이라 날짜를 또 달지 않는다.
+    anchors = [] if doc.title else [
+        i + 1 for i, b in enumerate(doc.blocks) if isinstance(b, Heading) and b.page_title]
+    anchors = anchors or [0]
     for at in reversed(anchors):
         nxt = doc.blocks[at] if at < len(doc.blocks) else None
         if isinstance(nxt, Paragraph) and DATE_LINE.match(plain(nxt.runs).strip()):

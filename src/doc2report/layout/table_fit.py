@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..ir import Cell, Document, Paragraph, Table, iter_tables, plain
+from ..ir import Cell, Document, Heading, ListItem, Paragraph, Table, iter_tables, plain
 from ..profile import Profile
 from ..transform.abbreviate import default_abbreviator
 from ..units import fmt_pt
@@ -43,6 +43,8 @@ class TableLayout:
     # (행 번호, 행 안의 칸 번호) → (글자 크기, 장평) 재지정. 표 전체 크기는 그대로 두고
     # 유난히 내용이 많은 셀만 더 줄인다(다른 셀까지 덩달아 작아지지 않게).
     cell_font: dict[tuple[int, int], tuple[int, float]] = field(default_factory=dict)
+    # 표 왼쪽 끝 = 표 바로 윗줄 문장의 왼쪽 끝(본문 영역 왼쪽에서 잰 EMU). 표 폭은 여기서 오른쪽 여백까지
+    indent: int = 0
 
     @property
     def total_width(self) -> int:
@@ -55,7 +57,37 @@ def plan_tables(doc: Document, profile: Profile) -> dict[int, TableLayout]:
     IR에는 서식·치수를 넣지 않기 위해 별도 사이드 테이블로 관리한다.
     """
     available = int(profile.page.usable_width * profile.tables.width_ratio)
-    return {id(t): fit_table(t, profile, available) for t in iter_tables(doc)}
+    indents = table_indents(doc, profile)
+    layouts = {}
+    for table in iter_tables(doc):
+        indent = min(indents.get(id(table), 0), available // 2)  # 아주 깊은 단계라도 반 폭은 남긴다
+        layout = fit_table(table, profile, available - indent)
+        layout.indent = 0 if layout.landscape else indent
+        layouts[id(table)] = layout
+    return layouts
+
+
+def table_indents(doc: Document, profile: Profile) -> dict[int, int]:
+    """본문 표마다 '바로 윗줄 문장의 왼쪽 끝'(2026-09-30 사용자: 표 폭은 표 위 제목 문장의 왼쪽
+    끝선부터 오른쪽 여백까지). 말머리 항목은 말머리가 찍히는 자리(단계 들여쓰기) — 렌더러가
+    `set_list_indent`로 첫 줄을 거기서 시작한다. 제목·일반 문단은 0. ※ 참고 문단은 윗줄보다 더
+    들여 쓴 부속 줄이라 기준으로 삼지 않는다."""
+    rules = profile.text
+    notes = tuple(rules.note_marks) if rules.note_indent else ()
+    out: dict[int, int] = {}
+    start = 0
+    for block in doc.blocks:
+        if isinstance(block, ListItem):
+            if not (notes and (block.marker or plain(block.runs).lstrip()).startswith(notes)):
+                start = profile.numbering_level(block.depth).indent or 0
+        elif isinstance(block, Paragraph):
+            if not (notes and plain(block.runs).lstrip().startswith(notes)):
+                start = 0
+        elif isinstance(block, Heading):
+            start = 0
+        elif isinstance(block, Table):
+            out[id(block)] = start
+    return out
 
 
 def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayout:
@@ -66,7 +98,20 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     _unify_column_fonts(table, layout)
     _balance_table_font(profile, layout)
     _drop_redundant_cell_fonts(layout)
+    _stretch_to(layout, available_width)
     return layout
+
+
+def _stretch_to(layout: TableLayout, available_width: int) -> None:
+    """폭 계산은 글꼴 메트릭 오차에 대비해 안전 여유(safety_margin)를 두고 하지만, 표 자체는
+    주어진 폭을 끝까지 쓴다(2026-09-30 사용자: 표 폭은 최대한). 남은 여유를 열 폭 비율대로 나눠
+    준다 — 열이 넓어질 뿐이라 줄바꿈이 늘지 않는다. 가로 쪽·강제 축소한 표는 그대로."""
+    total = layout.total_width
+    if layout.landscape or layout.overflow or total <= 0 or total >= available_width:
+        return
+    widths = [w * available_width // total for w in layout.col_widths]
+    widths[-1] += available_width - sum(widths)
+    layout.col_widths = widths
 
 
 def _unify_column_fonts(table: Table, layout: TableLayout) -> None:

@@ -236,7 +236,6 @@ function collectOptions() {
     tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
     merge: radio("merge") || "continuous",
     linked: $("#cf-linked").checked,
-    follow_links: $("#cf-linked").checked && $("#cf-follow").checked,
     title: $("#doc-title").value.trim(),
     date: dateMode === "pick" ? $("#date-pick").value : dateMode,
     date_mode: dateMode,
@@ -271,8 +270,6 @@ function restoreOptions() {
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
   setRadio("merge", o.merge || (o.page_breaks ? "pages" : "continuous"));
   $("#cf-linked").checked = o.linked !== false;
-  $("#cf-follow").checked = !!o.follow_links;
-  syncFollow();
   setRadio("date", o.date_mode ?? "");
   if (o.date_mode === "pick" && o.date) $("#date-pick").value = o.date;
   $("#out-pdf").checked = (o.formats || []).includes("pdf");
@@ -325,14 +322,6 @@ $("#input-list").addEventListener("click", (ev) => {
   if (btn.dataset.op === "down" && i < items.length - 1) [items[i + 1], items[i]] = [items[i], items[i + 1]];
   renderInputs();
 });
-
-// 링크 따라가기는 연결 페이지 불러오기가 켜져 있을 때만 의미가 있다
-function syncFollow() {
-  const on = $("#cf-linked").checked;
-  $("#cf-follow").disabled = !on;
-  $("#cf-follow").closest("label").classList.toggle("disabled", !on);
-}
-$("#cf-linked").addEventListener("change", syncFollow);
 
 $("#cf-add").addEventListener("click", async () => {
   const urls = $("#cf-urls").value.split(/\s+/).map((u) => u.trim()).filter(Boolean);
