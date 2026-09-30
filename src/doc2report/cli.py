@@ -123,6 +123,27 @@ def check(
 
 
 @app.command()
+def probe(
+    sources: list[str] = typer.Argument(..., help=".docx 파일 또는 폴더(하위 포함)"),
+    out: str = typer.Option("out/probe", "-o", "--out", help="결과 폴더 — 저장소 밖을 권장"),
+    keep_text: bool = typer.Option(False, "--keep-text", help="문서별 JSON에 원문 글자도 남김(기본: 뺌)"),
+    keep_names: bool = typer.Option(False, "--keep-names", help="문서별 JSON에 파일 이름도 남김(기본: 뺌)"),
+) -> None:
+    """정식보고서 .docx 말뭉치의 서식·형식·문장 통계를 낸다 (가이드라인 채굴 1단계)."""
+    from .guide_mining import collect_docx, probe_all, write_outputs
+
+    files = collect_docx(sources)
+    if not files:
+        typer.echo(".docx 파일을 찾지 못했습니다.")
+        raise typer.Exit(1)
+    probes, skipped = probe_all(files)
+    folder = write_outputs(probes, skipped, out, keep_text=keep_text, keep_names=keep_names)
+    typer.echo(f"{len(probes)}건 분석, {len(skipped)}건 건너뜀 → {folder / 'probe_summary.md'}")
+    for note in skipped:
+        typer.echo(f"  · {note}")
+
+
+@app.command()
 def doctor(
     save: bool = typer.Option(False, "--save", help="결과를 진단결과_날짜.txt로도 저장"),
     no_network: bool = typer.Option(False, "--no-network", help="Confluence·LLM 연결 점검은 건너뜀"),
