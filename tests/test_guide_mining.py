@@ -161,6 +161,15 @@ def test_ending_class(sentence, expected):
     assert _ending_class(sentence) == expected
 
 
+def test_marker_layers_have_endings_and_are_ordered_by_indent(sample):
+    rows = summarize([probe_docx(sample)])["markers"]["by_marker"]
+    lefts = [r["left_mm_median"] for r in rows]
+    assert lefts == sorted(lefts)                      # 얕은 층부터
+    box = next(r for r in rows if r["marker"] == "글자 □")
+    assert box["ending_class"][0]["value"] == "~음/함/임 (개조식)"   # "정리함"
+    assert box["period_ended_share"] == 0.0
+
+
 def test_drm_file_is_skipped_with_reason(tmp_path):
     fake = tmp_path / "drm.docx"
     fake.write_bytes(b"\x00DRM-ENCRYPTED")

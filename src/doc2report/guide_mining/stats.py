@@ -160,6 +160,7 @@ def _markers(probes) -> dict:
     rows = []
     for key, items in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:TOP * 3]:
         sizes = [x.fmt.size_pt for x in items if x.fmt.size_pt]
+        sentences = [s for x in items for s in _SENTENCE_SPLIT.split(x.text.strip()) if s.strip()]
         rows.append({
             "marker": key,
             "count": len(items),
@@ -170,7 +171,12 @@ def _markers(probes) -> dict:
             "bold_share": _ratio(sum(1 for x in items if x.fmt.bold), len(items)),
             "sep": dict(Counter(x.marker_sep or "-" for x in items).most_common(3)),
             "text_len": _dist([x.text_len for x in items]),
+            # 층(말머리)마다 종결·길이가 다르다 — 같은 문장도 층에 따라 허용 여부가 갈린다
+            "ending_class": _top(Counter(_ending_class(t) for t in sentences), n=4),
+            "period_ended_share": _ratio(sum(1 for t in sentences if t.rstrip().endswith(".")), len(sentences)),
         })
+    # 층 순서 = 왼쪽 들여쓰기가 얕은 것부터. 층 이름을 코드에 두지 않고 말뭉치의 말머리·들여쓰기에서 얻는다.
+    rows.sort(key=lambda r: (r["left_mm_median"] if r["left_mm_median"] is not None else 0, -r["count"]))
     return {
         "by_marker": rows,
         "auto_numbering_share": _ratio(

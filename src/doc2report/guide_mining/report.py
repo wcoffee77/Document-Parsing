@@ -32,11 +32,13 @@ def to_markdown(s: dict) -> str:
         + [f"  - {k}: n={v['n']}, {v['share']}" for k, v in bl["blank_before_marker"].items()],
         [f"- 보이지 않는 글자: {bl['invisible_chars'] or '없음'}"]])
     mk = s["markers"]
-    rows = ["| 말머리 | 건수 | 왼쪽(mm) | 첫줄(mm) | 앞 공백 | 크기(pt) | 굵게 | 뒤 구분 | 글자수 p50 |", "|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| 말머리(층, 얕은 순) | 건수 | 왼쪽(mm) | 첫줄(mm) | 앞 공백 | 크기(pt) | 굵게 | 뒤 구분 | 글자수 p50 | 종결 형태 | 마침표 |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in mk["by_marker"]:
         rows.append(f"| {r['marker']} | {r['count']} | {r['left_mm_median']} | {r['first_line_mm_median']} | "
                     f"{r['leading_spaces_median']} | {r['size_pt_median']} | {r['bold_share']} | {r['sep']} | "
-                    f"{(r['text_len'] or {}).get('p50')} |")
+                    f"{(r['text_len'] or {}).get('p50')} | "
+                    f"{_endings(r['ending_class'])} | "
+                    f"{r['period_ended_share']} |")
     lines += _section("말머리 체계 (계층별 실제 서식)", [rows, [
         f"- 자동 번호 비율 {mk['auto_numbering_share']}, 말머리 없는 문단 비율 {mk['no_marker_paragraph_share']}, "
         f"Symbol/Wingdings 글머리가 든 문서 {mk['docs_with_pua_bullet']}건"]])
@@ -67,6 +69,10 @@ def to_markdown(s: dict) -> str:
         f"(문서당 {_fmt(st['textboxes_per_doc'])}), 쪽 나눔 {_fmt(st['page_breaks_per_doc'])}, "
         f"제목 스타일을 쓴 문서 {st['heading_style_docs']}건"]])
     return "\n".join(lines) + "\n"
+
+
+def _endings(rows: list[dict]) -> str:
+    return ", ".join("{} {:.0%}".format(e["value"], e["share"]) for e in rows)
 
 
 def _section(title: str, blocks: list[list[str]]) -> list[str]:
