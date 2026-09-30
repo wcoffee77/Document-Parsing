@@ -26,6 +26,7 @@ import platform
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 HOME_ENV = "DOC2REPORT_HOME"  # 보관 폴더를 바꿀 때(테스트 등)
 FILE_NAME = "account.json"
@@ -42,7 +43,7 @@ ENV_KEYS = {
 SECRETS = ("confluence_token", "llm_api_key")
 
 # 서버를 켤 때의 환경변수(스크립트로 넣은 값) — 등록을 지우면 이 값으로 되돌린다
-_ORIGINAL_ENV = {env: os.environ.get(env) for env in ENV_KEYS.values()}
+_ORIGINAL_ENV = {env: os.environ.get(env) for env in (*ENV_KEYS.values(), "NO_PROXY")}
 
 
 @dataclass
@@ -121,6 +122,22 @@ def apply(account: Account | None) -> None:
             os.environ[env] = value
         else:
             os.environ.pop(env, None)
+    _bypass_proxy_for_llm(account)
+
+
+def _bypass_proxy_for_llm(account: Account | None) -> None:
+    """사내 LLM 주소는 프록시 예외(NO_PROXY)에 넣는다. PC에 HTTP_PROXY가 잡혀 있으면 httpx가 LLM 요청을
+    사내 Squid로 돌려 403이 났다(실제로 겪음 — 예전엔 onprem_env 스크립트의 NO_PROXY로 피했다). 사내 서버는
+    프록시를 거칠 이유가 없으므로 등록된 LLM 주소는 자동으로 뺀다."""
+    original = _ORIGINAL_ENV.get("NO_PROXY") or ""
+    host = urlparse((account.values.get("llm_base_url") if account else "") or "").hostname
+    hosts = [h for h in original.split(",") if h.strip()]
+    if host and host not in [h.strip() for h in hosts]:
+        hosts.append(host)
+    if hosts:
+        os.environ["NO_PROXY"] = ",".join(hosts)
+    else:
+        os.environ.pop("NO_PROXY", None)
 
 
 def load_and_apply() -> Account | None:

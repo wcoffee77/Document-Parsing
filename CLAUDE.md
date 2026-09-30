@@ -129,7 +129,7 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도�
 ## 검증 방법
 
 ```bash
-uv run pytest                           # 279개
+uv run pytest                           # 284개
 uv run python tools/score_corpus.py     # 표 폭 초과 0건이어야 함
 ```
 
@@ -742,6 +742,34 @@ confluence.yaml을 이 값으로 바꿈 — CLI의 Confluence 변환도 같이 �
   프로세스 목록에 토큰이 남을 수 있다. 이제 헤더 값은 자식 프로세스 환경변수(`D2R_HEADER_n`)로만 넘기고 스크립트는
   `$env:D2R_HEADER_n`을 참조한다. 이 경로는 사내 PC에서 검증된 경로라 **바뀐 뒤 첫 실측 필요**.
 - 팀원 안내: [docs/team-setup.md](docs/team-setup.md).
+
+**설치 묶음·진단 (2026-09-30, 팀 공유 2단계)** — 사용자: "외부에서 코딩한 결과를 사내 PC에 설치할 때 파이썬 환경
+자체를 맞추느라 고생했다. 팀원도 똑같이 고생할 것." 겪은 것: pypi.org·astral.sh 차단, uv 설치 불가(다른 PC에서
+uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작업, `-offline` 하이픈 실수, HTTP_PROXY→Squid 403.
+**그 과정을 받는 사람에게서 없앴다** — 설치 = zip 풀기.
+- `packaging/build_windows_bundle.ps1`: git이 추적하는 파일 + `runtime\`(python.org **공식 embeddable** — 서명된
+  python.exe, 사내 보안이 서명 없는 실행 파일을 막는 경우 대비) + `scripts/onprem-requirements.txt`(uv.lock에서 뽑은
+  같은 버전)를 `--only-binary --no-deps --target runtime\Lib\site-packages`로. `python3XX._pth`에
+  `Lib\site-packages`·`..\src`·`import site` — 앱을 설치하지 않고 소스 폴더를 그대로 쓴다(그래서 git 사용자는
+  clone에 `runtime`만 복사하면 된다). ._pth가 있으면 사용자 site-packages·PYTHONPATH가 끼어들지 않는다.
+  **빌드 PC의 파이썬 버전과 같은 embeddable을 받는다**(wheel ABI 일치).
+- 실행 파일: `start_webapp.bat`·`doctor.bat`은 `runtime\python.exe`가 있으면 **PowerShell을 거치지 않고** 바로
+  `python -m doc2report …`(GPO가 실행 정책을 잠그면 `-ExecutionPolicy Bypass`가 무시된다). 묶음(=.git 없음)은 결과를
+  `%USERPROFILE%\Documents\doc2report`에 — 새 버전을 다른 폴더에 풀어도 결과가 이어진다. `runtime`이 없으면 예전처럼
+  PowerShell + uv(없으면 설치 안내 후 종료). bat 파일은 **ASCII만**(cmd의 코드 페이지 문제).
+- `src/doc2report/__main__.py`(`python -m doc2report`), `doctor.py`/`doc2report doctor [--save] [--no-network]`: 파이썬·
+  패키지·코드 버전(.git/HEAD 직접 읽기 — git이 없는 PC도; main 아니면 경고)·Word 템플릿 왕복·결과 폴더 쓰기·글꼴
+  (**이름은 프로파일에서** — 설계 원칙 1, 테스트가 잡았다)·PDF·사용자 등록·DPAPI 왕복·프록시·Confluence(whoami)·
+  LLM(`/models`, 모델명 존재)·포트. 점검 하나가 죽어도 "실패" 한 줄로 바뀐다(`_safe`). 결과 파일은 UTF-8 BOM(메모장).
+  토큰은 절대 안 쓴다. 실패가 있으면 종료 코드 1.
+- `account._bypass_proxy_for_llm`: 등록된 **LLM 주소를 NO_PROXY에 자동 추가**(예전 onprem_env 스크립트의 역할 —
+  묶음 사용자는 스크립트를 안 쓴다). Confluence 주소는 넣지 않았다 — 사용자 PC에서 지금 경로(SSL 실패→PowerShell)가
+  검증돼 있어 바꾸지 않음.
+- CI(`.github/workflows/windows.yml`): `lock-sync`(requirements가 uv.lock과 같은지), `test`(Windows에서 전체 테스트 —
+  DPAPI 등 Windows 전용 경로), `bundle`(묶음 → **다른 폴더에 풀고 PATH에서 파이썬을 빼고** doctor·convert·web(잠김
+  확인) 실행 → Artifacts, 태그면 Releases). **실제 사내 PC 제약(보안 프로그램·AppLocker가 서명 없는 .pyd를 막는지)은
+  CI로 확인 못 한다 — 첫 배포 때 확인 필요.**
+- 팀원 안내 [docs/team-setup.md](docs/team-setup.md) 재작성(설치 5분·doctor·흔한 문제표·업데이트·git 사용자·담당자용 빌드).
 
 **다음 후보(제안만 함)**: 옵션 조합을 이름 붙여 저장(사용자 설정을 preset yaml로 저장), 결과 미리보기(HTML),
 변환 전 표 배치 미리보기(`check`).

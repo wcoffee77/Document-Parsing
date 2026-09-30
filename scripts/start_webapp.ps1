@@ -22,4 +22,15 @@ foreach ($name in @("confluence_env.ps1", "onprem_env.ps1")) {
 }
 
 $uv = if (Test-Path (Join-Path $root "uv.exe")) { Join-Path $root "uv.exe" } else { "uv" }
-& $uv run --offline --no-sync doc2report web @args
+if (-not (Get-Command $uv -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "[설치 필요] 파이썬 실행 환경을 찾지 못했습니다." -ForegroundColor Yellow
+    Write-Host "  가장 쉬운 방법: 설치 묶음 zip(doc2report-windows-x64.zip)의 runtime 폴더를 이 폴더에 복사하세요."
+    Write-Host "  자세한 방법: docs\team-setup.md"
+    exit 1
+}
+if ($args.Count -gt 0 -and $args[0] -eq "--doctor") {
+    & $uv run --offline --no-sync doc2report doctor --save
+} else {
+    & $uv run --offline --no-sync doc2report web @args
+}

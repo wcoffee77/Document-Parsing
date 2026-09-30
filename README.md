@@ -12,9 +12,19 @@ Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꿔 주는 �
 
 ## 설치
 
+**사내 PC(팀원)**: 설치 묶음 `doc2report-windows-x64.zip`을 받아 **차단 해제 → 풀기 → `start_webapp.bat`**.
+파이썬·uv·패키지 설치, 관리자 권한, 인터넷이 필요 없다. 안 되면 `doctor.bat`(설치 진단 — 막힌 곳과 해결 방법,
+결과 파일을 담당자에게). 자세히는 [docs/team-setup.md](docs/team-setup.md).
+
+**개발 환경**:
+
 ```bash
 uv sync
+uv run doc2report doctor      # 설치·환경 진단
 ```
+
+설치 묶음은 `main`에 push할 때 GitHub Actions(`.github/workflows/windows.yml`)가 Windows에서 만들고,
+시스템 파이썬 없이 풀어서 진단·변환·웹 서버까지 실행해 본다(Artifacts, 태그 `v*`면 Releases).
 
 ## 웹 화면 (권장)
 

@@ -123,6 +123,27 @@ def check(
 
 
 @app.command()
+def doctor(
+    save: bool = typer.Option(False, "--save", help="결과를 진단결과_날짜.txt로도 저장"),
+    no_network: bool = typer.Option(False, "--no-network", help="Confluence·LLM 연결 점검은 건너뜀"),
+) -> None:
+    """설치·환경 진단 — 파이썬·패키지·Word 템플릿·글꼴·사용자 등록·프록시·Confluence·LLM을 점검하고
+    막힌 곳마다 해결 방법을 알려 준다(토큰 값은 쓰지 않음)."""
+    from datetime import datetime
+
+    from .doctor import FAIL, report, run
+
+    checks = run(network=not no_network)
+    text = report(checks)
+    typer.echo(text)
+    if save:
+        path = Path.cwd() / f"진단결과_{datetime.now():%Y%m%d_%H%M}.txt"
+        path.write_text(text, encoding="utf-8-sig")  # 메모장에서 한글이 깨지지 않게 BOM
+        typer.echo(f"\n저장: {path}")
+    raise typer.Exit(1 if any(c.level == FAIL for c in checks) else 0)
+
+
+@app.command()
 def web(
     port: int = typer.Option(8765, "--port", help="포트 (이미 쓰고 있으면 다른 번호로)"),
     host: str = typer.Option("127.0.0.1", "--host",

@@ -1,0 +1,89 @@
+name: windows
+
+# 사내 PC(Windows)에서 막히던 것을 GitHub의 Windows 머신에서 미리 확인한다.
+#  - test:   전체 테스트를 Windows에서 (DPAPI 토큰 암호화·PowerShell 경로·경로 구분자 등)
+#  - bundle: 설치 묶음 zip을 만들고, 시스템 파이썬 없이 다른 폴더에 풀어 실제로 실행해 본다
+#  - 태그(v*)를 달면 그 zip을 Release에 올린다
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: 설치 묶음용 패키지 목록이 uv.lock과 같은지
+        run: |
+          uv export --no-dev --no-hashes --no-emit-project -o scripts/onprem-requirements.txt
+          git diff --exit-code scripts/onprem-requirements.txt
+
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --disable-pip-version-check -r scripts/onprem-requirements.txt pytest
+      - run: python -m pytest -q
+        env:
+          PYTHONUTF8: "1"
+
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 설치 묶음 만들기
+        shell: pwsh
+        run: ./packaging/build_windows_bundle.ps1
+      - name: 받은 사람처럼 실행해 보기 (다른 폴더, 시스템 파이썬 없이)
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP "try"
+          Expand-Archive dist/doc2report-windows-x64.zip $dest
+          $app = Join-Path $dest "doc2report"
+          $py = Join-Path $app "runtime/python.exe"
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'Python|pipx' }) -join ';'
+          $env:DOC2REPORT_HOME = Join-Path $env:RUNNER_TEMP "home"
+          $env:DOC2REPORT_OUTPUT_DIR = Join-Path $env:RUNNER_TEMP "out"
+          Set-Location $app
+
+          & $py -c "import sys; print(sys.executable); assert 'runtime' in sys.executable"
+          & $py -m doc2report doctor --no-network --save
+          if ($LASTEXITCODE -ne 0) { throw "진단에서 실패 항목이 나옴" }
+
+          $md = Join-Path $env:RUNNER_TEMP "sample.md"
+          Set-Content -Encoding utf8 $md -Value @("# 시험 보고", "", "## 1. 추진 배경", "", "- 항목 하나", "",
+            "| 구분 | 값 |", "|---|---|", "| 가 | 1 |")
+          & $py -m doc2report convert $md -o (Join-Path $env:RUNNER_TEMP "sample.docx")
+          if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "sample.docx"))) { throw "변환 결과가 없음" }
+
+          $server = Start-Process $py -ArgumentList "-m","doc2report","web","--port","8799","--no-browser" -PassThru
+          Start-Sleep -Seconds 6
+          $status = Invoke-RestMethod http://127.0.0.1:8799/api/status
+          Stop-Process -Id $server.Id -Force
+          if (-not $status.locked) { throw "열쇠 없이 접속했는데 잠기지 않음" }
+          $key = Get-Content (Join-Path $env:DOC2REPORT_HOME "access.key")
+          if ($key.Length -lt 32) { throw "접속 열쇠가 만들어지지 않음" }
+          Write-Host "설치 묶음 실행 확인 완료"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doc2report-windows-x64
+          path: dist/doc2report-windows-x64.zip
+          retention-days: 30
+      - name: Release에 올리기 (태그일 때)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/doc2report-windows-x64.zip --title "doc2report ${{ github.ref_name }}" --notes "압축을 풀고 start_webapp.bat을 실행하세요. 설치 안내: docs/team-setup.md"
