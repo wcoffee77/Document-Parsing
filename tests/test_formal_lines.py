@@ -131,9 +131,9 @@ def test_long_item_is_split_and_aligned_under_text(tmp_path, fake_fonts):
     items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")]
     assert len(items) >= 2
     first, second = items[0], items[1]
-    assert first.text.startswith("  □ ")
-    # 접두 "  □ " = 반각 2 + 전각 □(반각 2) + 반각 1 = 5칸 → 둘째 줄은 공백 5칸으로 글자 시작에 맞춘다
-    assert second.text.startswith(" " * 5) and not second.text.startswith(" " * 6)
+    assert first.text.startswith(" □ ")
+    # 접두 " □ " = 반각 1 + 전각 □(반각 2) + 반각 1 = 4칸 → 둘째 줄은 공백 4칸으로 글자 시작에 맞춘다
+    assert second.text.startswith(" " * 4) and not second.text.startswith(" " * 5)
     assert first.paragraph_format.keep_with_next and not items[-1].paragraph_format.keep_with_next
 
 
@@ -141,7 +141,7 @@ def test_slight_overflow_condenses_instead_of_wrapping(tmp_path, fake_fonts):
     prof = load_profile("formal")
     usable = prof.page.usable_width
     per = prof.font("body").size                                    # 전각 1글자 = 1em
-    count = int(usable / per) - 3                                   # 접두("  □ ", 공백 포함) 폭을 빼면 딱 1글자쯤 넘침
+    count = int(usable / per) - 2                                   # 접두(" □ ", 공백 포함) 폭을 빼면 딱 1글자쯤 넘침
     body = "가" * (count + 1)
     paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
                                     Paragraph(runs=[Run("□ " + body)])])
@@ -243,7 +243,7 @@ def test_wrapped_txt_lines_become_one_bold_sentence_aligned_under_text(tmp_path,
     items = [p for p in OpenDocx(str(out)).paragraphs if p.text.strip() and not p.text.startswith("1.")]
     assert items[-1].text.strip() == "□ 다음"
     lines = items[:-1]
-    assert len(lines) >= 2 and lines[0].text.startswith("  □ ") and lines[1].text.startswith(" " * 5)
+    assert len(lines) >= 2 and lines[0].text.startswith(" □ ") and lines[1].text.startswith(" " * 4)
     assert not any(l.text.lstrip().startswith("□") for l in lines[1:])        # 새 말머리가 붙지 않는다
     assert all(r.bold for l in lines for r in l.runs if r.text.strip())      # 둘째 줄도 굵게
 
@@ -271,12 +271,12 @@ def test_hard_line_breaks_are_kept_and_continuations_align_and_stay_bold(tmp_pat
         "□ 다음 항목\n"))
     texts = [p.text for p in paragraphs]
     assert texts == ["1. 추진 배경",
-                     "  □ 핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하며,",
-                     " " * 5 + "평가 결과를 공정하게 반영하고,",           # 쉼표로 끝나도 "."로 안 바뀌고 윗줄 글자에 맞춘다
-                     " " * 5 + "성과 연계를 강화함",                        # 셋째 줄도 같은 위치
-                     "    - 짧은 항목",
-                     " " * 6 + "내려쓴 짧은 줄",                             # 윗줄이 짧아도 이어짐
-                     "  □ 다음 항목"]
+                     " □ 핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하며,",
+                     " " * 4 + "평가 결과를 공정하게 반영하고,",           # 쉼표로 끝나도 "."로 안 바뀌고 윗줄 글자에 맞춘다
+                     " " * 4 + "성과 연계를 강화함",                        # 셋째 줄도 같은 위치
+                     "   - 짧은 항목",
+                     " " * 5 + "내려쓴 짧은 줄",                             # 윗줄이 짧아도 이어짐
+                     " □ 다음 항목"]
     bold = [all(r.bold for r in p.runs if r.text.strip()) for p in paragraphs]
     assert bold[1:4] == [True, True, True] and bold[4:6] == [False, False]  # □ 문장은 모든 줄이 굵게, - 는 안 굵게
 
@@ -334,7 +334,7 @@ def test_two_characters_over_the_line_are_narrowed_within_one_point(tmp_path, fa
     prof = load_profile("formal")
     assert (prof.text.condense_max, prof.text.fit_bold_factor) == (12700, 1.0) and prof.text.fit_margin == 0.002
     size = prof.font("body").size
-    head = 5 * size / 2                                         # "  □ " = 반각 5칸
+    head = 4 * size / 2                                         # " □ " = 반각 4칸
     room = (prof.page.usable_width - head) * (1 - prof.text.fit_margin)
     count = int(room / size) + 2                                # 한 줄에 들어가는 글자 수보다 두 글자 많게
     paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
@@ -354,10 +354,10 @@ def test_wrapped_lines_carry_a_hanging_indent_so_word_rewrap_still_aligns(tmp_pa
                                     Paragraph(runs=[Run("□ " + long)])])
     items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")]
     size = load_profile("formal").font("body").size
-    head = 5 * size // 2                                        # 첫 줄 접두 "  □ " = 반각 5칸
+    head = 4 * size // 2                                        # 첫 줄 접두 " □ " = 반각 4칸
     first, second = items[0].paragraph_format, items[1].paragraph_format
     assert abs(first.left_indent - head) < 700 and abs(first.first_line_indent + head) < 700
-    assert abs(second.left_indent - head) < 700 and abs(second.first_line_indent + head) < 700   # 공백 5칸 폭
+    assert abs(second.left_indent - head) < 700 and abs(second.first_line_indent + head) < 700   # 공백 4칸 폭
 
 
 def test_bold_widen_knob_changes_the_measured_width():

@@ -36,7 +36,7 @@ def rendered(tmp_path):
 def test_formal_profile_values():
     prof = load_profile("formal")
     assert [(lv.lead_spaces, lv.marker_sep, lv.indent, lv.hanging) for lv in prof.numbering] == [
-        (0, " ", 0, 0), (2, " ", 0, 0), (4, " ", 0, 0), (6, " ", 0, 0)]
+        (0, " ", 0, 0), (1, " ", 0, 0), (3, " ", 0, 0), (6, " ", 0, 0)]
     assert prof.tables.align == "left" and prof.tables.header_shading is None
     assert prof.text.annotation_markers == ["*", "＊", "∗", "(주석)"] and prof.text.note_lead_spaces == 4
     assert prof.text.fit_lines and prof.text.level_bold_original
@@ -55,7 +55,7 @@ def test_other_profiles_are_unchanged():
 
 def test_levels_are_separated_by_spaces_not_indent(rendered):
     texts = [p.text for p in rendered]
-    assert texts[:3] == ["1. 추진 배경", "  □ 핵심인력 선정", "    - 세부 내용"]
+    assert texts[:3] == ["1. 추진 배경", " □ 핵심인력 선정", "   - 세부 내용"]
     for paragraph in rendered[:3]:
         assert not paragraph.paragraph_format.left_indent        # 들여쓰기 기능은 안 씀
         assert not paragraph.paragraph_format.first_line_indent  # 둘째 줄도 왼쪽 여백에서
@@ -91,7 +91,7 @@ def test_web_preset_keeps_format_text_values():
         prof = options.build_profile({"preset": name}, docs, ["text"], llm_ready=False)[0]
         assert prof.text.annotation_markers == expected
     prof = options.build_profile({"preset": "formal", "mode": "manual"}, docs, ["text"], llm_ready=False)[0]
-    assert prof.text.note_lead_spaces == 4 and prof.numbering[1].lead_spaces == 2
+    assert prof.text.note_lead_spaces == 4 and prof.numbering[1].lead_spaces == 1
     assert "formal" in options.presets()
 
 
