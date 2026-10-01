@@ -143,3 +143,14 @@ def test_note_right_below_a_table_is_close_to_it(tmp_path, fake_fonts):
     assert all(r.font.size == Pt(12) for r in note.runs if r.text.strip())   # 12pt
     assert note.paragraph_format.space_after == Pt(18)                       # ※ 뒤는 그대로 18pt
     assert paragraphs["□ 다음 항목"].paragraph_format.space_before in (None, Pt(0))
+
+
+def test_header_row_has_a_1_5pt_bottom_rule_instead_of_shading(tmp_path):
+    doc, _ = _convert(tmp_path, _TABLES)
+    table = doc.tables[0]
+    ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    header = table.rows[0]._tr.tc_lst[0].tcPr.find(f"{ns}tcBorders").find(f"{ns}bottom")
+    body = table.rows[1]._tr.tc_lst[0].tcPr.find(f"{ns}tcBorders").find(f"{ns}top")
+    assert header.get(f"{ns}sz") == body.get(f"{ns}sz") == "12"                  # 1.5pt = 12/8pt
+    assert "w:shd" not in table.rows[0].cells[0]._tc.xml                        # 음영은 없다
+    assert table.rows[2]._tr.tc_lst[0].tcPr.find(f"{ns}tcBorders") is None      # 다른 행은 그대로

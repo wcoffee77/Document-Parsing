@@ -57,6 +57,8 @@ _SEQ: dict[str, tuple[str, ...]] = {
     ),
     "w:tblBorders": ("w:top", "w:start", "w:left", "w:bottom", "w:end", "w:right",
                      "w:insideH", "w:insideV"),
+    "w:tcBorders": ("w:top", "w:start", "w:left", "w:bottom", "w:end", "w:right",
+                    "w:insideH", "w:insideV", "w:tl2br", "w:tr2bl"),
     "w:tblCellMar": ("w:top", "w:start", "w:left", "w:bottom", "w:end", "w:right"),
     "w:tcPr": (
         "w:cnfStyle", "w:tcW", "w:gridSpan", "w:hMerge", "w:vMerge", "w:tcBorders",
@@ -256,6 +258,23 @@ def set_fixed_layout(table, total_width: int, align: str, indent: int = 0) -> No
         ind = _ordered(tbl_pr, "w:tblInd")
         ind.set(qn("w:w"), str(emu_to_dxa(indent)))
         ind.set(qn("w:type"), "dxa")
+
+
+def set_header_rule(table, header_rows: int, width: int, color: str) -> None:
+    """머리행과 내용을 가르는 굵은 선 — 머리행 아래 테두리(음영 대신). 머리행 칸의 아래 테두리와 다음 행 칸의
+    위 테두리를 같이 지정해 Word가 어느 쪽을 고르든 같은 굵기가 되게 한다(2026-10-01 사용자: 1.5pt)."""
+    rows = table.rows
+    if not width or header_rows <= 0 or header_rows >= len(rows):
+        return
+    size = str(emu_to_eighth_pt(width))
+    for row_index, edge in ((header_rows - 1, "bottom"), (header_rows, "top")):
+        for tc in rows[row_index]._tr.tc_lst:
+            borders = _ordered(tc.get_or_add_tcPr(), "w:tcBorders")
+            element = _ordered(borders, f"w:{edge}")
+            element.set(qn("w:val"), "single")
+            element.set(qn("w:sz"), size)
+            element.set(qn("w:space"), "0")
+            element.set(qn("w:color"), color.lstrip("#"))
 
 
 def set_table_borders(table, rules: TableRules) -> None:

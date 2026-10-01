@@ -84,6 +84,7 @@ tables:
   note_column_scales: [100%, 90%]   # 폭 상한을 넘으면 장평 90%까지
   note_column_max: 30%       # 참고 열이 표 폭에서 차지하는 최대 비율
   note_markers: ["주)", "주:"]   # 표 아래 "*"는 표 주석이 아니라 본문 주석(파란 10pt)이고, ※는 본문 ※ 줄이다
+  header_rule_width: 1.5pt   # 음영 대신 머리행 아래 테두리를 1.5pt로 (2026-10-01 사용자)
   header_shading: null       # 정식보고서 표는 음영 없음 (실측: 직접 음영 0건)
 
 text:

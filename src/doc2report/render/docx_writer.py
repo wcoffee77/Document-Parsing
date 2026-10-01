@@ -718,6 +718,8 @@ class DocxRenderer:
         oxml.set_grid(table, layout.col_widths)
 
         self._fill_cells(table, block, layout)
+        oxml.set_header_rule(table, block.header_rows, self.profile.tables.header_rule_width,
+                             self.profile.tables.border_color)
 
         rules = self.profile.tables
         min_height = rules.min_row_height(self.flow.relaxed)

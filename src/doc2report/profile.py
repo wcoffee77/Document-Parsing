@@ -183,6 +183,8 @@ class NumberingLevel(_Base):
 
 class TableRules(_Base):
     header_shading: str | None = None
+    header_rule_width: int | None = None
+    # 머리행 아래 테두리 굵기 — 음영 없이 머리와 내용을 가른다(정식보고서: 1.5pt, 2026-10-01 사용자)
     border_width: int | None = None
     border_color: str = "000000"
     cell_margin_x: int = 0
@@ -220,7 +222,8 @@ class TableRules(_Base):
     note_column_max: float = 0.3  # 참고 열 전체가 표 폭에서 차지할 수 있는 최대 비율
 
     @field_validator("border_width", "cell_margin_x", "cell_margin_y", "note_column_size",
-                     "cell_margin_x_min", "space_after", "note_space_before", "max_font_spread", mode="before")
+                     "cell_margin_x_min", "space_after", "note_space_before", "max_font_spread",
+                     "header_rule_width", mode="before")
     @classmethod
     def _len(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
@@ -670,7 +673,7 @@ def _dump_level(level: NumberingLevel) -> dict:
 
 def _dump_tables(rules: TableRules) -> dict:
     data = rules.model_dump()
-    for key in ("border_width", "cell_margin_y", "space_after", "note_space_before", "max_font_spread"):
+    for key in ("border_width", "cell_margin_y", "space_after", "note_space_before", "max_font_spread", "header_rule_width"):
         data[key] = _pt(data[key])
     for key in ("cell_margin_x", "cell_margin_x_min", "row_height", "row_height_relaxed"):
         data[key] = _mm(data[key])
