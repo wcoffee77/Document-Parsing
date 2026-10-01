@@ -213,7 +213,7 @@ def test_note_gap_depends_on_whether_the_system_continues(tmp_path, fake_fonts):
     doc, _ = _convert(tmp_path, text)
     paragraphs = {p.text.strip(): p for p in doc.paragraphs}
     assert paragraphs["※ 같은 계통 설명"].paragraph_format.space_after == Pt(6)      # - → ※ → -
-    assert paragraphs["※ 체계가 바뀌는 설명"].paragraph_format.space_after == Pt(18)  # - → ※ → □
+    assert paragraphs["※ 체계가 바뀌는 설명"].paragraph_format.space_after in (Pt(12), Pt(18))  # - → ※ → □ 올라감
 
 
 def test_paren_and_circled_numbers_are_one_level_below_the_section_number(tmp_path, fake_fonts):
@@ -227,3 +227,35 @@ def test_paren_and_circled_numbers_are_one_level_below_the_section_number(tmp_pa
 def test_report_tells_where_each_table_starts(tmp_path):
     _, result = _convert(tmp_path, _TABLES)
     assert any("위치: right 정렬" in n and "윗줄 글자 시작" in n for n in result.notes)
+
+
+def _lines(tmp_path, text):
+    doc, _ = _convert(tmp_path, text)
+    return [p.text.rstrip() for p in doc.paragraphs]
+
+
+def test_levels_follow_the_order_markers_appear(tmp_path, fake_fonts):
+    # 1. □ - · → 0·1·3·5칸
+    assert _lines(tmp_path, "1. 가\n□ 나\n- 다\n· 라\n")[-4:] == ["1. 가", " □ 나", "   - 다", "     · 라"]
+    # 1. □ (1) - → (1)·① 이 끼면 한 단계씩 밀린다
+    assert _lines(tmp_path, "1. 가\n□ 나\n(1) 다\n- 라\n")[-4:] == ["1. 가", " □ 나", "   (1) 다", "     - 라"]
+    # 1. (1) □ - 도 마찬가지(나온 순서대로)
+    assert _lines(tmp_path, "1. 가\n(1) 나\n□ 다\n- 라\n")[-4:] == ["1. 가", " (1) 나", "   □ 다", "     - 라"]
+    # □ - 두 단계만 있으면 □가 맨 위
+    assert _lines(tmp_path, "□ 가\n- 나\n")[-2:] == ["□ 가", " - 나"]
+    # □ ① - 세 단계, ① □ - 세 단계
+    assert _lines(tmp_path, "□ 가\n① 나\n- 다\n")[-3:] == ["□ 가", " ① 나", "   - 다"]
+    assert _lines(tmp_path, "① 가\n□ 나\n- 다\n")[-3:] == ["① 가", " □ 나", "   - 다"]
+
+
+def test_a_marker_seen_again_goes_back_to_its_level(tmp_path, fake_fonts):
+    got = _lines(tmp_path, "1. 가\n□ 나\n(1) 다\n- 라\n(1) 마\n□ 바\n- 사\n2. 아\n")[-8:]
+    assert got == ["1. 가", " □ 나", "   (1) 다", "     - 라", "   (1) 마", " □ 바", "   - 사", "2. 아"]
+
+
+def test_gaps_same_level_6pt_up_12_or_18pt(tmp_path, fake_fonts):
+    doc, _ = _convert(tmp_path, "1. 가\n□ 나\n- 다\n- 라\n□ 마\n- 바\n")
+    after = {p.text.strip(): p.paragraph_format.space_after for p in doc.paragraphs}
+    assert after["- 다"] == Pt(6)                          # - → - 같은 단계
+    assert after["- 라"] in (Pt(12), Pt(18))               # - → □ 올라감
+    assert after["□ 나"] == Pt(6)                          # □ → - 내려감은 6pt 그대로

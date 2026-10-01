@@ -544,10 +544,19 @@ class DocxRenderer:
         last = self._last_item
         if last is None:
             return None
-        level = self.profile.numbering_level(last.depth)
-        if isinstance(next_block, ListItem) and next_block.depth == last.depth:
-            return level.space_after
-        return level.level_change_space(self.flow.relaxed)
+        return self._transition_gap(last.depth, next_block)
+
+    def _transition_gap(self, depth: int, next_block: Block | None) -> int | None:
+        """윗줄(단계 depth) 뒤 간격 — 같은 단계가 이어지면 space_after(6pt), 더 얕은 단계로 올라가면 level_up(12pt,
+        지면에 여유가 있으면 18pt), 내려가거나 그 밖이면 level_change(2026-10-01 사용자). ※·주석에도 똑같이 적용한다."""
+        level = self.profile.numbering_level(depth)
+        relaxed = self.flow.relaxed
+        if isinstance(next_block, ListItem):
+            if next_block.depth == depth:
+                return level.space_after
+            if next_block.depth < depth:
+                return level.level_up_space(relaxed)
+        return level.level_change_space(relaxed)
 
     def _is_note(self, text: str) -> bool:
         rules = self.profile.text
@@ -558,8 +567,11 @@ class DocxRenderer:
         """※ 줄 다음에 항목이 이어지면 ※ 줄의 단락 뒤에 간격을 둔다(text.gap_after_note)."""
         rules = self.profile.text
         gap = rules.gap_after_note
-        if not is_note or gap is None or next_block is None or self._is_note_block(next_block):
+        if not is_note or next_block is None or self._is_note_block(next_block):
             return None
+        if gap is None:  # 따로 정한 값이 없으면 일반 항목과 같은 규칙(같은 단계 6pt, 올라가면 12·18pt)
+            return (self._transition_gap(self._plain_depth, next_block)
+                    if self._plain_depth is not None else None)
         same = rules.gap_after_note_same_level
         if (same is not None and isinstance(next_block, ListItem) and self._plain_depth is not None
                 and next_block.depth == self._plain_depth):
@@ -614,10 +626,7 @@ class DocxRenderer:
         if (rules.gap_after_section is not None and isinstance(next_block, ListItem)
                 and next_block.depth == 0 and block.depth > 0):
             return rules.gap_after_section  # 새 절(3.) 앞 간격은 단락 앞이 아니라 윗줄 뒤로
-        same_level = isinstance(next_block, ListItem) and next_block.depth == block.depth
-        if same_level:
-            return level.space_after
-        return level.level_change_space(self.flow.relaxed)
+        return self._transition_gap(block.depth, next_block)
 
     def _space_before(self, block: ListItem, level, is_note: bool = False) -> int:
         """새 절이 시작되는 자리(… - 다음의 2.)와 표 바로 뒤를 넉넉히 띄운다."""

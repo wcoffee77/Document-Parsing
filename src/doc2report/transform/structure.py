@@ -48,6 +48,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                               note_marks: list[str] | None = None,
                               annotation_markers: list[str] | None = None,
                               pattern_depths: list[dict] | None = None,
+                              levels_by_order: bool = False,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -59,17 +60,34 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     annotations = tuple(annotation_markers or ())
     patterns = [(re.compile(entry["pattern"]), int(entry["depth"])) for entry in (pattern_depths or [])]
 
+    stack: list[tuple] = []  # levels_by_order: 문서에 나온 순서대로 쌓은 말머리 종류 — 인덱스가 곧 단계
+
     def _marked_depth(runs: list[Run]) -> int | None:
         found = _find_marker(runs, marker_re)
         if found is None:
             return None
         own = found[0]
         if own in depths:
-            return depths[own]
-        for pattern, depth in patterns:
-            if pattern.match(own):
-                return depth
-        return 0 if own[:1].isdigit() else None  # "1." "1)" = 첫 단계, 그 밖("※", "가.")은 문단 그대로
+            kind, fixed = ("c", depths[own]), depths[own]
+        else:
+            kind, fixed = None, None
+            for index, (pattern, depth) in enumerate(patterns):
+                if pattern.match(own):
+                    kind, fixed = ("p", index), depth
+                    break
+            if kind is None:
+                if not own[:1].isdigit():
+                    return None  # "※", "가." 같은 건 문단 그대로
+                kind, fixed = ("n",), 0  # "1." "1)" = 첫 단계
+        if not levels_by_order:
+            return fixed
+        # 사용자 원칙(2026-10-01): 말머리의 단계는 문서에 어떻게 나왔는지 보고 정한다 — "1. □ -", "1. □ (1) -",
+        # "□ (1) -", "(1) □ -", "□ -" 모두 나온 순서대로 한 단계씩 내려간다. 이미 나온 종류가 다시 나오면 그 단계로 올라간다.
+        if kind in stack:
+            del stack[stack.index(kind) + 1:]
+            return stack.index(kind)
+        stack.append(kind)
+        return len(stack) - 1
 
     def item(depth: int, runs: list[Run], own: str | None = None, *, derived: bool = False,
              **extra) -> ListItem:
@@ -101,6 +119,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         elif isinstance(block, Heading):
             depth = max(0, block.level - HEADING_BASE) + base
             heading_depth = depth
+            stack.clear()
             blocks.append(item(depth, block.runs, derived=True, from_heading=True))
         elif isinstance(block, ListItem):
             blocks.append(item(heading_depth + 1 + block.depth, block.runs, block.marker,
@@ -114,7 +133,8 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
             level = _marked_depth(block.runs)
             new = item(heading_depth + 1, block.runs, derived=True)
             if level is not None:
-                new.depth = max(heading_depth + 1, level + base)
+                new.depth = (heading_depth + 1 + level if levels_by_order
+                             else max(heading_depth + 1, level + base))
             blocks.append(new)
         elif isinstance(block, Paragraph) and (top := _marked_depth(block.runs)) is not None:
             # 제목이 나오기 전이라도 원문 말머리("1." "□" "-")가 있는 문단은 그 말머리의 단계로

@@ -36,7 +36,7 @@ def rendered(tmp_path):
 def test_formal_profile_values():
     prof = load_profile("formal")
     assert [(lv.lead_spaces, lv.marker_sep, lv.indent, lv.hanging) for lv in prof.numbering] == [
-        (0, " ", 0, 0), (1, " ", 0, 0), (3, " ", 0, 0), (5, " ", 0, 0)]
+        (0, " ", 0, 0), (1, " ", 0, 0), (3, " ", 0, 0), (5, " ", 0, 0), (7, " ", 0, 0)]
     assert prof.tables.align == "right" and prof.tables.header_shading is None
     assert prof.text.annotation_markers == ["*", "＊", "∗", "(주석)"] and prof.text.note_lead_spaces == 4
     assert prof.text.fit_lines and prof.text.level_bold_original
@@ -76,7 +76,7 @@ def test_annotation_keeps_level_gaps_of_the_line_above(rendered):
     by_text = {p.text.strip(): p for p in rendered}
     above, note = by_text["- 세부 내용"], by_text["* 최근 평가 상위 이상, 영어회화 2급 이상"]
     assert above.paragraph_format.space_after == Emu(0)                       # 주석이 윗줄에 붙는다
-    assert note.paragraph_format.space_after == prof.text.gap_after_annotation == Pt(18)  # 주석 뒤 18pt (단락 뒤)
+    assert note.paragraph_format.space_after in (Pt(12), Pt(18))   # 주석 뒤: - → □로 올라가므로 12pt(지면 여유 있으면 18pt)
 
 
 def test_note_mark_uses_spaces_and_body_size(rendered):

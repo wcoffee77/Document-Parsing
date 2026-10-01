@@ -153,6 +153,10 @@ class NumberingLevel(_Base):
     space_after: int | None = None
     space_after_level_change: int | None = None
     space_after_level_change_max: int | None = None  # 지면에 여유가 있을 때까지 늘릴 값
+    space_after_level_up: int | None = None
+    space_after_level_up_max: int | None = None
+    # 더 얕은 단계로 올라가는 자리(- 다음의 □)의 간격 — 없으면 space_after_level_change를 쓴다
+    # (정식보고서: 같은 단계 6pt, 올라갈 때 12pt·여유 있으면 18pt, 내려갈 때 6pt — 2026-10-01 사용자)
     bold: bool | None = None
     size: int | None = None
     lead_spaces: int = 0
@@ -167,7 +171,8 @@ class NumberingLevel(_Base):
         return None if v is None else parse_length(v, default_unit="mm")
 
     @field_validator("space_before", "space_after", "space_after_level_change",
-                     "space_after_level_change_max", "size", mode="before")
+                     "space_after_level_change_max", "space_after_level_up",
+                     "space_after_level_up_max", "size", mode="before")
     @classmethod
     def _pt(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
@@ -179,6 +184,15 @@ class NumberingLevel(_Base):
         if self.space_after_level_change is not None:
             return self.space_after_level_change
         return self.space_after
+
+
+    def level_up_space(self, relaxed: bool) -> int | None:
+        """더 얕은 단계로 올라가는 자리의 간격(지면에 여유가 있으면 넉넉한 값)."""
+        if relaxed and self.space_after_level_up_max is not None:
+            return self.space_after_level_up_max
+        if self.space_after_level_up is not None:
+            return self.space_after_level_up
+        return self.level_change_space(relaxed)
 
 
 class TableRules(_Base):
@@ -343,6 +357,9 @@ class TextRules(_Base):
     gap_after_note_same_level: int | None = None
     # ※ 줄 다음에 윗줄과 **같은 단계** 항목이 이어지면(같은 계통) 이 간격, 단계가 달라지면 gap_after_note
     # (2026-10-01 사용자: "- 문장1 / ※ / - 문장2"는 6pt, "- 문장1 / ※ / □ 문장2"는 18pt)
+    levels_by_order: bool = False
+    # true: 원문 말머리의 단계를 말머리 종류(1. □ (1)·① - ·)가 문서에 나온 순서로 정한다 — 한 단계씩 내려가고, 이미 나온
+    # 종류가 다시 나오면 그 단계로 올라간다(2026-10-01 사용자: "문서에 머리기호가 어떻게 나왔는지 보고 판단").
     pattern_depths: list[dict] = Field(default_factory=list)
     # 원문 말머리를 정규식으로 단계에 매긴다 — [{pattern: '^\\(\\d{1,2}\\)', depth: 1}]. 말머리 문자로 가리킬 수 없는 번호
     # "(1)"·"①"을 □와 같은 단계로 둘 때(정식보고서: 1. → (1)·① → - → ·)
@@ -388,7 +405,7 @@ FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
                       "fit_bold_factor", "condense_pad", "shorten_to_fit", "orphan_max",
                       "gap_after_annotation", "gap_after_note", "gap_after_section",
-                      "gap_after_note_same_level", "pattern_depths")
+                      "gap_after_note_same_level", "pattern_depths", "levels_by_order")
 
 
 def with_format_text(rules: TextRules, preset: TextRules) -> TextRules:
@@ -679,7 +696,8 @@ def _dump_level(level: NumberingLevel) -> dict:
     for key in ("indent", "hanging"):
         data[key] = _mm(data[key])
     for key in ("space_before", "space_after", "space_after_level_change",
-                "space_after_level_change_max", "size"):
+                "space_after_level_change_max", "space_after_level_up",
+                "space_after_level_up_max", "size"):
         data[key] = _pt(data[key])
     return data
 
