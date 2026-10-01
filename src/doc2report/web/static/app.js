@@ -277,7 +277,7 @@ function syncPreset() {
   $("#preset-summary").textContent = custom ? "출발 서식에서 바꾸고 싶은 값만 고치세요 (단위: pt, 배, 장평 %, 여백 cm)"
     : (p ? `${p.summary}` : "");
   const hasConfluence = state.inputs.some((i) => i.type === "confluence");
-  const suggest = hasConfluence && preset === "default" && state.profiles.confluence;
+  const suggest = hasConfluence && preset === state.schema.presets[0] && state.profiles.confluence;
   const hint = $("#preset-hint");
   hint.classList.toggle("hidden", !suggest);
   if (suggest) {
@@ -310,7 +310,7 @@ function collectOptions() {
     mode,
     llm: $("#use-llm").checked,
     allow_llm: $("#use-llm").checked,
-    preset: radio("preset") || "default",
+    preset: radio("preset") || state.schema.presets[0],
     custom,
     rules_base: $("#rules-base").value,
     polish: radio("polish"),
@@ -338,7 +338,7 @@ function restoreOptions() {
   let o = null;
   try { o = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { o = null; }
   const presets = state.schema.presets;
-  const first = presets.includes("default") ? "default" : presets[0];
+  const first = presets[0];
   const known = (n) => n && state.profiles[n] && presets.includes(n);
   setRadio("preset", o && (o.preset === "custom" || known(o.preset)) ? o.preset : first);
   fillCustom(o && o.custom && known(o.custom.base) ? o.custom.base : first);

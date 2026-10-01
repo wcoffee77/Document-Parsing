@@ -7,8 +7,8 @@
 
 name: default
 description: 사내 보고서 표준 서식 (A4 세로, 바탕체 14pt)
-label: 보고서                # 웹 화면 서식 선택 이름
-preset_order: 1
+# label·preset_order 없음 = 웹 화면의 서식 목록에 안 나온다(2026-10-01 사용자: 정식보고서·Confluence 변환 둘만).
+# formal·confluence가 이 파일을 물려받고, 규칙 기본값(text)도 이 파일에서 온다 — 지우지 말 것.
 
 page:
   size: A4

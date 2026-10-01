@@ -49,6 +49,7 @@ _TOGGLES = {key: fields for key, _, _, fields in MARKER_TOGGLES + POLISH_TOGGLES
 TABLE_CHOICES = {"align": [("right", "오른쪽"), ("center", "가운데"), ("left", "왼쪽")]}
 FORMAT_KEYS = ("font", "size", "line_spacing", "title_size", "table_size", "body_scale", "table_scale")
 MARGIN_SIDES = ("top", "bottom", "left", "right")
+_HIDDEN_BASE = ["default"]  # 목록엔 없지만 내부에서 서식으로 쓸 수 있는 기반 프로파일(테스트·옵션 없는 호출)
 _HEAVY_PRESET = "confluence"  # 내용이 많을 때 권하는 서식
 
 _STRUCTURED_RATIO = 0.3  # 제목·말머리가 있는 문단이 이 비율 이상이면 "정리된 문서"
@@ -171,12 +172,12 @@ def format_profile(options: dict) -> Profile:
     """출력 설정의 서식 선택 → 서식 프로파일. 사용자 설정은 출발 서식에서 바꾼 값만 덮어쓴다."""
     preset = options.get("preset") or "default"
     if preset != "custom":
-        if preset not in presets():
+        if preset not in presets() + _HIDDEN_BASE:
             raise ValueError(f"알 수 없는 서식: {preset}")
         return load_profile(preset)
     custom = options.get("custom") or {}
     base = custom.get("base") or "default"
-    if base not in presets():
+    if base not in presets() + _HIDDEN_BASE:
         raise ValueError(f"알 수 없는 출발 서식: {base}")
     prof = load_profile(base)
     current = format_values(prof)
@@ -204,7 +205,7 @@ def manual_rules(prof: Profile, options: dict) -> tuple[Profile, str, bool]:
     """직접 선택 모드: "규칙 기본값" 프로파일의 규칙(text)에 체크박스 값을 덮어써 서식 프로파일에 끼운다.
     문장 다듬기: polish = none | rules(파이썬 규칙), llm = LLM 맞춤법·어조 다듬기(따로 켬)."""
     base = options.get("rules_base")
-    text = load_profile(base).text if base in presets() else prof.text
+    text = load_profile(base).text if base in presets() + _HIDDEN_BASE else prof.text
     text_updates = {field: bool(v) for key, v in (options.get("text") or {}).items()
                     for field in _TOGGLES.get(key, ())}
     table_opts = options.get("tables") or {}
@@ -271,7 +272,7 @@ def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,
 
     heavy = chars >= _HEAVY_CHARS or tables >= _HEAVY_TABLES or len(docs) >= 2
     heavy_name = _HEAVY_PRESET if _HEAVY_PRESET in presets() else None
-    if heavy and heavy_name and preset.name == "default":
+    if heavy and heavy_name and preset.name in ("default", presets()[0]):
         label = load_profile(heavy_name).label or heavy_name
         reasons.append(f"본문 {chars:,}자·표 {tables}개·입력 {len(docs)}개로 내용이 많음 — "
                        f"'{label}' 서식이 더 잘 맞을 수 있음(서식은 고른 그대로 둠)")

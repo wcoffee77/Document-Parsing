@@ -19,9 +19,9 @@ from doc2report.web.server import create_server
 
 
 def test_presets_are_profiles_with_preset_order():
-    assert opts.presets()[:2] == ["default", "confluence"]
-    report, confluence = opts.profile_info("default"), opts.profile_info("confluence")
-    assert (report["label"], confluence["label"]) == ("보고서", "Confluence 변환")
+    assert opts.presets()[:2] == ["formal", "confluence"] and "default" not in opts.presets()
+    report, confluence = opts.profile_info("formal"), opts.profile_info("confluence")
+    assert (report["label"], confluence["label"]) == ("정식보고서", "Confluence 변환")
 
 
 def test_confluence_preset_matches_user_spec():
