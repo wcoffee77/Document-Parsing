@@ -196,7 +196,7 @@ class DocxRenderer:
                     paragraph.paragraph_format.space_after = Emu(note_gap)
             if container is None and not is_note:
                 self._base_indent = 0
-            self._after_table_gap(paragraph, container)
+            self._after_table_gap(paragraph, container, is_note)
             self._set_anchor(self._last_paragraph(paragraph), spec, head, container)
         elif isinstance(block, ListItem):
             self._list_item(block, container, next_block)
@@ -237,12 +237,19 @@ class DocxRenderer:
                     break
         return self._paragraph(block.runs, self.profile.font(key), container)
 
-    def _after_table_gap(self, paragraph, container) -> None:
+    def _table_gap(self, is_note: bool) -> int | None:
+        """표 바로 다음 줄의 앞 간격. 표를 부연하는 ※ 줄은 표에 딸린 줄이라 더 좁게(tables.note_space_before)."""
+        rules = self.profile.tables
+        if is_note and rules.note_space_before is not None:
+            return rules.note_space_before
+        return rules.space_after
+
+    def _after_table_gap(self, paragraph, container, is_note: bool = False) -> None:
         """표 바로 뒤 문단은 표와 붙어 보이므로 앞 간격을 확보한다.
 
         (Word는 표 자체에 '단락 뒤 간격'을 줄 수 없어 다음 문단 쪽에서 띄운다.)
         """
-        gap = self.profile.tables.space_after
+        gap = self._table_gap(is_note)
         if container is None and gap and isinstance(self._previous, Table):
             current = paragraph.paragraph_format.space_before
             paragraph.paragraph_format.space_before = Emu(max(int(current or 0), gap))
@@ -281,7 +288,7 @@ class DocxRenderer:
         # 말머리를 일부러 뺀 항목(꺾쇠 표기)은 내어쓰기 없이 첫 줄과 나머지 줄을 맞춘다.
         hanging = 0 if block.marker == "" else level.hanging
         space = self._item_spacing(block, level, next_block)
-        before = self._space_before(block, level)
+        before = self._space_before(block, level, self._is_note(note_text) if container is None else False)
         head = (" " * lead + marker + level.marker_sep) if marker else ""
 
         plan = self._fit(block.runs, spec, head, indent=indent, hanging=hanging or 0, container=container)
@@ -593,7 +600,7 @@ class DocxRenderer:
             return level.space_after
         return level.level_change_space(self.flow.relaxed)
 
-    def _space_before(self, block: ListItem, level) -> int:
+    def _space_before(self, block: ListItem, level, is_note: bool = False) -> int:
         """새 절이 시작되는 자리(… - 다음의 2.)와 표 바로 뒤를 넉넉히 띄운다."""
         previous = self._previous
         if previous is None:
@@ -605,8 +612,9 @@ class DocxRenderer:
         deeper_before = isinstance(previous, ListItem) and previous.depth > block.depth
         if deeper_before and level.space_before:
             before = level.space_before
-        if isinstance(previous, Table) and self.profile.tables.space_after:
-            before = max(before, self.profile.tables.space_after)
+        gap = self._table_gap(is_note)
+        if isinstance(previous, Table) and gap:
+            before = max(before, gap)
         return before
 
     def _code(self, block: CodeBlock, container=None):

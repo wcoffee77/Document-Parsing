@@ -208,6 +208,7 @@ class TableRules(_Base):
     valign: str = "center"
     width_ratio: float = 1.0  # 사용가능폭 대비 표 목표 폭
     space_after: int | None = None  # 표 바로 다음 문단에 최소한 확보할 앞 간격
+    note_space_before: int | None = None  # 표 바로 아래 ※ 부연 설명 줄은 space_after 대신 이 앞 간격(표에 딸린 줄)
     row_height: int | None = None  # 행 최소 높이
     row_height_relaxed: int | None = None  # 지면에 여유가 있을 때의 행 최소 높이
     equal_columns: bool = False
@@ -219,7 +220,7 @@ class TableRules(_Base):
     note_column_max: float = 0.3  # 참고 열 전체가 표 폭에서 차지할 수 있는 최대 비율
 
     @field_validator("border_width", "cell_margin_x", "cell_margin_y", "note_column_size",
-                     "cell_margin_x_min", "space_after", "max_font_spread", mode="before")
+                     "cell_margin_x_min", "space_after", "note_space_before", "max_font_spread", mode="before")
     @classmethod
     def _len(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
@@ -669,7 +670,7 @@ def _dump_level(level: NumberingLevel) -> dict:
 
 def _dump_tables(rules: TableRules) -> dict:
     data = rules.model_dump()
-    for key in ("border_width", "cell_margin_y", "space_after", "max_font_spread"):
+    for key in ("border_width", "cell_margin_y", "space_after", "note_space_before", "max_font_spread"):
         data[key] = _pt(data[key])
     for key in ("cell_margin_x", "cell_margin_x_min", "row_height", "row_height_relaxed"):
         data[key] = _mm(data[key])

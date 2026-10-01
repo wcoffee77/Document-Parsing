@@ -902,6 +902,7 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   shorten_sentence`, 한 번에 안 맞으면 2·4자 더 짧게 재시도, 서식이 섞인 문장은 건드리지 않음) 줄인 결과가 한 줄이면 채택 — `--report`에 "표현 줄임: 전 → 후".
   LLM이 없거나 실패하면 원문 그대로 두고 "두세 글자가 다음 줄로 넘어간 문장 N개(넘친 글자 수)"만 남긴다(`orphan_max` 4자). 이 샌드박스는 LLM이 없어 가짜
   줄임 함수로만 검증 — **온프렘 LLM 실측 필요**(문장 끝 형태·사실 유지 여부).
+- **표 아래 ※ (2026-10-01 사용자)**: 표를 부연하는 ※ 줄은 12pt(`note_size_delta: 2pt`)이고 앞 간격은 표 뒤 18pt(`tables.space_after`)가 아니라 6pt — `tables.note_space_before: 6pt`(formal), 렌더러 `_table_gap(is_note)`. ※ 뒤 간격 18pt(`gap_after_note`)는 그대로.
 - **진행 상태**: 1단계 probe(서식·형식·문장 통계, 층별 종결·길이, 주석 상자 포함)를 합성 docx로 검증하고 사내 문서 8건으로
   1차 실측했다. 다음: 샘플 리포트로 변환 결과와의 차이 확인 →
   `rules/*.yaml` 검수기(임계값은 실측으로 채움) → 변환 결과 채점기 → 파일럿 후 LLM 단계.

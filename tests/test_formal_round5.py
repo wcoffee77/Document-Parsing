@@ -133,3 +133,13 @@ def test_orphan_is_shortened_by_llm_or_reported(tmp_path, fake_fonts):
     assert len(lines) == 2 and any("두세 글자" in n for n in r.notes)            # 못 줄이면 리포트에 남긴다
     r, lines = render(lambda text, limit: text[:limit - 1])
     assert len(lines) == 1 and any("표현 줄임" in n for n in r.notes)            # 줄이면 한 줄
+
+
+def test_note_right_below_a_table_is_close_to_it(tmp_path, fake_fonts):
+    doc, _ = _convert(tmp_path, _TABLES + "※ 표를 부연하는 설명\n□ 다음 항목\n")
+    paragraphs = {p.text.strip(): p for p in doc.paragraphs}
+    note = paragraphs["※ 표를 부연하는 설명"]
+    assert note.paragraph_format.space_before == Pt(6)                       # 표 뒤 18pt가 아니라 6pt
+    assert all(r.font.size == Pt(12) for r in note.runs if r.text.strip())   # 12pt
+    assert note.paragraph_format.space_after == Pt(18)                       # ※ 뒤는 그대로 18pt
+    assert paragraphs["□ 다음 항목"].paragraph_format.space_before in (None, Pt(0))
