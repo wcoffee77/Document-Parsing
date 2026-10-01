@@ -83,6 +83,10 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
             return fixed
         # 사용자 원칙(2026-10-01): 말머리의 단계는 문서에 어떻게 나왔는지 보고 정한다 — "1. □ -", "1. □ (1) -",
         # "□ (1) -", "(1) □ -", "□ -" 모두 나온 순서대로 한 단계씩 내려간다. 이미 나온 종류가 다시 나오면 그 단계로 올라간다.
+        if not stack and kind != ("n",):
+            # 맨 위가 "1."이 아니면(□ -, □ (1) -, (1) □ -) "1." 단계를 비워 둔 채 시작한다 — □는 1칸, -는 3칸
+            # (2026-10-01 사용자: "ㅁ - 두 단계면 ㅁ 1칸, -는 3칸 / 1. ㅁ - 이면 0칸, 1칸, 3칸")
+            stack.append(("n",))
         if kind in stack:
             del stack[stack.index(kind) + 1:]
             return stack.index(kind)
@@ -119,7 +123,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         elif isinstance(block, Heading):
             depth = max(0, block.level - HEADING_BASE) + base
             heading_depth = depth
-            stack.clear()
+            stack[:] = [("h",)]  # 제목이 곧 맨 위 단계 — 그 아래 말머리는 한 단계씩 내려간다
             blocks.append(item(depth, block.runs, derived=True, from_heading=True))
         elif isinstance(block, ListItem):
             blocks.append(item(heading_depth + 1 + block.depth, block.runs, block.marker,
@@ -133,7 +137,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
             level = _marked_depth(block.runs)
             new = item(heading_depth + 1, block.runs, derived=True)
             if level is not None:
-                new.depth = (heading_depth + 1 + level if levels_by_order
+                new.depth = (heading_depth + level if levels_by_order
                              else max(heading_depth + 1, level + base))
             blocks.append(new)
         elif isinstance(block, Paragraph) and (top := _marked_depth(block.runs)) is not None:
@@ -143,7 +147,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         else:
             blocks.append(block)
 
-    if normalize:
+    if normalize and not levels_by_order:  # 단계 번호가 곧 앞 공백이라 맨 위를 0으로 당기면 안 된다
         items = [b for b in blocks if isinstance(b, ListItem)]
         shift = min((b.depth for b in items), default=0)
         for b in items:

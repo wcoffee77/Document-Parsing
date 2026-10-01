@@ -241,11 +241,11 @@ def test_levels_follow_the_order_markers_appear(tmp_path, fake_fonts):
     assert _lines(tmp_path, "1. 가\n□ 나\n(1) 다\n- 라\n")[-4:] == ["1. 가", " □ 나", "   (1) 다", "     - 라"]
     # 1. (1) □ - 도 마찬가지(나온 순서대로)
     assert _lines(tmp_path, "1. 가\n(1) 나\n□ 다\n- 라\n")[-4:] == ["1. 가", " (1) 나", "   □ 다", "     - 라"]
-    # □ - 두 단계만 있으면 □가 맨 위
-    assert _lines(tmp_path, "□ 가\n- 나\n")[-2:] == ["□ 가", " - 나"]
-    # □ ① - 세 단계, ① □ - 세 단계
-    assert _lines(tmp_path, "□ 가\n① 나\n- 다\n")[-3:] == ["□ 가", " ① 나", "   - 다"]
-    assert _lines(tmp_path, "① 가\n□ 나\n- 다\n")[-3:] == ["① 가", " □ 나", "   - 다"]
+    # □ - 두 단계: □ 1칸, - 3칸 (1. 단계는 비워 둔다)
+    assert _lines(tmp_path, "□ 가\n- 나\n")[-2:] == [" □ 가", "   - 나"]
+    # □ ① - / ① □ - 세 단계: 1·3·5칸
+    assert _lines(tmp_path, "□ 가\n① 나\n- 다\n")[-3:] == [" □ 가", "   ① 나", "     - 다"]
+    assert _lines(tmp_path, "① 가\n□ 나\n- 다\n")[-3:] == [" ① 가", "   □ 나", "     - 다"]
 
 
 def test_a_marker_seen_again_goes_back_to_its_level(tmp_path, fake_fonts):
