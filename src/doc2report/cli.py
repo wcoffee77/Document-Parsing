@@ -51,6 +51,10 @@ def convert(
     date: str = typer.Option(None, "--date", help="제목 아래 날짜 ('today' 또는 '2026. 10. 1')"),
     polish: str = typer.Option(None, "--polish",
                                help="rules | llm | none (생략 시 프로파일의 text.polish)"),
+    llm: bool = typer.Option(False, "--llm",
+                             help="규칙은 그대로 두고 LLM으로 맞춤법·어조 교열 + (정식보고서) 넘치는 문장 줄임"),
+    shorten: bool = typer.Option(False, "--shorten",
+                                 help="문구는 안 고치고, 줄 맞춤에서 두세 글자 넘치는 문장만 LLM으로 줄임(정식보고서)"),
     report: Path = typer.Option(None, "--report", help="변경 내역을 저장할 .md 경로"),
     save_profile: Path = typer.Option(None, "--save-profile", help="고른 서식을 .yaml로 저장"),
     open_after: bool = typer.Option(False, "--open", help="변환 후 결과 문서 열기"),
@@ -79,7 +83,7 @@ def convert(
 
     def once() -> None:
         result = run_convert(source, out, effective, polish=polish, date=date, linked=not no_linked,
-                             follow_links=follow_links)
+                             follow_links=follow_links, llm=True if llm else None, shorten=shorten)
         typer.echo(f"[완료] {out}  (표 {len(result.layouts)}개, 문구 수정 {len(result.changes)}건)")
         for note in result.notes:
             typer.echo(f"  · {note}")

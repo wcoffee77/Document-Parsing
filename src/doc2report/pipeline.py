@@ -158,6 +158,8 @@ def convert(
     date: str | None = None,
     linked: bool = True,
     follow_links: bool = False,
+    llm: bool | None = None,
+    shorten: bool = False,
 ) -> ConvertResult:
     """source(파일 경로 / Confluence URL / '-') → output(.docx).
 
@@ -166,7 +168,7 @@ def convert(
     date: 제목 아래에 넣을 날짜. "today"(또는 "오늘")면 오늘 날짜를 프로파일 형식으로 넣는다.
     """
     return convert_many([source], output, profile, polish=polish, date=date, linked=linked,
-                        follow_links=follow_links)
+                        follow_links=follow_links, llm=llm, shorten=shorten)
 
 
 def convert_many(
@@ -182,6 +184,8 @@ def convert_many(
     progress=None,
     linked: bool = True,
     follow_links: bool = False,
+    llm: bool | None = None,
+    shorten: bool = False,
 ) -> ConvertResult:
     """여러 입력을 읽어 한 문서로 합친 뒤 변환한다. progress(메시지)는 진행 상황 알림(웹 화면용)."""
     if not sources:
@@ -202,7 +206,8 @@ def convert_many(
         notes.extend(source_notes)
     doc = merge_documents(docs, title=title, section_titles=section_titles, page_breaks=page_breaks)
     say("문구·구조 규칙 적용 중")
-    return convert_document(doc, output, prof, polish=polish, date=date, notes=notes, progress=say)
+    return convert_document(doc, output, prof, polish=polish, date=date, notes=notes, progress=say,
+                            llm=llm, shorten=shorten)
 
 
 def convert_document(
@@ -215,9 +220,11 @@ def convert_document(
     notes: list[str] | None = None,
     progress=None,
     llm: bool | None = None,
+    shorten: bool = False,
 ) -> ConvertResult:
     """polish: none(안 다듬음) | rules(파이썬 규칙) | llm(규칙 + LLM, CLI 호환).
-    llm: 주면 LLM을 규칙과 따로 켜고 끈다(웹 화면 — "규칙은 안 함 + LLM만"도 가능)."""
+    llm: 주면 LLM을 규칙과 따로 켜고 끈다(웹 화면 — "규칙은 안 함 + LLM만"도 가능).
+    shorten: 문구 교열(llm) 없이 **줄 맞춤에서 넘치는 문장을 줄이는 데만** LLM을 쓴다(CLI --shorten)."""
     say = progress or (lambda message: None)
     polish = polish or prof.text.polish or "rules"
     use_llm = polish == "llm" if llm is None else llm
@@ -225,7 +232,7 @@ def convert_document(
         _insert_dateline(doc, date, prof)
 
     doc, changes = drop_blank_blocks(doc)  # 안 그러면 접을 때 "□"만 덜렁 찍힌 줄이 된다
-    if not (prof.text.fit_lines and polish == "none" and not use_llm):
+    if not (prof.text.fit_lines and polish == "none"):
         # 글쓴이가 엔터로 나눈 줄바꿈은 줄 맞춤이 켜졌고 문구를 안 고칠 때만 살린다. 문구 다듬기(문장 분리·개조식)는
         # 줄바꿈이 낀 문장을 쪼개 이어진 줄을 새 항목으로 만들어 버린다(2026-10-01 사용자: ","가 "."로 바뀌고 종결).
         doc = soften_hard_breaks(doc)
@@ -276,7 +283,7 @@ def convert_document(
                        for before, after in layout.header_text.values())
     flow = plan_flow(doc, prof, layouts)
     shortener = None
-    if use_llm and prof.text.shorten_to_fit:
+    if (use_llm or shorten) and prof.text.shorten_to_fit:
         from .transform.llm_polish import shorten_sentence
 
         shortener = shorten_sentence

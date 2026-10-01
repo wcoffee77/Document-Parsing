@@ -101,6 +101,8 @@ def _collect(blocks: list[Block], texts: list[str], targets: list) -> None:
             continue  # 제목은 어조를 바꿀 대상이 아니다
         if isinstance(block, (Paragraph, ListItem)):
             text = plain(block.runs).strip()
+            if "\n" in text:
+                continue  # 글쓴이가 엔터로 나눈 줄(정식보고서 줄 맞춤) — 한 줄씩 답하는 형식에 안 맞고 줄 위치를 지켜야 한다
             if text and any(ch.isalpha() for ch in text):
                 texts.append(text)
                 targets.append(block)

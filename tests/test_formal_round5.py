@@ -154,3 +154,12 @@ def test_header_row_has_a_1_5pt_bottom_rule_instead_of_shading(tmp_path):
     assert header.get(f"{ns}sz") == body.get(f"{ns}sz") == "12"                  # 1.5pt = 12/8pt
     assert "w:shd" not in table.rows[0].cells[0]._tc.xml                        # 음영은 없다
     assert table.rows[2]._tr.tc_lst[0].tcPr.find(f"{ns}tcBorders") is None      # 다른 행은 그대로
+
+
+def test_cli_has_llm_and_shorten_flags():
+    from typer.testing import CliRunner
+
+    from doc2report.cli import app
+
+    out = CliRunner().invoke(app, ["convert", "--help"]).output
+    assert "--llm" in out and "--shorten" in out

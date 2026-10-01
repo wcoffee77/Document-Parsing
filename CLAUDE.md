@@ -904,6 +904,7 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   줄임 함수로만 검증 — **온프렘 LLM 실측 필요**(문장 끝 형태·사실 유지 여부).
 - **표 아래 ※ (2026-10-01 사용자)**: 표를 부연하는 ※ 줄은 12pt(`note_size_delta: 2pt`)이고 앞 간격은 표 뒤 18pt(`tables.space_after`)가 아니라 6pt — `tables.note_space_before: 6pt`(formal), 렌더러 `_table_gap(is_note)`. ※ 뒤 간격 18pt(`gap_after_note`)는 그대로.
 - **표 머리 구분선 (2026-10-01 사용자)**: 정식보고서 표는 머리에 음영이 없고 **머리행 아래 테두리 1.5pt**로 내용과 구분한다 — `tables.header_rule_width: 1.5pt`(formal), `oxml.set_header_rule`이 머리행 칸의 아래 테두리와 다음 행 칸의 위 테두리를 같이 지정(Word가 어느 쪽을 골라도 같은 굵기). 원본 probe의 칸 테두리 절에서 실제 굵기를 확인해 값을 맞출 것.
+- **LLM 켜는 법 (2026-10-01)**: `--polish llm`은 파이썬 규칙 + LLM이라 정식보고서에서는 쓰지 말 것(규칙이 문장을 쪼갠다). 정식보고서용은 `--shorten`(문구는 안 고치고 넘치는 문장만 줄임)·`--llm`(교열 + 줄임, 규칙은 formal 그대로 = 안 함). 엔터로 나눈 줄(`\n`)이 든 문장은 교열 LLM에 안 보낸다(`llm_polish._collect`) — 줄 위치를 지키고, 한 줄 답 형식에 안 맞아서. 그래서 줄 맞춤이 켜진 서식은 LLM이 켜져도 `soften_hard_breaks`를 건너뛴다.
 - **진행 상태**: 1단계 probe(서식·형식·문장 통계, 층별 종결·길이, 주석 상자 포함)를 합성 docx로 검증하고 사내 문서 8건으로
   1차 실측했다. 다음: 샘플 리포트로 변환 결과와의 차이 확인 →
   `rules/*.yaml` 검수기(임계값은 실측으로 채움) → 변환 결과 채점기 → 파일럿 후 LLM 단계.
