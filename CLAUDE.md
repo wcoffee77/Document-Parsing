@@ -885,6 +885,23 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   같이 줘서, 글꼴 폭 계산이 Word와 달라 Word가 줄을 한 번 더 바꿔도 이어지는 줄이 윗줄 글자에 맞는다(줄이 맞게 들어가면 안 보임; `_FitPlan.first_hang/cont_hang`).
 - **`default` 서식을 웹 목록에서 숨김 (2026-10-01 사용자: 정식보고서·Confluence 변환 둘만)** — `default.yaml`에서 `label`·`preset_order`만 뺐다(formal·confluence가 `extends: default`이고 자동 판단의 규칙 기본값도 여기서 오므로 파일은 남긴다). 목록은 정식보고서(1)·Confluence 변환(2). 서버는 옵션 없는 호출·"규칙 기본값"에서 숨은 `default`를 여전히 받는다(`options._HIDDEN_BASE`). 화면 기본 선택은 목록 첫째(정식보고서). 직접 선택의 "규칙 기본값" 선택지도 이 둘이라, 예전 '보고서' 규칙(말머리 만들기·개조식)은 체크박스로 켠다.
 - **샘플 입력 `samples/`**: 정식보고서 변환 확인용 가상 문서 2건(txt 메모 — `*`·※·탭 표·주), md — 표 2개). 실제 내용 아님.
+- **정식보고서 실사용 5차(2026-10-01, 샘플 2건 변환)** — 사용자 지적 → 처리:
+  ① 계산상 0.9pt로 좁혀 둔 줄을 Word는 1.0pt여야 한 줄에 넣음 → `text.condense_pad: 0.1pt`(계산값 + 0.1pt, `condense_max` 이하). `fit_text(pad=)`.
+  ② 주석·※ 뒤가 붙어 보임, 새 절 앞 간격 → **단락 앞 대신 윗줄의 단락 뒤**: `gap_after_annotation`·`gap_after_note`·`gap_after_section` 모두 18pt,
+  `numbering[0].space_before: 0`. 주석 상자는 윗줄의 단락 뒤 = 상자 높이 + 18pt. ※는 `note_size_delta: 2pt`(14→12pt, 주 문장이 아님). `_is_note`가
+  `note_indent`만 보던 것을 `note_lead_spaces`도 보게 고침(formal은 note_indent 0이라 ※가 노트로 안 잡혔다).
+  ③ 표 왼쪽 끝 = 윗줄 □ 말머리의 왼쪽 끝: `table_indents`가 `lead_spaces` 폭(공백 × 본문 글꼴)을 더하고(주석·※ 줄은 기준에서 제외), 왼쪽 정렬 표는
+  `oxml.set_fixed_layout(indent=)`가 `w:tblInd`로 시작점을 준다(예전엔 오른쪽 정렬 표만 폭으로 위치가 정해졌다). **Word에서 tblInd가 테두리 기준인지
+  글자 기준인지(호환 모드) 실측 필요.**
+  ④ 마크다운 입력의 `2026. 10. 1`이 번호 목록으로 읽혀 날짜가 사라짐 → `parse_markdown`이 날짜 줄만 이스케이프(`_DATE_AS_LIST`).
+  ⑤ 표 열 폭: `tables.equal_columns`(formal) — 같은 성격(값) 열은 폭 동일, 머리가 `note_columns`(비고·이슈·참고·특이사항·의견·코멘트)인 열은 참고 열로
+  표 폭의 `note_column_max`(30%) 이내, 글자 `note_column_size`(10pt), 폭 상한을 넘으면 장평 `note_column_scales`([100%, 90%]) 순서로 줄임(`cell_font`
+  사이드 테이블 재사용). 같게 하면 값 칸이 줄바꿈되거나 병합 열이 있으면 원래 폭 배분으로 돌아간다(`_equalize_columns`가 None). 참고 열 판정은 머리
+  글자가 목록과 같을 때만 — 그 밖의 긴 글 열은 자동 판단하지 않는다(필요하면 `note_columns`에 머리 이름을 추가).
+  ⑥ 좁히기 한도(1pt)로도 두세 글자가 다음 줄로 넘어가는 문장: `text.shorten_to_fit`(formal true) + LLM이 켜져 있으면 LLM이 "최대 N자"로 줄이고(`llm_polish.
+  shorten_sentence`, 한 번에 안 맞으면 2·4자 더 짧게 재시도, 서식이 섞인 문장은 건드리지 않음) 줄인 결과가 한 줄이면 채택 — `--report`에 "표현 줄임: 전 → 후".
+  LLM이 없거나 실패하면 원문 그대로 두고 "두세 글자가 다음 줄로 넘어간 문장 N개(넘친 글자 수)"만 남긴다(`orphan_max` 4자). 이 샌드박스는 LLM이 없어 가짜
+  줄임 함수로만 검증 — **온프렘 LLM 실측 필요**(문장 끝 형태·사실 유지 여부).
 - **진행 상태**: 1단계 probe(서식·형식·문장 통계, 층별 종결·길이, 주석 상자 포함)를 합성 docx로 검증하고 사내 문서 8건으로
   1차 실측했다. 다음: 샘플 리포트로 변환 결과와의 차이 확인 →
   `rules/*.yaml` 검수기(임계값은 실측으로 채움) → 변환 결과 채점기 → 파일럿 후 LLM 단계.

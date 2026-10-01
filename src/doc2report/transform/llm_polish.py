@@ -42,6 +42,12 @@ _SYSTEM = (
     "6. 이미 바른 문장은 그대로 돌려준다.\n"
     "입력은 한 줄에 하나의 문장이며, 같은 개수의 줄로만 답한다. 설명은 쓰지 않는다."
 )
+_SHORTEN_SYSTEM = (
+    "너는 한국 회사의 보고서 교열 담당자다. 주어진 문장을 지정한 글자 수 이내로 줄여라.\n"
+    "지킬 것: 사실·수치·날짜·고유명사·약어는 바꾸지 않는다. 문장 끝 형태(명사형·~함·~음 등)는 원문 그대로 둔다. "
+    "의미가 같은 중복·군더더기·수식어를 빼거나 더 짧은 말로 바꾼다. 없는 내용을 만들지 않는다.\n"
+    "입력은 '최대 N자: 문장' 한 줄이다. 줄인 문장 한 줄만 답한다. 설명은 쓰지 않는다."
+)
 _MAX_DRIFT = 1.6  # 결과가 원문보다 이 배 이상 길어지면 무언가 잘못된 것으로 본다
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
@@ -104,14 +110,23 @@ def _collect(blocks: list[Block], texts: list[str], targets: list) -> None:
             continue  # 표는 보내지 않는다
 
 
-def _ask_llm(texts: list[str]) -> list[str]:
+def shorten_sentence(text: str, max_chars: int) -> str | None:
+    """문장을 max_chars자 이내로 줄여 돌려준다(줄 맞춤에서 두세 글자가 넘치는 문장용). 실패하면 None."""
+    try:
+        lines = _ask_llm([f"최대 {max_chars}자: {text}"], system=_SHORTEN_SYSTEM)
+    except Exception:
+        return None
+    return lines[0].strip() if lines and lines[0].strip() else None
+
+
+def _ask_llm(texts: list[str], system: str = _SYSTEM) -> list[str]:
     base_url = os.environ.get("DOC2REPORT_LLM_BASE_URL")
     if base_url:
-        return _ask_openai_compatible(texts, base_url)
-    return _ask_anthropic(texts)
+        return _ask_openai_compatible(texts, base_url, system)
+    return _ask_anthropic(texts, system)
 
 
-def _ask_openai_compatible(texts: list[str], base_url: str) -> list[str]:
+def _ask_openai_compatible(texts: list[str], base_url: str, system: str = _SYSTEM) -> list[str]:
     """vLLM/Ollama/TGI 등 OpenAI `/chat/completions` 호환 온프렘 엔드포인트용.
 
     사내 Qwen 서빙처럼 인터넷이 닫힌 환경을 겨냥한 경로라 anthropic SDK에
@@ -133,7 +148,7 @@ def _ask_openai_compatible(texts: list[str], base_url: str) -> list[str]:
                     "model": model,
                     "temperature": 0,
                     "messages": [
-                        {"role": "system", "content": _SYSTEM},
+                        {"role": "system", "content": system},
                         {"role": "user", "content": "\n".join(chunk)},
                     ],
                 },
@@ -149,7 +164,7 @@ def _ask_openai_compatible(texts: list[str], base_url: str) -> list[str]:
     return out
 
 
-def _ask_anthropic(texts: list[str]) -> list[str]:
+def _ask_anthropic(texts: list[str], system: str = _SYSTEM) -> list[str]:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY 가 없습니다")
     try:
@@ -163,7 +178,7 @@ def _ask_anthropic(texts: list[str]) -> list[str]:
         message = client.messages.create(
             model=os.environ.get("DOC2REPORT_MODEL", DEFAULT_ANTHROPIC_MODEL),
             max_tokens=4096,
-            system=_SYSTEM,
+            system=system,
             messages=[{"role": "user", "content": "\n".join(chunk)}],
         )
         lines = message.content[0].text.strip().splitlines()

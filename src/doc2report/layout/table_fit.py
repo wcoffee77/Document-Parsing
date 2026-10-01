@@ -73,15 +73,23 @@ def table_indents(doc: Document, profile: Profile) -> dict[int, int]:
     `set_list_indent`로 첫 줄을 거기서 시작한다. 제목·일반 문단은 0. ※ 참고 문단은 윗줄보다 더
     들여 쓴 부속 줄이라 기준으로 삼지 않는다."""
     rules = profile.text
-    notes = tuple(rules.note_marks) if rules.note_indent else ()
+    notes = tuple(rules.note_marks) if (rules.note_indent or rules.note_lead_spaces is not None) else ()
+    boxes = tuple(rules.annotation_markers)  # 주석(*)은 윗줄에 딸린 부속 줄이라 기준으로 삼지 않는다
+    skip = notes + boxes
+    body = profile.font("body")
+    measure = TextMeasurer(body.east_asia, body.latin or body.east_asia, body.size,
+                           bold=bool(body.bold), scale=body.char_scale or 1.0)
     out: dict[int, int] = {}
     start = 0
     for block in doc.blocks:
         if isinstance(block, ListItem):
-            if not (notes and (block.marker or plain(block.runs).lstrip()).startswith(notes)):
-                start = profile.numbering_level(block.depth).indent or 0
+            if not (skip and (block.marker or plain(block.runs).lstrip()).startswith(skip)):
+                level = profile.numbering_level(block.depth)
+                # 말머리 앞 공백(정식보고서)도 첫 줄의 시작점이다 — 표는 □ 말머리 왼쪽 끝에 맞춘다
+                lead = int(measure.width(" " * level.lead_spaces)) if level.lead_spaces else 0
+                start = (level.indent or 0) + lead
         elif isinstance(block, Paragraph):
-            if not (notes and plain(block.runs).lstrip().startswith(notes)):
+            if not (skip and plain(block.runs).lstrip().startswith(skip)):
                 start = 0
         elif isinstance(block, Heading):
             start = 0
@@ -93,6 +101,7 @@ def table_indents(doc: Document, profile: Profile) -> dict[int, int]:
 def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayout:
     layout = _fit_widths(table, profile, available_width)
     _abbreviate_headers(table, profile, layout)
+    _apply_note_column_fonts(table, profile, layout)
     _left_align_long_cells(table, profile, layout)
     _shrink_long_cells(table, profile, layout)
     _unify_column_fonts(table, layout)
@@ -309,6 +318,8 @@ def _try_fit(
         widths = _cap_down(mins, maxs, usable)
     else:
         return None
+    if profile.tables.equal_columns:
+        widths = _equalize_columns(table, profile, widths, mins, maxs, usable, size) or widths
 
     limit = profile.tables.max_cell_lines
     if check_lines and limit and _max_cell_lines(table, profile, size, scale, widths) > limit:
@@ -320,6 +331,93 @@ def _try_fit(
         cell_margin_x=margin,
         char_scale=scale,
     )
+
+
+def note_column_set(table: Table, profile: Profile) -> set[int]:
+    """머리가 tables.note_columns("비고"·"이슈" …)에 든 열 — 값(데이터)이 아니라 참고 사항이 적힌 열."""
+    names = {name.replace(" ", "") for name in profile.tables.note_columns}
+    if not names:
+        return set()
+    cols: set[int] = set()
+    for cell, col, span in iter_grid(table):
+        if cell.is_header and span == 1 and "".join(cell_lines(cell)).replace(" ", "") in names:
+            cols.add(col)
+    return cols
+
+
+def _note_column_plan(table: Table, profile: Profile, cols: set[int], size: int, scale: float,
+                      usable: float) -> tuple[int, float, dict[int, float]]:
+    """참고 열의 (글자 크기, 장평)과 열 폭. 폭 상한(note_column_max)을 넘으면 장평 후보를 차례로 시도한다."""
+    rules = profile.tables
+    note_size = min(rules.note_column_size or size, size)
+    scales = rules.note_column_scales or [scale]
+    chosen = (note_size, scales[0])
+    natural: dict[int, float] = {}
+    for candidate in scales:
+        _, maxs = column_demands(table, profile, note_size, candidate, content_first=True)
+        natural = {c: maxs[c] for c in cols}
+        chosen = (note_size, candidate)
+        if sum(natural.values()) <= rules.note_column_max * usable:
+            break
+    return chosen[0], chosen[1], natural
+
+
+def _equalize_columns(table: Table, profile: Profile, widths: list[float], mins: list[float],
+                      maxs: list[float], usable: float, size: int) -> list[float] | None:
+    """같은 성격(값)의 열은 폭을 같게 하고, 참고 열(비고·이슈)은 표 폭의 일부만 쓴다
+    (2026-10-01 사용자: 구분·목표·실적·달성률은 폭이 같아야 하고, 비고·이슈는 핵심 정보가 아니라
+    표의 30%를 넘기지 않게 글씨를 10pt로 줄이거나 장평을 줄여서). 같게 하면 값 칸이 줄바꿈되거나
+    최소 폭이 안 나오면 None — 원래 폭 배분을 쓴다."""
+    cols = len(widths)
+    notes = note_column_set(table, profile)
+    data = [c for c in range(cols) if c not in notes]
+    if len(data) < 2 and not notes:
+        return None
+    if table.col_count != cols or any(span > 1 for _, _, span in iter_grid(table)):
+        return None  # 병합 열이 있는 표는 열 성격을 가를 수 없다
+
+    note_width = 0.0
+    note_widths: dict[int, float] = {}
+    if notes:
+        _, _, natural = _note_column_plan(table, profile, notes, size, 1.0, usable)
+        note_size, note_scale, _ = _note_column_plan(table, profile, notes, size, 1.0, usable)
+        note_mins, _ = column_demands(table, profile, note_size, note_scale, content_first=True)
+        cap = profile.tables.note_column_max * usable
+        total = sum(natural.values())
+        factor = min(1.0, cap / total) if total else 1.0
+        note_widths = {c: max(natural[c] * factor, 0.0) for c in notes}
+        note_width = sum(note_widths.values())
+        if any(note_widths[c] + 1e-6 < note_mins[c] for c in notes):
+            return None  # 상한 안에서는 어절 하나도 못 넣는다
+    if len(data) < 1:
+        return None
+    equal = (usable - note_width) / len(data)
+    # 같게 해도 값이 한 줄에 들어가야 한다(머리는 어절 하나 폭만)
+    if equal + 1e-6 < max(maxs[c] for c in data):
+        return None
+    result = [equal] * cols
+    for c, w in note_widths.items():
+        result[c] = w
+    return result
+
+
+def _apply_note_column_fonts(table: Table, profile: Profile, layout: TableLayout) -> None:
+    """참고 열의 칸(머리 포함)을 더 작은 글자로 — 표 전체 크기보다 작을 때만."""
+    if not profile.tables.equal_columns:
+        return
+    notes = note_column_set(table, profile)
+    if not notes:
+        return
+    size, scale, _ = _note_column_plan(
+        table, profile, notes, layout.font_size, layout.char_scale,
+        sum(layout.col_widths) - layout.cell_margin_x * 2 * len(layout.col_widths))
+    if size * scale >= layout.font_size * layout.char_scale:
+        return
+    for ri, ci, cell, col, span in _iter_grid_indexed(table):
+        if col in notes and span == 1:
+            layout.cell_font[(ri, ci)] = (size, scale)
+    layout.notes.append(f"참고 열({', '.join(str(c + 1) for c in sorted(notes))}번)은 표 폭의 "
+                        f"{profile.tables.note_column_max:.0%} 이내로, 글자 {fmt_pt(size)}·장평 {scale:.0%}로 줄임")
 
 
 def _fill_up(maxs: list[float], target: float) -> list[float]:

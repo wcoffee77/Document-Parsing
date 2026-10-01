@@ -55,8 +55,9 @@ class RenderResult:
 
 class DocxRenderer:
     def __init__(self, profile: Profile, layouts: dict[int, TableLayout] | None = None,
-                 flow: FlowPlan | None = None):
+                 flow: FlowPlan | None = None, shortener=None):
         self.profile = profile
+        self.shortener = shortener  # (문장, 첫 줄에 들어가는 글자 수) → 줄인 문장. 없으면 줄이지 않는다
         self.layouts = layouts or {}
         self.flow = flow or FlowPlan()
         self.notes: list[str] = list(self.flow.notes)
@@ -74,6 +75,8 @@ class DocxRenderer:
         self._anchor: _Anchor | None = None  # 주석 상자가 붙을 윗줄 문단
         self._last_para = None               # 줄 맞춤으로 나뉜 문단 중 마지막 것
         self._boxes = 0                      # 만든 텍스트 상자 수
+        self._orphans: list[tuple[str, int]] = []      # 두세 글자가 다음 줄로 넘어간 문장 (앞 24자, 넘친 글자 수)
+        self._shortened: list[tuple[str, str]] = []    # LLM이 줄여 한 줄로 만든 문장 (전, 후)
 
     # ── 진입점 ──────────────────────────────────────────────────────────
 
@@ -102,6 +105,13 @@ class DocxRenderer:
                     f"더 나눈 줄이 한 줄에 들어가려면 글자마다 좁혀야 했던 양(pt): 최소 {needs[0]}, 중앙 "
                     f"{needs[len(needs) // 2]}, 최대 {needs[-1]} (n={len(needs)}) — 최대치 안쪽이면 좁히기로 해결됐을 줄, "
                     f"1.0 근처에 몰려 있으면 글꼴 폭 계산이 실제보다 넓다는 뜻")
+        for before, after in self._shortened:
+            self.notes.append(f"표현 줄임(한 줄로 맞추려고 LLM이 줄임): '{before}' → '{after}'")
+        if self._orphans:
+            detail = ", ".join(f"'{head}…' {n}자" for head, n in self._orphans[:8])
+            self.notes.append(
+                f"글자 간격을 최대로 좁혀도 한 줄에 못 넣고 두세 글자가 다음 줄로 넘어간 문장 {len(self._orphans)}개 "
+                f"(표현을 줄이면 한 줄로 쓸 수 있음 — 넘친 글자 수): {detail}")
         return RenderResult(document=self.docx, notes=self.notes)
 
     def _dateline(self, blocks: list[Block]) -> list[Block]:
@@ -173,14 +183,17 @@ class DocxRenderer:
             is_note = container is None and self._is_note(text)
             indent = self._note_indent() if is_note else int(spec.indent or 0)
             plan = self._fit(block.runs, spec, head, indent=indent, hanging=0, container=container)
+            note_gap = self._note_gap(is_note, next_block)
             if plan is not None:
                 paragraph = self._emit_fitted(plan, spec, head=head, indent=indent, hanging=0,
-                                              space=None, before=None, container=container)
+                                              space=note_gap, before=None, container=container)
             else:
                 runs = ([Run(head)] if head else []) + block.runs  # 들여쓰기 기능 대신 공백으로 (정식보고서)
                 paragraph = self._paragraph(runs, spec, container)
                 if is_note:
                     paragraph.paragraph_format.left_indent = Emu(indent)
+                if note_gap is not None:
+                    paragraph.paragraph_format.space_after = Emu(note_gap)
             if container is None and not is_note:
                 self._base_indent = 0
             self._after_table_gap(paragraph, container)
@@ -345,21 +358,36 @@ class DocxRenderer:
             cont_spaces = round((head_w + measure.width(extra)) / space_w) if space_w else 0
             cont_room = usable - indent - cont_spaces * space_w
             cont_indent = indent
-        widths: list[float] = []
-        for run in runs:
-            widths.extend(self._measurer(spec, bool(spec.bold or run.bold)).char_width(c) for c in run.text)
-        lines: list[Line] = []
-        offset = 0
-        segments = 0
-        for segment in text.split("\n"):
-            if segment.strip():
-                segments += 1
-                lines += [Line(offset + line.start, offset + line.end, line.steps, line.need) for line in fit_text(
-                    segment, widths[offset:offset + len(segment)],
-                    first_room=cont_room if lines else first_room, cont_room=cont_room,
-                    max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
-                    margin=rules.fit_margin)]
-            offset += len(segment) + 1
+        def layout(current: list[Run]) -> tuple[str, list[Line], int]:
+            current_text = "".join(run.text for run in current)
+            widths: list[float] = []
+            for run in current:
+                widths.extend(self._measurer(spec, bool(spec.bold or run.bold)).char_width(c) for c in run.text)
+            made: list[Line] = []
+            offset = 0
+            count = 0
+            for segment in current_text.split("\n"):
+                if segment.strip():
+                    count += 1
+                    made += [Line(offset + line.start, offset + line.end, line.steps, line.need) for line in fit_text(
+                        segment, widths[offset:offset + len(segment)],
+                        first_room=cont_room if made else first_room, cont_room=cont_room,
+                        max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
+                        margin=rules.fit_margin, pad=rules.condense_pad or 0)]
+                offset += len(segment) + 1
+            return current_text, made, count
+
+        text, lines, segments = layout(runs)
+        if not hard and len(lines) == 2 and lines[1].end - lines[1].start <= rules.orphan_max:
+            # 좁히기 한도까지 써도 두세 글자가 다음 줄로 넘어간다 — 표현을 줄여 한 줄로 쓰는 것이 가장 좋다
+            # (2026-10-01 사용자). LLM이 있으면 줄이고, 없으면 리포트에 남긴다.
+            orphan = lines[1].end - lines[1].start
+            shortened = self._shorten(runs, text, lines[0].end - lines[0].start, layout) if rules.shorten_to_fit else None
+            if shortened is not None:
+                runs = shortened
+                text, lines, segments = layout(runs)
+            else:
+                self._orphans.append((text.strip()[:24], orphan))
         if not hard and len(lines) <= 1 and not any(line.steps for line in lines):
             return None
         if len(lines) > segments:
@@ -374,6 +402,26 @@ class DocxRenderer:
         return _FitPlan(pieces, cont_spaces, cont_indent,
                         first_hang=0 if hanging else int(head_w + measure.width(extra)),
                         cont_hang=0 if hanging else int(cont_spaces * space_w))
+
+    def _shorten(self, runs: list[Run], text: str, first_chars: int, layout) -> list[Run] | None:
+        """LLM에게 문장을 줄이게 해 한 줄로 들어가면 그 runs를, 아니면 None. 서식이 섞인 문장은 건드리지 않는다."""
+        if self.shortener is None or len({(r.bold, r.italic, r.code, r.href) for r in runs if r.text}) > 1:
+            return None
+        original = text.strip()
+        template = next((r for r in runs if r.text), runs[0])
+        for target in (first_chars, first_chars - 2, first_chars - 4):  # 한 번에 안 맞으면 더 짧게 다시
+            try:
+                candidate = (self.shortener(original, target) or "").strip()
+            except Exception:
+                return None
+            if not candidate or len(candidate) >= len(original) or "\n" in candidate:
+                continue
+            new_runs = [template.copy_with(candidate)]
+            if len(layout(new_runs)[1]) == 1:
+                self._shortened.append((original, candidate))
+                return new_runs
+        self._orphans.append((original[:24], len(original) - first_chars))
+        return None
 
     def _emit_fitted(self, plan: _FitPlan, spec: FontSpec, *, head: str, indent: int, hanging: int,
                      space: int | None, before: int | None, container=None):
@@ -467,19 +515,35 @@ class DocxRenderer:
         return True
 
     def _annotation_gap(self, next_block: Block | None) -> int | None:
+        if self._is_annotation_block(next_block):
+            return 0
+        fixed = self.profile.text.gap_after_annotation
+        if fixed is not None:
+            return fixed  # 단락 앞 대신 주석(윗줄) 뒤에 간격을 둔다 — 다음 항목과 붙어 보이지 않게
         last = self._last_item
         if last is None:
             return None
         level = self.profile.numbering_level(last.depth)
-        if self._is_annotation_block(next_block):
-            return 0
         if isinstance(next_block, ListItem) and next_block.depth == last.depth:
             return level.space_after
         return level.level_change_space(self.flow.relaxed)
 
     def _is_note(self, text: str) -> bool:
         rules = self.profile.text
-        return bool(rules.note_indent and any(text.startswith(m) for m in rules.note_marks))
+        return bool((rules.note_indent or rules.note_lead_spaces is not None)
+                    and any(text.startswith(m) for m in rules.note_marks))
+
+    def _note_gap(self, is_note: bool, next_block: Block | None) -> int | None:
+        """※ 줄 다음에 항목이 이어지면 ※ 줄의 단락 뒤에 간격을 둔다(text.gap_after_note)."""
+        gap = self.profile.text.gap_after_note
+        if not is_note or gap is None or next_block is None or self._is_note_block(next_block):
+            return None
+        return gap
+
+    def _is_note_block(self, block: Block | None) -> bool:
+        if isinstance(block, ListItem):
+            return self._is_note(block.marker or plain(block.runs).lstrip())
+        return isinstance(block, Paragraph) and self._is_note(plain(block.runs).lstrip())
 
     def _note_indent(self) -> int:
         """※ 참고사항: 바로 윗줄 문단의 들여쓰기 + text.note_indent (2026-09-29 사용자: +0.4cm)."""
@@ -517,6 +581,13 @@ class DocxRenderer:
         """단계가 바뀌는 자리(1. → □ → -)에서만 단락 뒤 간격을 준다."""
         if self._is_annotation_block(next_block):
             return 0  # 주석이 윗줄에 딸려 붙는다 — 단계 간격은 주석 줄이 대신 준다
+        rules = self.profile.text
+        note = self._note_gap(self._is_note(block.marker or plain(block.runs).lstrip()), next_block)
+        if note is not None:
+            return note
+        if (rules.gap_after_section is not None and isinstance(next_block, ListItem)
+                and next_block.depth == 0 and block.depth > 0):
+            return rules.gap_after_section  # 새 절(3.) 앞 간격은 단락 앞이 아니라 윗줄 뒤로
         same_level = isinstance(next_block, ListItem) and next_block.depth == block.depth
         if same_level:
             return level.space_after
@@ -633,7 +704,7 @@ class DocxRenderer:
 
         target = container if container is not None else self.docx
         table = target.add_table(rows=rows, cols=cols)
-        oxml.set_fixed_layout(table, layout.total_width, self.profile.tables.align)
+        oxml.set_fixed_layout(table, layout.total_width, self.profile.tables.align, layout.indent)
         oxml.set_table_borders(table, self.profile.tables)
         oxml.set_cell_margins(table, layout.cell_margin_x, self.profile.tables.cell_margin_y)
         oxml.set_grid(table, layout.col_widths)

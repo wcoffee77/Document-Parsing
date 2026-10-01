@@ -240,7 +240,7 @@ def _set_shd(shd, fill: str) -> None:
 # ── 표 ──────────────────────────────────────────────────────────────────
 
 
-def set_fixed_layout(table, total_width: int, align: str) -> None:
+def set_fixed_layout(table, total_width: int, align: str, indent: int = 0) -> None:
     """Word의 자동 맞춤을 끄고 계산한 폭을 못 박는다."""
     table.autofit = False
     tbl_pr = table._tbl.tblPr
@@ -251,6 +251,11 @@ def set_fixed_layout(table, total_width: int, align: str) -> None:
     value = _TABLE_JC.get((align or "center").lower())
     if value:
         _ordered(tbl_pr, "w:jc").set(qn("w:val"), value)
+    if indent and (align or "").lower() == "left":
+        # 왼쪽 정렬 표의 시작점 — 표 바로 윗줄 문장의 왼쪽 끝에 맞춘다(2026-10-01 사용자)
+        ind = _ordered(tbl_pr, "w:tblInd")
+        ind.set(qn("w:w"), str(emu_to_dxa(indent)))
+        ind.set(qn("w:type"), "dxa")
 
 
 def set_table_borders(table, rules: TableRules) -> None:

@@ -76,13 +76,13 @@ def test_annotation_keeps_level_gaps_of_the_line_above(rendered):
     by_text = {p.text.strip(): p for p in rendered}
     above, note = by_text["- 세부 내용"], by_text["* 최근 평가 상위 이상, 영어회화 2급 이상"]
     assert above.paragraph_format.space_after == Emu(0)                       # 주석이 윗줄에 붙는다
-    assert note.paragraph_format.space_after == prof.numbering[2].space_after_level_change  # - → □ 간격
+    assert note.paragraph_format.space_after == prof.text.gap_after_annotation == Pt(18)  # 주석 뒤 18pt (단락 뒤)
 
 
 def test_note_mark_uses_spaces_and_body_size(rendered):
     note = next(p for p in rendered if "참고 사항" in p.text)
     assert note.text == "    ※ 참고 사항"
-    assert all(r.font.size in (None, Pt(14)) for r in note.runs)               # 본문보다 작게 안 함
+    assert all(r.font.size == Pt(12) for r in note.runs if r.text.strip())   # ※는 주 문장이 아니라 본문(14pt)보다 2pt 작게
 
 
 def test_web_preset_keeps_format_text_values():

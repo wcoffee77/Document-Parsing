@@ -8,6 +8,7 @@
 - 줄은 어절(공백) 경계에서만 나눈다. 한 어절이 한 줄보다 길면 글자 단위로 끊는다.
 - 한 줄이 넘치는 양을 글자 수로 나눈 값이 `max_condense` 이하면 나누지 않고 좁힌다
   (좁히는 양은 `step`의 배수로 올림). 그보다 넘치면 앞 어절까지만 한 줄로 쓴다.
+- 좁히는 양에는 `pad`만큼 여유를 더한다(최대치 이하에서). 계산상 맞아도 Word는 한 줄에 못 넣는 일이 있다.
 - `margin`만큼 폭을 덜 쓴다 — 글꼴 폭 측정이 Word와 조금 달라도 Word가 다시 줄을 바꾸지 않게.
 """
 
@@ -26,7 +27,8 @@ class Line:
 
 
 def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: float,
-             max_condense: float = 0.0, step: float = 0.0, margin: float = 0.0) -> list[Line]:
+             max_condense: float = 0.0, step: float = 0.0, margin: float = 0.0,
+             pad: float = 0.0) -> list[Line]:
     """text를 줄로 나눈다. widths[i]는 text[i]의 폭, room은 글자가 쓸 수 있는 줄 폭(같은 단위)."""
     lines: list[Line] = []
     n = len(text)
@@ -51,7 +53,10 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             if overflow <= 1e-6:
                 best = Line(pos, j)
             elif max_condense > 0 and step > 0 and overflow <= max_condense * count:
-                best = Line(pos, j, max(1, math.ceil(overflow / count / step - 1e-9)))
+                steps = max(1, math.ceil(overflow / count / step - 1e-9))
+                if pad > 0:  # 계산 오차 대비 여유 — 단, 최대치는 넘기지 않는다
+                    steps = min(steps + math.ceil(pad / step - 1e-9), int(max_condense / step + 1e-9))
+                best = Line(pos, j, steps)
             else:
                 need = overflow / count
                 break

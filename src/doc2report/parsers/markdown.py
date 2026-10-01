@@ -35,8 +35,13 @@ _KIND_BY_KEYWORD = {
 }
 
 
+_DATE_AS_LIST = re.compile(r"(?m)^(\d{4})\.(\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?[ \t]*)$")
+
+
 def parse_markdown(text: str, *, source: str | None = None) -> Document:
     md = MarkdownIt("commonmark").enable(["table", "strikethrough"])
+    # "2026. 10. 1" 같은 날짜 줄은 Markdown에서 번호 목록(2026번)으로 읽혀 날짜가 사라진다 — 글자 그대로 두게 이스케이프
+    text = _DATE_AS_LIST.sub(r"\1\\.\2", text)
     tokens = md.parse(text)
     blocks = _blocks(tokens, depth=0)
     title = None

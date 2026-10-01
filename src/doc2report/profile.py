@@ -210,8 +210,15 @@ class TableRules(_Base):
     space_after: int | None = None  # 표 바로 다음 문단에 최소한 확보할 앞 간격
     row_height: int | None = None  # 행 최소 높이
     row_height_relaxed: int | None = None  # 지면에 여유가 있을 때의 행 최소 높이
+    equal_columns: bool = False
+    # true: 같은 성격(값)의 열은 폭을 같게 한다 — 정식보고서 표(2026-10-01 사용자: 구분·목표·실적·달성률 폭 동일).
+    #       참고 열(note_columns)은 데이터가 아니라 비중을 작게 둔다.
+    note_columns: list[str] = Field(default_factory=list)  # 머리가 이 말이면 참고 열(비고·이슈 …)
+    note_column_size: int | None = None  # 참고 열 글자 크기(본문 칸·머리 모두). 표 크기보다 클 때는 안 쓴다
+    note_column_scales: list[float] = Field(default_factory=list)  # 참고 열 장평 후보(큰 것부터) — 폭 상한을 넘으면 다음 후보
+    note_column_max: float = 0.3  # 참고 열 전체가 표 폭에서 차지할 수 있는 최대 비율
 
-    @field_validator("border_width", "cell_margin_x", "cell_margin_y",
+    @field_validator("border_width", "cell_margin_x", "cell_margin_y", "note_column_size",
                      "cell_margin_x_min", "space_after", "max_font_spread", mode="before")
     @classmethod
     def _len(cls, v: Any) -> Any:
@@ -234,12 +241,12 @@ class TableRules(_Base):
             return []
         return [parse_length(x, default_unit="pt") for x in v]
 
-    @field_validator("char_scale_ladder", mode="before")
+    @field_validator("char_scale_ladder", "note_column_scales", mode="before")
     @classmethod
     def _scales(cls, v: Any) -> Any:
         return [] if v is None else [parse_ratio(x) for x in v]
 
-    @field_validator("safety_margin", "width_ratio", mode="before")
+    @field_validator("safety_margin", "width_ratio", "note_column_max", mode="before")
     @classmethod
     def _ratio(cls, v: Any) -> Any:
         return parse_ratio(v)
@@ -317,11 +324,26 @@ class TextRules(_Base):
     condense_max: int | None = None   # 글자 간격을 좁히는 최대치 (0.5pt)
     condense_step: int | None = None  # 좁히는 단위 (0.1pt)
     fit_margin: float = 0.0           # 줄 폭을 이만큼 덜 쓴다(글꼴 측정 오차 대비)
+    condense_pad: int | None = None
+    # 좁힐 양을 계산값보다 이만큼 더 준다(상한은 condense_max). 계산상 0.9pt면 되는 줄을 Word는 1.0pt여야
+    # 한 줄에 넣는 일이 있다(2026-10-01 사용자 실측) — 글꼴 폭 계산 오차를 흡수한다.
+    shorten_to_fit: bool = False
+    # true + LLM이 켜져 있으면, 좁히기 한도까지 써도 두세 글자가 다음 줄로 넘어가는 문장은 LLM에게 표현을 줄여
+    #       한 줄로 쓰게 한다(2026-10-01 사용자). LLM이 없으면 --report에 그 문장이 몇 글자 넘치는지만 남긴다.
+    orphan_max: int = 4
+    # 이 글자 수 이하가 마지막 줄에 홀로 남으면 "두세 글자 내려쓴 줄"로 본다.
+    gap_after_annotation: int | None = None
+    gap_after_note: int | None = None
+    gap_after_section: int | None = None
+    # 단락 앞 간격 대신 **윗줄의 단락 뒤 간격**으로 띄운다(2026-10-01 사용자: "가급적 단락 앞은 쓰지 말고 단락 뒤").
+    #   annotation: 주석(*) 다음에 항목이 이어질 때 · note: ※ 줄 다음에 항목이 이어질 때 ·
+    #   section: 마지막 하위 항목 다음에 새 절(0단계 "3.")이 시작할 때.
     fit_bold_factor: float | None = None
     # 줄 맞춤에서 굵은 글자 폭 = 보통 글자 폭 × 이 값. 비우면 표 맞춤과 같은 기본 보정을 쓴다. 굵은 줄이 너무 일찍
     # 나뉘면(원본은 한 줄에 쓴 줄) 1.0으로 낮춘다 — 값은 probe의 "줄 폭 사용률"(굵은 글자·보통 글자)로 정한다.
 
-    @field_validator("condense_max", "condense_step", mode="before")
+    @field_validator("condense_max", "condense_step", "condense_pad", "gap_after_annotation",
+                     "gap_after_note", "gap_after_section", mode="before")
     @classmethod
     def _condense(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
@@ -350,7 +372,8 @@ class TextRules(_Base):
 FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
-                      "fit_bold_factor")
+                      "fit_bold_factor", "condense_pad", "shorten_to_fit", "orphan_max",
+                      "gap_after_annotation", "gap_after_note", "gap_after_section")
 
 
 def with_format_text(rules: TextRules, preset: TextRules) -> TextRules:
@@ -596,6 +619,8 @@ def dump_profile(profile: Profile) -> str:
     text["note_size_delta"] = _pt(text["note_size_delta"])  # EMU 그대로 쓰면 다시 읽을 때 또 변환된다
     text["condense_max"] = _pt(text["condense_max"])
     text["condense_step"] = _pt(text["condense_step"])
+    for key in ("condense_pad", "gap_after_annotation", "gap_after_note", "gap_after_section"):
+        text[key] = _pt(text[key])
     text["fit_margin"] = _pct(text["fit_margin"]) if text["fit_margin"] else None
     text["fit_bold_factor"] = _pct(text["fit_bold_factor"])
     data["text"] = _strip(text)
@@ -651,4 +676,7 @@ def _dump_tables(rules: TableRules) -> dict:
     data["font_ladder"] = [_pt(step) for step in rules.font_ladder]
     data["char_scale_ladder"] = [_pct(step) for step in rules.char_scale_ladder]
     data["safety_margin"] = _pct(rules.safety_margin)
+    data["note_column_size"] = _pt(rules.note_column_size)
+    data["note_column_scales"] = [_pct(step) for step in rules.note_column_scales]
+    data["note_column_max"] = _pct(rules.note_column_max)
     return _strip(data)

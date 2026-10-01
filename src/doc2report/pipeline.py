@@ -275,7 +275,12 @@ def convert_document(
         changes.extend(Change(before, after, "표 머리 축약")
                        for before, after in layout.header_text.values())
     flow = plan_flow(doc, prof, layouts)
-    renderer = DocxRenderer(prof, layouts, flow)
+    shortener = None
+    if use_llm and prof.text.shorten_to_fit:
+        from .transform.llm_polish import shorten_sentence
+
+        shortener = shorten_sentence
+    renderer = DocxRenderer(prof, layouts, flow, shortener=shortener)
 
     notes = list(notes or [])
     if output is None:

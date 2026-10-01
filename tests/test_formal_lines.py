@@ -174,7 +174,7 @@ def test_star_right_after_a_table_is_still_a_blue_annotation(tmp_path):
     run = star.runs[-1]
     assert run.font.size == Pt(10) and run.font.color.rgb == RGBColor(0, 0, 255)
     note = paragraphs["※ 표 아래 참고"]
-    assert note.runs[-1].font.size in (None, Pt(14)) and not (
+    assert note.runs[-1].font.size == Pt(12) and not (
         note.runs[-1].font.color and note.runs[-1].font.color.type and
         note.runs[-1].font.color.rgb == RGBColor(0, 0, 255))
 
