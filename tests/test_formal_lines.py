@@ -326,3 +326,43 @@ def test_fit_text_reports_how_much_narrowing_the_break_would_have_needed():
     lines = fit_text(text, widths(text), first_room=62, cont_room=62, max_condense=0.5, step=0.25)
     assert [text[l.start:l.end] for l in lines] == ["가나다 라마바", "사아자"]
     assert lines[0].need > 0.5 and lines[1].need == 0.0                  # 첫 줄: 다음 어절을 넣으려면 0.5pt보다 더 좁혀야 했다
+
+
+# ── 2026-10-01 4차: 1pt까지 좁히기, Word가 줄을 또 바꿔도 맞도록 ─────────────
+
+def test_two_characters_over_the_line_are_narrowed_within_one_point(tmp_path, fake_fonts):
+    prof = load_profile("formal")
+    assert (prof.text.condense_max, prof.text.fit_bold_factor) == (12700, 1.0) and prof.text.fit_margin == 0.002
+    size = prof.font("body").size
+    head = 5 * size / 2                                         # "  □ " = 반각 5칸
+    room = (prof.page.usable_width - head) * (1 - prof.text.fit_margin)
+    count = int(room / size) + 2                                # 한 줄에 들어가는 글자 수보다 두 글자 많게
+    paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
+                                    Paragraph(runs=[Run("□ " + "가" * count)])])
+    items = [p for p in paragraphs if "가" in p.text]
+    assert len(items) == 1                                      # 두세 글자 남기고 내려쓰지 않는다
+    values = [int(r._r.rPr.find(f"{_W_NS}spacing").get(f"{_W_NS}val")) for r in items[0].runs
+              if r._r.rPr is not None and r._r.rPr.find(f"{_W_NS}spacing") is not None]
+    assert values and all(-20 <= v <= -2 for v in values)       # 0.1~1pt (1/20pt 단위)
+
+
+def test_wrapped_lines_carry_a_hanging_indent_so_word_rewrap_still_aligns(tmp_path, fake_fonts):
+    from docx.shared import Emu
+
+    long = " ".join(["가나다라마바사아"] * 12)
+    paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
+                                    Paragraph(runs=[Run("□ " + long)])])
+    items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")]
+    size = load_profile("formal").font("body").size
+    head = 5 * size // 2                                        # 첫 줄 접두 "  □ " = 반각 5칸
+    first, second = items[0].paragraph_format, items[1].paragraph_format
+    assert abs(first.left_indent - head) < 700 and abs(first.first_line_indent + head) < 700
+    assert abs(second.left_indent - head) < 700 and abs(second.first_line_indent + head) < 700   # 공백 5칸 폭
+
+
+def test_bold_widen_knob_changes_the_measured_width():
+    from doc2report.layout.measure import TextMeasurer
+
+    plain = TextMeasurer("바탕체", "바탕체", 177800).width("가나다")
+    assert TextMeasurer("바탕체", "바탕체", 177800, bold=True).width("가나다") == pytest.approx(plain * 1.04)
+    assert TextMeasurer("바탕체", "바탕체", 177800, bold=True, bold_widen=1.0).width("가나다") == pytest.approx(plain)

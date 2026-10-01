@@ -317,11 +317,19 @@ class TextRules(_Base):
     condense_max: int | None = None   # 글자 간격을 좁히는 최대치 (0.5pt)
     condense_step: int | None = None  # 좁히는 단위 (0.1pt)
     fit_margin: float = 0.0           # 줄 폭을 이만큼 덜 쓴다(글꼴 측정 오차 대비)
+    fit_bold_factor: float | None = None
+    # 줄 맞춤에서 굵은 글자 폭 = 보통 글자 폭 × 이 값. 비우면 표 맞춤과 같은 기본 보정을 쓴다. 굵은 줄이 너무 일찍
+    # 나뉘면(원본은 한 줄에 쓴 줄) 1.0으로 낮춘다 — 값은 probe의 "줄 폭 사용률"(굵은 글자·보통 글자)로 정한다.
 
     @field_validator("condense_max", "condense_step", mode="before")
     @classmethod
     def _condense(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
+
+    @field_validator("fit_bold_factor", mode="before")
+    @classmethod
+    def _bold_factor(cls, v: Any) -> Any:
+        return None if v is None else parse_ratio(v)
 
     @field_validator("fit_margin", mode="before")
     @classmethod
@@ -341,7 +349,8 @@ class TextRules(_Base):
 
 FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
-                      "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin")
+                      "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
+                      "fit_bold_factor")
 
 
 def with_format_text(rules: TextRules, preset: TextRules) -> TextRules:
@@ -588,6 +597,7 @@ def dump_profile(profile: Profile) -> str:
     text["condense_max"] = _pt(text["condense_max"])
     text["condense_step"] = _pt(text["condense_step"])
     text["fit_margin"] = _pct(text["fit_margin"]) if text["fit_margin"] else None
+    text["fit_bold_factor"] = _pct(text["fit_bold_factor"])
     data["text"] = _strip(text)
     choices = _strip(profile.choices.model_dump())
     if choices:

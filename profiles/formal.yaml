@@ -96,5 +96,6 @@ text:
   fit_lines: true
   condense_max: 1pt          # 글자 간격을 좁히는 최대치 (2026-10-01 사용자: 1pt까지)
   condense_step: 0.1pt
-  fit_margin: 0.5%           # 글꼴 폭 계산 오차 대비 여유. 크면 원본처럼 꽉 채운 줄(0.5pt 좁힘)이 나뉘어 버린다
+  fit_margin: 0.2%           # 글꼴 폭 계산 오차 대비 여유. 크면 원본처럼 꽉 채운 줄이 나뉘어 버린다(1pt 한도의 8%를 0.5%가 먹음)
+  fit_bold_factor: 100%      # 굵은 글자 폭 = 보통 글자 폭 × 이 값. 잠정(굵은 □ 줄이 두세 글자 남기고 일찍 나뉨) — probe 실측으로 확정
   annotation_box: true       # 주석은 텍스트 상자(원본과 같음). 못 만들면 일반 문단 주석으로

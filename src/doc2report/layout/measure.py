@@ -221,13 +221,14 @@ class TextMeasurer:
     """한 서식(동아시아 글꼴 + 라틴 글꼴 + 크기)에서의 폭 계산기."""
 
     def __init__(self, east_asia: str, latin: str, size_emu: int, bold: bool = False,
-                 scale: float = 1.0):
+                 scale: float = 1.0, bold_widen: float | None = None):
         self.ea = get_metrics(east_asia)
         self.latin = get_metrics(latin)
         self.size = size_emu
         # 굵은 글씨는 같은 크기라도 조금 넓다. 별도 파일을 찾지 않고 보정만 한다.
         # 장평(scale)은 글자 폭에만 곱해진다 (Word의 w:w와 같은 방식).
-        self.bold_factor = (1.04 if bold else 1.0) * scale
+        # bold_widen: 굵은 글자가 보통 글자보다 얼마나 넓은지(1.0 = 같음). 안 주면 표 맞춤용 기본 보정(1.04).
+        self.bold_factor = ((1.04 if bold_widen is None else bold_widen) if bold else 1.0) * scale
 
     @property
     def font_available(self) -> bool:

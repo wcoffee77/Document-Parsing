@@ -312,7 +312,7 @@ class DocxRenderer:
 
     def _measurer(self, spec: FontSpec, bold: bool) -> TextMeasurer:
         return TextMeasurer(spec.east_asia, spec.latin or spec.east_asia, spec.size, bold=bold,
-                            scale=spec.char_scale or 1.0)
+                            scale=spec.char_scale or 1.0, bold_widen=self.profile.text.fit_bold_factor)
 
     def _fit(self, runs: list[Run], spec: FontSpec, head: str, *, indent: int, hanging: int,
              container=None, extra: str = ""):
@@ -369,7 +369,11 @@ class DocxRenderer:
         self._fit_condensed += sum(1 for line in lines if line.steps)
         pieces = [(_slice_runs(runs, line.start, line.end),
                    emu_to_dxa(line.steps * (rules.condense_step or 0))) for line in lines]
-        return _FitPlan(pieces, cont_spaces, cont_indent)
+        # 글꼴 폭 계산이 Word와 달라 Word가 줄을 한 번 더 바꾸더라도 윗줄 글자에 맞도록, 접두(공백+말머리) 폭만큼
+        # 내어쓰기를 같이 준다. 줄이 맞게 들어가면 눈에 안 보인다.
+        return _FitPlan(pieces, cont_spaces, cont_indent,
+                        first_hang=0 if hanging else int(head_w + measure.width(extra)),
+                        cont_hang=0 if hanging else int(cont_spaces * space_w))
 
     def _emit_fitted(self, plan: _FitPlan, spec: FontSpec, *, head: str, indent: int, hanging: int,
                      space: int | None, before: int | None, container=None):
@@ -382,13 +386,13 @@ class DocxRenderer:
             fmt = paragraph.paragraph_format
             if i == 0:
                 first = paragraph
-                oxml.set_list_indent(paragraph, indent, hanging)
+                oxml.set_list_indent(paragraph, indent, hanging or plan.first_hang)
                 if before:
                     fmt.space_before = Emu(before)
                 if head:
                     oxml.apply_run_format(paragraph.add_run(head), spec)
             else:
-                oxml.set_list_indent(paragraph, plan.cont_indent, 0)
+                oxml.set_list_indent(paragraph, plan.cont_indent, plan.cont_hang)
                 fmt.space_before = Emu(0)
                 if plan.cont_spaces:
                     oxml.apply_run_format(paragraph.add_run(" " * plan.cont_spaces), spec)
@@ -790,6 +794,8 @@ class _FitPlan:
     pieces: list[tuple[list[Run], int]]   # (줄의 runs, 좁힌 양 1/20pt)
     cont_spaces: int                      # 둘째 줄부터 앞에 칠 공백 수
     cont_indent: int                      # 둘째 줄부터 문단 왼쪽 들여쓰기
+    first_hang: int = 0                   # 첫 줄 접두 폭 — Word가 스스로 줄을 바꿀 때 이어지는 줄이 맞을 자리
+    cont_hang: int = 0                    # 둘째 줄부터의 접두(공백) 폭
 
 
 def _slice_runs(runs: list[Run], start: int, end: int) -> list[Run]:
