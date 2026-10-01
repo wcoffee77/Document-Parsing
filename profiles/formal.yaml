@@ -82,17 +82,19 @@ tables:
   header_shading: null       # 정식보고서 표는 음영 없음 (실측: 직접 음영 0건)
 
 text:
+  polish: none               # 정식보고서는 문구를 고치지 않는다 — 개조식·문장 분리는 줄바꿈이 낀 문장을 쪼개 ","를 "."로 바꾸고
+                             # 이어진 줄을 새 항목으로 만든다(2026-10-01 사용자). 초안을 개조식으로 바꾸려면 --polish rules
   note_size_delta: 0pt       # ※는 본문과 같은 크기 (실측 14pt)
   note_indent: 0mm           # ※ 들여쓰기는 공백으로 (note_lead_spaces)
   note_lead_spaces: 4
-  annotation_markers: ["*", "(주석)"]   # "(주석) 설명"으로 쳐도 "* 설명"으로 통일해 파란 10pt로 쓴다
+  annotation_markers: ["*", "＊", "∗", "(주석)"]   # 전각 별표나 "(주석) 설명"으로 쳐도 "* 설명"으로 통일해 파란 10pt로 쓴다
   annotation_mark: "*"
   annotation_lead_spaces: 4
   level_bold_original: true  # 서식을 다 없앤 글(txt)도 1.·□ 문장은 굵게 (실측: □ 전부 굵게 39%·앞부분 36%)
   # 줄 맞춤 — 정식보고서는 줄이 길면 엔터로 나누고 왼쪽 끝을 윗줄 글자에 맞추며, 아슬아슬하게 넘치면
   # 글자 간격을 0.1~0.5pt 좁혀 줄 바뀜을 막는다(2026-10-01 사용자 — "아주 많음").
   fit_lines: true
-  condense_max: 0.5pt
+  condense_max: 1pt          # 글자 간격을 좁히는 최대치 (2026-10-01 사용자: 1pt까지)
   condense_step: 0.1pt
   fit_margin: 0.5%           # 글꼴 폭 계산 오차 대비 여유. 크면 원본처럼 꽉 채운 줄(0.5pt 좁힘)이 나뉘어 버린다
   annotation_box: true       # 주석은 텍스트 상자(원본과 같음). 못 만들면 일반 문단 주석으로

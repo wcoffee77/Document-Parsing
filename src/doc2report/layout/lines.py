@@ -22,6 +22,7 @@ class Line:
     start: int          # 글자 목록 안 시작 위치
     end: int            # 끝 위치(미포함, 뒤쪽 공백 제외)
     steps: int = 0      # 글자 간격을 step의 몇 배만큼 좁혔는지(0 = 안 좁힘)
+    need: float = 0.0   # 다음 어절까지 한 줄에 넣으려면 글자마다 좁혀야 했던 양(0 = 어절이 남지 않았거나 끊은 이유가 다름)
 
 
 def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: float,
@@ -37,6 +38,7 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             break
         room = max((cont_room if lines else first_room) * (1.0 - margin), min(widths[pos:pos + 1] or [1.0]))
         best: Line | None = None
+        need = 0.0
         total = 0.0
         j = pos
         while j < n:
@@ -51,7 +53,10 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             elif max_condense > 0 and step > 0 and overflow <= max_condense * count:
                 best = Line(pos, j, max(1, math.ceil(overflow / count / step - 1e-9)))
             else:
+                need = overflow / count
                 break
+        if best is not None and need:
+            best = Line(best.start, best.end, best.steps, need)
         if best is None:  # 첫 어절부터 한 줄에 안 들어간다 — 글자 단위로 끊는다
             end, total = pos, 0.0
             while end < n and (end == pos or total + widths[end] <= room):

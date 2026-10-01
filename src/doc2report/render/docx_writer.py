@@ -30,7 +30,7 @@ from ..ir import (
     plain,
 )
 from ..layout.flow import FlowPlan
-from ..layout.lines import fit_text
+from ..layout.lines import Line, fit_text
 from ..layout.measure import TextMeasurer
 from ..layout.table_fit import TableLayout, plan_tables
 from ..profile import FontSpec, Profile
@@ -69,6 +69,7 @@ class DocxRenderer:
         self._last_item: ListItem | None = None  # 주석 줄의 단계 간격을 윗줄 기준으로 잡기 위해
         self._fit_wrapped = 0    # 엔터로 줄을 나눈 문장 수
         self._fit_condensed = 0  # 글자 간격을 좁힌 줄 수
+        self._fit_needs: list[float] = []  # 우리가 더 나눈 줄에서 "한 줄에 넣으려면 필요했던 좁힘"(pt/글자)
         self._fit_warned = False
         self._anchor: _Anchor | None = None  # 주석 상자가 붙을 윗줄 문단
         self._last_para = None               # 줄 맞춤으로 나뉜 문단 중 마지막 것
@@ -93,8 +94,14 @@ class DocxRenderer:
             self.notes.append(f"주석 {self._boxes}개를 텍스트 상자로 넣음 (윗줄 아래에 띄움 — Word에서 위치 확인)")
         if self._fit_wrapped or self._fit_condensed:
             self.notes.append(
-                f"줄 맞춤: {self._fit_wrapped}개 문장은 엔터로 줄을 나누고 왼쪽 끝을 윗줄에 맞춤, "
+                f"줄 맞춤: 원문의 줄바꿈 말고 {self._fit_wrapped}개 문장을 더 나눔(이어지는 줄은 윗줄 글자에 맞춤), "
                 f"{self._fit_condensed}개 줄은 글자 간격을 좁혀 한 줄로 맞춤 (글꼴 폭 계산 기준 — Word에서 확인)")
+            if self._fit_needs:
+                needs = sorted(self._fit_needs)
+                self.notes.append(
+                    f"더 나눈 줄이 한 줄에 들어가려면 글자마다 좁혀야 했던 양(pt): 최소 {needs[0]}, 중앙 "
+                    f"{needs[len(needs) // 2]}, 최대 {needs[-1]} (n={len(needs)}) — 최대치 안쪽이면 좁히기로 해결됐을 줄, "
+                    f"1.0 근처에 몰려 있으면 글꼴 폭 계산이 실제보다 넓다는 뜻")
         return RenderResult(document=self.docx, notes=self.notes)
 
     def _dateline(self, blocks: list[Block]) -> list[Block]:
@@ -318,8 +325,9 @@ class DocxRenderer:
         if not rules.fit_lines or container is not None:
             return None
         text = "".join(run.text for run in runs)
-        if not text.strip() or "\n" in text or "\t" in text:
+        if not text.strip() or "\t" in text:
             return None
+        hard = "\n" in text  # 글쓴이가 엔터로 나눈 줄 — 그 자리를 지키고 이어지는 줄을 윗줄 글자에 맞춘다
         measure = self._measurer(spec, bool(spec.bold))
         if not measure.font_available:
             if not self._fit_warned:
@@ -340,13 +348,24 @@ class DocxRenderer:
         widths: list[float] = []
         for run in runs:
             widths.extend(self._measurer(spec, bool(spec.bold or run.bold)).char_width(c) for c in run.text)
-        lines = fit_text(text, widths, first_room=first_room, cont_room=cont_room,
-                         max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
-                         margin=rules.fit_margin)
-        if len(lines) <= 1 and not any(line.steps for line in lines):
+        lines: list[Line] = []
+        offset = 0
+        segments = 0
+        for segment in text.split("\n"):
+            if segment.strip():
+                segments += 1
+                lines += [Line(offset + line.start, offset + line.end, line.steps, line.need) for line in fit_text(
+                    segment, widths[offset:offset + len(segment)],
+                    first_room=cont_room if lines else first_room, cont_room=cont_room,
+                    max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
+                    margin=rules.fit_margin)]
+            offset += len(segment) + 1
+        if not hard and len(lines) <= 1 and not any(line.steps for line in lines):
             return None
-        if len(lines) > 1:
-            self._fit_wrapped += 1
+        if len(lines) > segments:
+            self._fit_wrapped += 1  # 글쓴이의 줄바꿈 말고 우리가 더 나눈 문장
+            # 어디서 나눴는지 가늠하려고, 한 줄에 넣으려면 글자마다 얼마나 좁혀야 했는지(pt)를 모아 둔다(글자는 안 남김)
+            self._fit_needs += [round(line.need / 12700, 2) for line in lines if line.need]
         self._fit_condensed += sum(1 for line in lines if line.steps)
         pieces = [(_slice_runs(runs, line.start, line.end),
                    emu_to_dxa(line.steps * (rules.condense_step or 0))) for line in lines]
@@ -424,7 +443,7 @@ class DocxRenderer:
             return False
         measure = self._measurer(spec, bool(spec.bold))
         line = measure.line_height(spec.line_spacing or 1.0) if measure.font_available else None
-        text = "".join(run.text for run in block.runs).strip()
+        text = " ".join("".join(run.text for run in block.runs).split("\n")).strip()
         if line is None or not text:
             return False
         room = self.profile.page.usable_width - anchor.x
@@ -433,7 +452,7 @@ class DocxRenderer:
         widths = [measure.char_width(c) for c in text]
         lines = fit_text(text, widths, first_room=room, cont_room=room, margin=rules.fit_margin)
         height = int(line * len(lines))
-        runs = [(run.text, bool(run.bold)) for run in block.runs if run.text]
+        runs = [(run.text.replace("\n", " "), bool(run.bold)) for run in block.runs if run.text]
         runs[0] = (runs[0][0].lstrip(), runs[0][1])
         self._boxes += 1
         oxml.add_text_box(anchor.paragraph, runs=runs, spec=spec, x=anchor.x, y=anchor.line + anchor.used,

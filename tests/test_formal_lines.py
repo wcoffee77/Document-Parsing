@@ -246,3 +246,83 @@ def test_wrapped_txt_lines_become_one_bold_sentence_aligned_under_text(tmp_path,
     assert len(lines) >= 2 and lines[0].text.startswith("  □ ") and lines[1].text.startswith(" " * 5)
     assert not any(l.text.lstrip().startswith("□") for l in lines[1:])        # 새 말머리가 붙지 않는다
     assert all(r.bold for l in lines for r in l.runs if r.text.strip())      # 둘째 줄도 굵게
+
+
+# ── 2026-10-01 사용자 실사용 2차 보고 재현 ────────────────────────────
+
+def _convert_txt(tmp_path, text, profile="formal", **kw):
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "r.txt"
+    src.write_text(text, encoding="utf-8")
+    out = tmp_path / "r.docx"
+    result = convert(str(src), out, profile, **kw)
+    return OpenDocx(str(out)).paragraphs, result
+
+
+def test_hard_line_breaks_are_kept_and_continuations_align_and_stay_bold(tmp_path, fake_fonts):
+    paragraphs, _ = _convert_txt(tmp_path, (
+        "1. 추진 배경\n"
+        "□ 핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하며,\n"
+        "평가 결과를 공정하게 반영하고,\n"
+        "성과 연계를 강화함\n"
+        "- 짧은 항목\n"
+        "내려쓴 짧은 줄\n"
+        "□ 다음 항목\n"))
+    texts = [p.text for p in paragraphs]
+    assert texts == ["1. 추진 배경",
+                     "  □ 핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하며,",
+                     " " * 5 + "평가 결과를 공정하게 반영하고,",           # 쉼표로 끝나도 "."로 안 바뀌고 윗줄 글자에 맞춘다
+                     " " * 5 + "성과 연계를 강화함",                        # 셋째 줄도 같은 위치
+                     "    - 짧은 항목",
+                     " " * 6 + "내려쓴 짧은 줄",                             # 윗줄이 짧아도 이어짐
+                     "  □ 다음 항목"]
+    bold = [all(r.bold for r in p.runs if r.text.strip()) for p in paragraphs]
+    assert bold[1:4] == [True, True, True] and bold[4:6] == [False, False]  # □ 문장은 모든 줄이 굵게, - 는 안 굵게
+
+
+def test_formal_does_not_rewrite_the_text_by_default(tmp_path, fake_fonts):
+    assert load_profile("formal").text.polish == "none"
+    long = "기준을 마련하여 인사 운영 체계를 개선하고 평가 결과를 공정하게 반영하며 성과 연계를 강화하고,"  # 60자 넘는 문장
+    paragraphs, result = _convert_txt(tmp_path, f"1. 추진 배경\n□ {long}\n다음 줄 내용\n")
+    joined = "".join(p.text.strip() for p in paragraphs[1:])
+    assert long.replace(" ", "") in joined.replace(" ", "") and "다음줄내용" in joined.replace(" ", "")
+    assert "." not in joined and not result.changes
+
+
+def test_star_variants_are_all_annotations_even_after_a_long_line(tmp_path, fake_fonts):
+    paragraphs, result = _convert_txt(tmp_path, (
+        "1. 추진 배경\n"
+        "□ 핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하고 평가 결과를 공정하게 반영함\n"
+        "*공백 없는 별표 주석\n"
+        "＊전각 별표 주석\n"
+        "* 일반 별표 주석\n"))
+    body = [p.text for p in paragraphs]
+    assert not any("주석" in t for t in body)                                   # 셋 다 본문이 아니라 텍스트 상자
+    holders = [p for p in paragraphs if list(p._p.iter(f"{_V_NS}shape"))]
+    assert len(holders) == 1 and len(list(holders[0]._p.iter(f"{_V_NS}shape"))) == 3   # 윗줄(마지막 줄)에 세 개
+    boxes = "".join(holders[0]._p.itertext())
+    assert all(k in boxes for k in ("공백 없는 별표 주석", "전각 별표 주석", "일반 별표 주석"))
+    assert "* 전각 별표 주석" in boxes                                           # 표시는 "*"로 통일
+
+
+def test_condense_budget_is_one_point(tmp_path):
+    assert load_profile("formal").text.condense_max == 12700
+
+
+def test_non_fitting_profiles_still_join_hard_breaks(tmp_path):
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "d.txt"
+    src.write_text("1. 추진 배경\n□ 핵심인력 선정 기준을 마련하며\n평가를 반영함\n", encoding="utf-8")
+    out = tmp_path / "d.docx"
+    convert(str(src), out, "default", polish="none")
+    texts = [p.text for p in OpenDocx(str(out)).paragraphs]
+    assert any("핵심인력 선정 기준을 마련하며 평가를 반영함" in t for t in texts)   # 줄 맞춤이 꺼진 서식은 예전처럼 한 문장
+
+
+def test_fit_text_reports_how_much_narrowing_the_break_would_have_needed():
+    text = "가나다 라마바 사아자"
+    lines = fit_text(text, widths(text), first_room=62, cont_room=62, max_condense=0.5, step=0.25)
+    assert [text[l.start:l.end] for l in lines] == ["가나다 라마바", "사아자"]
+    assert lines[0].need > 0.5 and lines[1].need == 0.0                  # 첫 줄: 다음 어절을 넣으려면 0.5pt보다 더 좁혀야 했다

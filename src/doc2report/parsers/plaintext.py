@@ -43,32 +43,40 @@ def _mark_title(lines: list[str]) -> None:
         lines[first] = "# " + title
 
 
-_WRAPPED_MIN = 24  # 말머리 줄이 이만큼 길면 "한 줄에 못 담아 내려쓴" 줄로 본다(짧은 소제목 줄 뒤의 설명 문단과 구분)
 _NUMBERED_HEADING = re.compile(r"^(?:\d{1,2}[.)]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][.)]?)\s")
+_SENTENCE_END = re.compile(r"(?<!\d)[.!?]$")
 
 
 @functools.lru_cache(maxsize=1)
 def _marker_rules():
-    """말머리·꺾쇠 문자는 프로파일(default)의 text 값을 쓴다 — 코드에 문자를 굳히지 않는다."""
+    """말머리·꺾쇠·주석 표시 문자는 프로파일 값을 쓴다 — 코드에 문자를 굳히지 않는다."""
     from ..profile import load_profile
     from ..transform.structure import _find_marker, _marker_pattern
 
     rules = load_profile("default").text
-    return _marker_pattern(rules.leading_markers), _find_marker, tuple(rules.no_marker_openers) + ("(", "（")
+    notes: tuple[str, ...] = ()
+    try:
+        notes = tuple(load_profile("formal").text.annotation_markers)  # "*" "＊" "(주석)" — 글쓴이가 친 주석 표시
+    except FileNotFoundError:
+        pass
+    return (_marker_pattern(rules.leading_markers), _find_marker,
+            tuple(rules.no_marker_openers) + ("(", "（"), notes)
 
 
 def _join_wrapped(lines: list[str]) -> list[str]:
-    """한 문장이 길어 **글쓴이가 엔터로 내려쓴 줄**을 윗줄에 이어 붙인다.
+    """말머리 줄 바로 아래의 **말머리 없는 줄**을 윗줄에 딸린 줄로 묶는다 — 엔터 위치는 그대로 둔다.
 
-    정식보고서를 서식 없는 txt로 옮기면 "- 문장1"과 내려쓴 "문장2"가 따로 줄이 된다 — 그대로 두면 둘째 줄이
-    새 항목(말머리가 붙고 단계·굵기가 어긋남)이 된다. 말머리 줄 **바로 아래**(빈 줄 없이) 말머리·날짜·꺾쇠·
-    괄호 없이 시작하는 줄이 오고, 윗줄이 줄 하나를 꽉 채울 만큼 길거나(`_WRAPPED_MIN`자) 이 줄이 공백 두 칸
-    이상으로 들여써졌으면 한 문장의 이어짐으로 본다. 합친 문장은 줄 맞춤이 다시 나눈다."""
-    pattern, find, stops = _marker_rules()
+    정식보고서에서 한 문장이 길어 글쓴이가 엔터로 내려쓴 줄은 txt에서 독립된 줄이 된다. 그대로 두면 새 항목
+    (말머리가 붙고 굵기·정렬이 어긋남)이 된다. 그렇다고 한 줄로 합쳐 다시 나누면 글쓴이의 줄바꿈과 어긋난다
+    (2026-10-01 사용자: 뒤죽박죽). 그래서 Markdown **강제 줄바꿈**(줄 끝 공백 두 칸)으로 같은 문단에 묶어
+    렌더러가 그 줄바꿈 자리에서 윗줄 글자에 맞춰 이어 쓰게 한다.
+
+    묶는 조건: 윗줄이 말머리 줄(번호 제목 "1." 제외)이고 마침표·물음표로 끝나지 않으며, 이 줄은 말머리·날짜·꺾쇠·
+    괄호·주석 표시로 시작하지 않을 때. 이어지는 줄이 여러 개여도 계속 묶는다(쉼표로 끝나는 줄 다음 줄 포함)."""
+    pattern, find, openers, notes = _marker_rules()
     out: list[str] = []
     in_fence = False
-    joinable = False  # 바로 윗줄이 이어 붙일 수 있는 말머리 줄인가
-    last = 0          # 윗줄(마지막 물리 줄)의 글자 수
+    joinable = False  # 바로 윗줄이 이어 받을 수 있는 말머리 줄(또는 그 이어짐)인가
     for line in lines:
         if _FENCE.match(line):
             in_fence = not in_fence
@@ -80,16 +88,15 @@ def _join_wrapped(lines: list[str]) -> list[str]:
             out.append(line)
             joinable = False
             continue
-        marked = bool(_MD_LIST.match(stripped)) or find([Run(stripped)], pattern) is not None
-        indented = len(line) - len(line.lstrip(" \u3000")) >= 2
-        if (joinable and not marked and not stripped.startswith(stops) and not DATE_LINE.match(stripped)
-                and (last >= _WRAPPED_MIN or indented)):
-            out[-1] = out[-1].rstrip() + " " + stripped
-            last = len(stripped)
+        listed = _MD_LIST.match(stripped)
+        is_marker = (listed is not None and not listed.group(2)[0].isdigit()) or stripped.startswith(notes) \
+            or find([Run(stripped)], pattern) is not None   # 말머리 줄 (날짜 "2026. 9. 1"은 아니다)
+        starts_new = bool(listed) or is_marker or stripped.startswith(openers) or bool(DATE_LINE.match(stripped))
+        if joinable and not starts_new and not _SENTENCE_END.search(out[-1].rstrip()):
+            out[-1] = out[-1].rstrip() + "  \n" + stripped
             continue
         out.append(line)
-        joinable = marked and not _NUMBERED_HEADING.match(stripped)
-        last = len(stripped)
+        joinable = is_marker and not _NUMBERED_HEADING.match(stripped)
     return out
 
 

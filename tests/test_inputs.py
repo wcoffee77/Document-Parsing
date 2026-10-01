@@ -85,14 +85,19 @@ def test_pasted_lines_become_paragraphs_and_keep_typed_markers():
     assert all(isinstance(b, Paragraph) for b in doc.blocks)  # 목록 문법으로 먹히지 않음
 
 
-def test_wrapped_line_is_joined_to_the_marker_line_above():
-    """원문에서 글쓴이가 엔터로 내려쓴 줄 — 말머리 줄 바로 아래에 이어지면 한 문장이다."""
-    long = "핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하고 평가 결과를"
-    md = text_to_markdown(f"1. 추진 배경\n□ {long}\n공정하게 반영함\n- 짧은 항목\n다음 설명\n"
-                          f"- {long}\n    들여쓴 이어짐\n(주석) 괄호로 시작\n")
+def test_wrapped_line_stays_attached_to_the_marker_line_with_its_line_break():
+    """원문에서 글쓴이가 엔터로 내려쓴 줄 — 말머리 줄 바로 아래에 이어지면 한 문장의 다음 줄이다(엔터 위치 보존)."""
+    long = "핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하며,"
+    md = text_to_markdown(f"1. 추진 배경\n□ {long}\n평가 결과를 공정하게 반영하고,\n성과 연계를 강화함\n"
+                          f"- 짧은 항목\n다음 설명\n- 문장.\n마침표 뒤 줄\n*별표\n＊전각 별표\n(주석) 괄호\n"
+                          f"2026. 9. 29\n날짜 다음 줄\n")
     texts = [plain(b.runs) for b in parse_markdown(md).blocks]
-    assert texts == ["1. 추진 배경", f"□ {long} 공정하게 반영함", "- 짧은 항목", "다음 설명",
-                     f"- {long} 들여쓴 이어짐", "(주석) 괄호로 시작"]
+    assert texts == ["1. 추진 배경",
+                     f"□ {long}\n평가 결과를 공정하게 반영하고,\n성과 연계를 강화함",   # 쉼표로 끝나는 줄 다음 줄도 이어진다
+                     "- 짧은 항목\n다음 설명",                                     # 줄이 짧아도 이어진다
+                     "- 문장.", "마침표 뒤 줄",                                    # 마침표로 끝난 줄 다음은 새 문단
+                     "*별표", "＊전각 별표", "(주석) 괄호",                          # 주석 표시는 윗줄에 안 붙는다
+                     "2026. 9. 29", "날짜 다음 줄"]                               # 날짜는 말머리 줄이 아니다
 
 
 def test_tab_separated_lines_become_a_table():

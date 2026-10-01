@@ -24,6 +24,7 @@ from .transform.structure import (
     fold_headings_into_levels,
     merge_short_list_items,
     normalize_annotations,
+    soften_hard_breaks,
 )
 
 
@@ -224,6 +225,10 @@ def convert_document(
         _insert_dateline(doc, date, prof)
 
     doc, changes = drop_blank_blocks(doc)  # 안 그러면 접을 때 "□"만 덜렁 찍힌 줄이 된다
+    if not (prof.text.fit_lines and polish == "none" and not use_llm):
+        # 글쓴이가 엔터로 나눈 줄바꿈은 줄 맞춤이 켜졌고 문구를 안 고칠 때만 살린다. 문구 다듬기(문장 분리·개조식)는
+        # 줄바꿈이 낀 문장을 쪼개 이어진 줄을 새 항목으로 만들어 버린다(2026-10-01 사용자: ","가 "."로 바뀌고 종결).
+        doc = soften_hard_breaks(doc)
     doc, title_changes = clean_page_titles(doc, prof.text.page_title_strip)
     changes.extend(title_changes)
     if polish != "none":

@@ -266,7 +266,9 @@ def _inline(token: Token) -> tuple[list[Run], list[Image]]:
             images.append(Image(src=child.attrGet("src") or "",
                                 caption=(child.content or None)))
         elif ty in ("softbreak", "hardbreak"):
-            runs.append(Run(" ", bold=bool(bold), italic=bool(italic), href=href))
+            # 강제 줄바꿈("\n")은 글쓴이가 엔터로 줄을 나눈 자리 — 줄 맞춤이 켜진 서식만 살리고 나머지는
+            # pipeline이 공백으로 바꾼다(soften_hard_breaks).
+            runs.append(Run("\n" if ty == "hardbreak" else " ", bold=bool(bold), italic=bool(italic), href=href))
 
     return _merge_runs(runs), images
 

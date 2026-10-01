@@ -22,6 +22,7 @@ Confluence에서 내려받은 문서는 제목·항목에 이미 "1. 추진 배�
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from ..ir import (DATE_LINE, Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table,
                   invisible_codes, is_blank, plain)
@@ -134,6 +135,29 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                   for b in blocks]
 
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def soften_hard_breaks(doc: Document) -> Document:
+    """강제 줄바꿈("\n")을 공백으로 — 줄 맞춤이 꺼진 서식은 예전처럼 한 문장으로 이어 쓴다."""
+    def runs_of(runs: list[Run]) -> list[Run]:
+        return [r.copy_with(r.text.replace("\n", " ")) if "\n" in r.text else r for r in runs]
+
+    def block_of(block: Block) -> Block:
+        if isinstance(block, Heading):
+            return Heading(level=block.level, runs=runs_of(block.runs), section_title=block.section_title,
+                           page_title=block.page_title)
+        if isinstance(block, Paragraph):
+            return Paragraph(runs=runs_of(block.runs), align=block.align)
+        if isinstance(block, ListItem):
+            return replace(block, runs=runs_of(block.runs))
+        if isinstance(block, Callout):
+            return Callout(kind=block.kind, blocks=[block_of(b) for b in block.blocks])
+        return block
+
+    if not any("\n" in r.text for b in doc.blocks if isinstance(b, (Heading, Paragraph, ListItem, Callout))
+               for r in (b.runs if hasattr(b, "runs") else [])):
+        return doc
+    return Document(blocks=[block_of(b) for b in doc.blocks], title=doc.title, source=doc.source)
 
 
 def normalize_annotations(doc: Document, markers: list[str], mark: str) -> tuple[Document, list[Change]]:
