@@ -14,9 +14,10 @@ Markdown 표로 바꿔 준다(첫 줄 = 머리행).
 
 from __future__ import annotations
 
+import functools
 import re
 
-from ..ir import DATE_LINE
+from ..ir import DATE_LINE, Run
 
 _TITLE_STOP = ("□", "■", "○", "●", "※", "(", "[", "【", "〈", "ㅁ")
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
@@ -42,12 +43,63 @@ def _mark_title(lines: list[str]) -> None:
         lines[first] = "# " + title
 
 
+_WRAPPED_MIN = 24  # 말머리 줄이 이만큼 길면 "한 줄에 못 담아 내려쓴" 줄로 본다(짧은 소제목 줄 뒤의 설명 문단과 구분)
+_NUMBERED_HEADING = re.compile(r"^(?:\d{1,2}[.)]|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][.)]?)\s")
+
+
+@functools.lru_cache(maxsize=1)
+def _marker_rules():
+    """말머리·꺾쇠 문자는 프로파일(default)의 text 값을 쓴다 — 코드에 문자를 굳히지 않는다."""
+    from ..profile import load_profile
+    from ..transform.structure import _find_marker, _marker_pattern
+
+    rules = load_profile("default").text
+    return _marker_pattern(rules.leading_markers), _find_marker, tuple(rules.no_marker_openers) + ("(", "（")
+
+
+def _join_wrapped(lines: list[str]) -> list[str]:
+    """한 문장이 길어 **글쓴이가 엔터로 내려쓴 줄**을 윗줄에 이어 붙인다.
+
+    정식보고서를 서식 없는 txt로 옮기면 "- 문장1"과 내려쓴 "문장2"가 따로 줄이 된다 — 그대로 두면 둘째 줄이
+    새 항목(말머리가 붙고 단계·굵기가 어긋남)이 된다. 말머리 줄 **바로 아래**(빈 줄 없이) 말머리·날짜·꺾쇠·
+    괄호 없이 시작하는 줄이 오고, 윗줄이 줄 하나를 꽉 채울 만큼 길거나(`_WRAPPED_MIN`자) 이 줄이 공백 두 칸
+    이상으로 들여써졌으면 한 문장의 이어짐으로 본다. 합친 문장은 줄 맞춤이 다시 나눈다."""
+    pattern, find, stops = _marker_rules()
+    out: list[str] = []
+    in_fence = False
+    joinable = False  # 바로 윗줄이 이어 붙일 수 있는 말머리 줄인가
+    last = 0          # 윗줄(마지막 물리 줄)의 글자 수
+    for line in lines:
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            out.append(line)
+            joinable = False
+            continue
+        stripped = line.strip()
+        if in_fence or not stripped or "\t" in line or _TABLE_ROW.match(line):
+            out.append(line)
+            joinable = False
+            continue
+        marked = bool(_MD_LIST.match(stripped)) or find([Run(stripped)], pattern) is not None
+        indented = len(line) - len(line.lstrip(" \u3000")) >= 2
+        if (joinable and not marked and not stripped.startswith(stops) and not DATE_LINE.match(stripped)
+                and (last >= _WRAPPED_MIN or indented)):
+            out[-1] = out[-1].rstrip() + " " + stripped
+            last = len(stripped)
+            continue
+        out.append(line)
+        joinable = marked and not _NUMBERED_HEADING.match(stripped)
+        last = len(stripped)
+    return out
+
+
 def text_to_markdown(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if looks_like_markdown(text):
         return text
     lines = text.split("\n")
     _mark_title(lines)
+    lines = _join_wrapped(lines)
     out: list[str] = []
     in_fence = False
     i = 0

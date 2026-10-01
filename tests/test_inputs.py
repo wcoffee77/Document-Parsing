@@ -79,10 +79,20 @@ def test_docx_source_is_detected_by_extension(word_file):
 
 
 def test_pasted_lines_become_paragraphs_and_keep_typed_markers():
-    doc = parse_markdown(text_to_markdown("1. 추진 배경\n□ 채용 현황\n- 입사 확정\n    들여쓴 줄"))
+    doc = parse_markdown(text_to_markdown("1. 추진 배경\n□ 채용 현황\n- 입사 확정\n\n    들여쓴 줄"))
     texts = [plain(b.runs) for b in doc.blocks]
     assert texts == ["1. 추진 배경", "□ 채용 현황", "- 입사 확정", "들여쓴 줄"]
     assert all(isinstance(b, Paragraph) for b in doc.blocks)  # 목록 문법으로 먹히지 않음
+
+
+def test_wrapped_line_is_joined_to_the_marker_line_above():
+    """원문에서 글쓴이가 엔터로 내려쓴 줄 — 말머리 줄 바로 아래에 이어지면 한 문장이다."""
+    long = "핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하고 평가 결과를"
+    md = text_to_markdown(f"1. 추진 배경\n□ {long}\n공정하게 반영함\n- 짧은 항목\n다음 설명\n"
+                          f"- {long}\n    들여쓴 이어짐\n(주석) 괄호로 시작\n")
+    texts = [plain(b.runs) for b in parse_markdown(md).blocks]
+    assert texts == ["1. 추진 배경", f"□ {long} 공정하게 반영함", "- 짧은 항목", "다음 설명",
+                     f"- {long} 들여쓴 이어짐", "(주석) 괄호로 시작"]
 
 
 def test_tab_separated_lines_become_a_table():

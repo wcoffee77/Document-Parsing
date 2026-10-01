@@ -145,6 +145,7 @@ class FontMetrics:
         self._hmtx = None
         self._upem = 1000
         self._cache: dict[str, float] = {}
+        self.line_em: float | None = None  # 한 줄 높이(em) — Word의 단일 줄간격 기준
         self.loaded = False
         path = _find_font_file(name)
         if path is None:
@@ -158,6 +159,7 @@ class FontMetrics:
             self._hmtx = font["hmtx"]
             self._upem = font["head"].unitsPerEm or 1000
             self._font = font
+            self.line_em = _line_em(font, self._upem)
             self.loaded = True
         except Exception:
             self.loaded = False
@@ -182,6 +184,21 @@ class FontMetrics:
 
     def text_em(self, text: str) -> float:
         return sum(self.char_em(c) for c in text)
+
+
+def _line_em(font, upem: int) -> float | None:
+    """글꼴 파일의 줄 높이(em). Word·GDI는 OS/2 win 메트릭을 쓰고, 없으면 hhea."""
+    try:
+        os2 = font["OS/2"]
+        if os2.usWinAscent + os2.usWinDescent > 0:
+            return (os2.usWinAscent + os2.usWinDescent) / upem
+    except Exception:
+        pass
+    try:
+        hhea = font["hhea"]
+        return (hhea.ascent - hhea.descent + hhea.lineGap) / upem
+    except Exception:
+        return None
 
 
 def _fallback_em(ch: str) -> float:
@@ -219,6 +236,11 @@ class TextMeasurer:
     def char_width(self, ch: str) -> float:
         metrics = self.ea if is_wide(ch) else self.latin
         return metrics.char_em(ch) * self.size * self.bold_factor
+
+    def line_height(self, multiplier: float = 1.0) -> float | None:
+        """한 줄의 높이(EMU) = 글꼴 줄 높이 × 크기 × 줄간격 배수. 글꼴을 못 읽으면 None."""
+        em = self.ea.line_em
+        return None if em is None else em * self.size * multiplier
 
     def width(self, text: str) -> float:
         """문자열을 한 줄로 썼을 때의 폭(EMU)."""

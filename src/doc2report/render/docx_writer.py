@@ -70,6 +70,9 @@ class DocxRenderer:
         self._fit_wrapped = 0    # 엔터로 줄을 나눈 문장 수
         self._fit_condensed = 0  # 글자 간격을 좁힌 줄 수
         self._fit_warned = False
+        self._anchor: _Anchor | None = None  # 주석 상자가 붙을 윗줄 문단
+        self._last_para = None               # 줄 맞춤으로 나뉜 문단 중 마지막 것
+        self._boxes = 0                      # 만든 텍스트 상자 수
 
     # ── 진입점 ──────────────────────────────────────────────────────────
 
@@ -86,6 +89,8 @@ class DocxRenderer:
 
         blocks = self._dateline(doc.blocks)
         self._blocks(blocks)
+        if self._boxes:
+            self.notes.append(f"주석 {self._boxes}개를 텍스트 상자로 넣음 (윗줄 아래에 띄움 — Word에서 위치 확인)")
         if self._fit_wrapped or self._fit_condensed:
             self.notes.append(
                 f"줄 맞춤: {self._fit_wrapped}개 문장은 엔터로 줄을 나누고 왼쪽 끝을 윗줄에 맞춤, "
@@ -143,6 +148,8 @@ class DocxRenderer:
                 self._previous = block
 
     def _block(self, block: Block, container=None, next_block: Block | None = None) -> None:
+        if container is None and not isinstance(block, (ListItem, Paragraph)):
+            self._anchor = None  # 표·제목·그림 뒤의 주석은 붙일 윗줄이 없다
         if isinstance(block, Heading):
             self._after_table_gap(self._heading(block, container), container)
         elif isinstance(block, Paragraph):
@@ -170,6 +177,7 @@ class DocxRenderer:
             if container is None and not is_note:
                 self._base_indent = 0
             self._after_table_gap(paragraph, container)
+            self._set_anchor(self._last_paragraph(paragraph), spec, head, container)
         elif isinstance(block, ListItem):
             self._list_item(block, container, next_block)
         elif isinstance(block, Table):
@@ -258,8 +266,9 @@ class DocxRenderer:
 
         plan = self._fit(block.runs, spec, head, indent=indent, hanging=hanging or 0, container=container)
         if plan is not None:
-            self._emit_fitted(plan, spec, head=head, indent=indent, hanging=hanging or 0,
-                              space=space, before=before, container=container)
+            first = self._emit_fitted(plan, spec, head=head, indent=indent, hanging=hanging or 0,
+                                      space=space, before=before, container=container)
+            self._set_anchor(self._last_para, spec, head, container)
             return
 
         paragraph = self._new_paragraph(container)
@@ -273,6 +282,24 @@ class DocxRenderer:
             run = paragraph.add_run(head)
             oxml.apply_run_format(run, spec)
         self._runs(paragraph, block.runs, spec)
+        self._set_anchor(paragraph, spec, head, container)
+
+    def _last_paragraph(self, paragraph):
+        """줄 맞춤으로 문단이 여러 개로 나뉘었으면 마지막 것(주석 상자는 마지막 줄 아래에 붙는다)."""
+        return self._last_para if self._last_para is not None else paragraph
+
+    def _set_anchor(self, paragraph, spec: FontSpec, head: str, container) -> None:
+        """윗줄 문단과 그 높이·글자 시작 위치를 기억해 둔다 — 뒤따르는 `*` 주석이 텍스트 상자로 붙는다."""
+        self._last_para = None
+        if container is not None or not self.profile.text.annotation_box:
+            return
+        measure = self._measurer(spec, bool(spec.bold))
+        height = measure.line_height(spec.line_spacing or 1.0) if measure.font_available else None
+        if height is None:
+            self._anchor = None
+            return
+        after = paragraph.paragraph_format.space_after
+        self._anchor = _Anchor(paragraph, int(height), int(measure.width(head)), int(after or 0))
 
     # ── 줄 맞춤 (정식보고서: 엔터로 줄 나눔 + 글자 간격 좁히기) ────────────
 
@@ -348,6 +375,7 @@ class DocxRenderer:
                     oxml.apply_run_format(paragraph.add_run(" " * plan.cont_spaces), spec)
             self._runs(paragraph, line_runs, spec, condense=condense)
             if last:
+                self._last_para = paragraph
                 if space is not None:
                     fmt.space_after = Emu(space)
             else:
@@ -373,6 +401,8 @@ class DocxRenderer:
         """"* 설명" 주석 — 윗줄에 딸린 파란 작은 글씨 문단. 단계가 바뀌는 간격은 주석이 아니라 윗줄 기준이다."""
         rules = self.profile.text
         spec = self.profile.font("annotation")
+        if self._annotation_box(block, spec, next_block):
+            return
         head = " " * rules.annotation_lead_spaces
         indent = int(spec.indent or 0)
         gap = self._annotation_gap(next_block)
@@ -385,6 +415,33 @@ class DocxRenderer:
             if gap is not None:
                 paragraph.paragraph_format.space_after = Emu(gap)
         self._after_table_gap(paragraph, None)
+
+    def _annotation_box(self, block: Paragraph, spec: FontSpec, next_block: Block | None) -> bool:
+        """주석을 윗줄 바로 아래의 텍스트 상자로 띄운다. 못 만들면 False — 일반 문단 주석으로 쓴다."""
+        rules = self.profile.text
+        anchor = self._anchor
+        if not rules.annotation_box or anchor is None:
+            return False
+        measure = self._measurer(spec, bool(spec.bold))
+        line = measure.line_height(spec.line_spacing or 1.0) if measure.font_available else None
+        text = "".join(run.text for run in block.runs).strip()
+        if line is None or not text:
+            return False
+        room = self.profile.page.usable_width - anchor.x
+        if room <= 0:
+            return False
+        widths = [measure.char_width(c) for c in text]
+        lines = fit_text(text, widths, first_room=room, cont_room=room, margin=rules.fit_margin)
+        height = int(line * len(lines))
+        runs = [(run.text, bool(run.bold)) for run in block.runs if run.text]
+        runs[0] = (runs[0][0].lstrip(), runs[0][1])
+        self._boxes += 1
+        oxml.add_text_box(anchor.paragraph, runs=runs, spec=spec, x=anchor.x, y=anchor.line + anchor.used,
+                          width=int(room), height=height, number=self._boxes)
+        anchor.used += height
+        gap = self._annotation_gap(next_block)
+        anchor.paragraph.paragraph_format.space_after = Emu(anchor.after + anchor.used + int(gap or 0))
+        return True
 
     def _annotation_gap(self, next_block: Block | None) -> int | None:
         last = self._last_item
@@ -698,6 +755,15 @@ class DocxRenderer:
     def _paragraphs(self, container=None):
         target = container if container is not None else self.docx
         return target.paragraphs
+
+
+@dataclass
+class _Anchor:
+    paragraph: object   # 주석 상자가 붙을 윗줄 문단(docx)
+    line: int           # 그 문단의 한 줄 높이(EMU) — 상자는 이 아래에 놓인다
+    x: int              # 윗줄 글자가 시작하는 위치(본문 왼쪽 끝에서, EMU)
+    after: int          # 문단 원래의 단락 뒤 간격
+    used: int = 0       # 이미 붙인 상자들의 높이 합
 
 
 @dataclass

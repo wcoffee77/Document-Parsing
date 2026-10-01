@@ -139,6 +139,16 @@ def to_markdown(s: dict) -> str:
         f"- 목차 있는 문서 {st['toc_docs']}건, 텍스트 상자가 있는 문서 {st['textbox_docs']}건 "
         f"(문서당 {_fmt(st['textboxes_per_doc'])}), 쪽 나눔 {_fmt(st['page_breaks_per_doc'])}, "
         f"제목 스타일을 쓴 문서 {st['heading_style_docs']}건"]])
+    ft = s["fitting"]
+    fit_rows = [[f"- 본문 문단 {ft['paragraphs']}개 중 글자 간격을 바꾼 문단 {ft['spaced_share']}"],
+                _dist_rows("글자 간격(pt, 음수=좁힘)", ft["spacing_pt"]),
+                ["- 한 줄에 쓴 문단의 줄 폭 사용률(글자 폭 / 줄 폭; 1.0 = 꽉 참, 굵은 글자도 보통 글자 폭으로 잰 값)"]
+                + [f"  - {k}: {_fmt(v)}" for k, v in ft["width_ratio"].items()],
+                [f"- 말머리 줄 바로 아래 말머리 없는 줄 {ft['unmarked_after_marker']}개 중 "
+                 f"앞 공백으로 시작한 줄(내려쓴 줄) {ft['continuation_like']}개"],
+                _dist_rows("내려쓴 줄의 앞 공백 수", ft["continuation_spaces"]),
+                _dist_rows("윗줄 말머리", ft["continuation_after"])]
+    lines += _section("줄 맞춤 (줄 폭 사용률·글자 간격·내려쓴 줄)", fit_rows)
     cs = s["charset"]
     lines += _section("글자 구성·기호", [
         [f"- 글자 비중: {cs['share']}",

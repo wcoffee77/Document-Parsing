@@ -11,7 +11,8 @@ docx 스키마를 아는 코드는 이 파일에만 둔다.
 from __future__ import annotations
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls, qn
 from docx.oxml.shared import OxmlElement
 from docx.shared import Emu, Pt, RGBColor
 
@@ -127,6 +128,51 @@ def apply_run_format(run, spec: FontSpec) -> None:
         # 장평 — python-docx API에 없다. 값은 백분율 정수(90 = 90%).
         scale = _ordered(run._element.get_or_add_rPr(), "w:w")
         scale.set(qn("w:val"), str(int(round(spec.char_scale * 100))))
+
+
+_VML_NS = ('xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" '
+           'xmlns:w10="urn:schemas-microsoft-com:office:word"')
+_SHAPETYPE = ('<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe">'
+              '<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>')
+
+
+def add_text_box(paragraph, *, runs: list[tuple[str, bool]], spec: FontSpec, x: int, y: int,
+                 width: int, height: int, number: int) -> None:
+    """윗줄(paragraph)에 붙은 **글자 앞** 텍스트 상자 — 정식보고서의 주석(2026-10-01 사용자).
+
+    VML(Word 2007부터 읽고 저장 때 새 형식으로 바꾼다)로 쓴다. 테두리·배경색 없음, 안쪽 여백 0.
+    x는 본문 왼쪽 끝에서, y는 윗줄 문단 맨 위에서 상자 맨 위·왼쪽까지의 거리(EMU).
+    runs = [(글자, 굵게)]. 같은 문서의 두 번째 상자부터는 도형 형식 정의를 다시 넣지 않는다."""
+    from xml.sax.saxutils import escape
+
+    def pt(value: int) -> str:
+        return f"{emu_to_pt(value):.2f}pt"
+
+    run_xml = ""
+    for text, bold in runs:
+        props = ""
+        if spec.east_asia or spec.latin:
+            props += (f'<w:rFonts w:ascii="{spec.latin or spec.east_asia}" w:hAnsi="{spec.latin or spec.east_asia}" '
+                      f'w:eastAsia="{spec.east_asia or spec.latin}"/>')
+        if bold or spec.bold:
+            props += "<w:b/>"
+        if spec.color:
+            props += f'<w:color w:val="{spec.color.lstrip("#").upper()}"/>'
+        if spec.size:
+            half = int(round(emu_to_pt(spec.size) * 2))
+            props += f'<w:sz w:val="{half}"/><w:szCs w:val="{half}"/>'
+        run_xml += (f'<w:r><w:rPr>{props}</w:rPr><w:t xml:space="preserve">{escape(text)}</w:t></w:r>')
+    line = int(round((spec.line_spacing or 1.0) * 240))
+    body = (f'<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="{line}" w:lineRule="auto"/>'
+            f'<w:jc w:val="left"/></w:pPr>{run_xml}</w:p>')
+    shape = (f'<v:shape id="TextBox{number}" o:spid="_x0000_s{1025 + number}" type="#_x0000_t202" '
+             f'style="position:absolute;margin-left:{pt(x)};margin-top:{pt(y)};width:{pt(width)};'
+             f'height:{pt(height)};z-index:{251658240 + number};mso-position-horizontal-relative:margin;'
+             f'mso-position-vertical-relative:text" filled="f" stroked="f">'
+             f'<v:textbox inset="0,0,0,0"><w:txbxContent>{body}</w:txbxContent></v:textbox>'
+             f'<w10:wrap type="none"/></v:shape>')
+    holder = parse_xml(f'<w:r {nsdecls("w")} {_VML_NS}><w:pict>{_SHAPETYPE if number == 1 else ""}{shape}</w:pict></w:r>')
+    paragraph._p.append(holder)
 
 
 def set_char_spacing(run, twips: int) -> None:

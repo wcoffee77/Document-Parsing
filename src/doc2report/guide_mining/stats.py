@@ -56,6 +56,7 @@ def summarize(probes: list[DocProbe], *, phrases: bool = True) -> dict:
         "table_cells": _table_cells(probes),
         "phrases": _phrases(probes) if phrases else None,
         "charset": _charset(probes),
+        "fitting": _fitting(probes),
     }
 
 
@@ -490,6 +491,41 @@ def _phrases(probes) -> dict:
                 latin.setdefault(word, set()).add(p.doc_id)
     return {"section_titles": repeated(titles, 25), "table_terms": repeated(terms, 30),
             "latin_terms": repeated(latin, 20)}
+
+
+def _fitting(probes) -> dict:
+    """줄 맞춤 실측 — 원본이 줄을 얼마나 꽉 채우고, 글자 간격을 얼마나·얼마나 자주 좁히는가, 내려쓴 줄은 어떤 모양인가."""
+    body = [x for p in probes for x in _body_items(p)]
+    spaced = [x for x in body if x.fmt.spacing_twips]
+    groups = {"보통 글자·간격 그대로": [], "보통 글자·좁힘": [], "굵은 글자·간격 그대로": [], "굵은 글자·좁힘": []}
+    for x in body:
+        if x.width_ratio is None or not 0.5 <= x.width_ratio <= 1.12:  # 한 줄에 쓴 문단만(여러 줄은 1을 훨씬 넘는다)
+            continue
+        bold = x.bold_pattern == "all"
+        narrowed = bool(x.fmt.spacing_twips and x.fmt.spacing_twips < 0)
+        groups[f"{'굵은' if bold else '보통'} 글자·{'좁힘' if narrowed else '간격 그대로'}"].append(x.width_ratio)
+    # 내려쓴 줄: 말머리 없이 앞 공백으로 시작하고 바로 윗줄이 말머리 줄
+    follow, follow_spaces, follow_by = 0, Counter(), Counter()
+    unmarked_after_marker = 0
+    for p in probes:
+        items = _body_items(p)
+        for prev, cur in zip(items, items[1:]):
+            if prev.marker_kind and not cur.marker_kind:
+                unmarked_after_marker += 1
+                if cur.leading_spaces:
+                    follow += 1
+                    follow_spaces[cur.leading_spaces] += 1
+                    follow_by[_marker_key(prev)] += 1
+    return {
+        "paragraphs": len(body),
+        "spaced_share": _ratio(len(spaced), len(body)),
+        "spacing_pt": _top(Counter(round(x.fmt.spacing_twips / 20, 2) for x in spaced), n=8),
+        "width_ratio": {k: _dist(v) for k, v in groups.items()},
+        "unmarked_after_marker": unmarked_after_marker,
+        "continuation_like": follow,
+        "continuation_spaces": _top(follow_spaces, n=6),
+        "continuation_after": _top(follow_by, n=6),
+    }
 
 
 def _dominant(probe: DocProbe, pick: Callable):

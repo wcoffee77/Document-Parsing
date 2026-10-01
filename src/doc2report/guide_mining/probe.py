@@ -21,6 +21,7 @@ from docx import Document as open_docx
 from docx.oxml.ns import qn
 
 from ..ir import invisible_codes, is_blank
+from ..layout.measure import TextMeasurer
 from ..units import EMU_PER_MM, PAGE_SIZES, parse_length
 
 _TWIP_PER_MM = 1440 / 25.4
@@ -56,6 +57,7 @@ class Fmt:
     char_scale_pct: int | None = None
     color: str | None = None         # RRGGBB, 테마색은 "theme:accent1", 자동이면 None
     underline: bool | None = None
+    spacing_twips: int | None = None  # 글자 간격(1/20pt). 음수 = 좁힘
 
 
 @dataclass
@@ -89,6 +91,8 @@ class ParaProbe:
     bold_pattern: str = "none"       # 말머리 뒤 글자 기준: all | none | prefix | suffix | mixed
     underline: bool = False          # 말머리 뒤 글자의 과반이 밑줄
     leading_wide: int = 0            # 앞 공백 중 전각 공백(U+3000) 개수 — 반각 두 칸과 폭이 다르다
+    width_ratio: float | None = None  # 한 줄로 썼을 때 글자 폭 / 줄 폭 (보통 글자 기준, 글자 간격 반영). 글꼴 파일이 있어야 계산
+
     cell_row: int | None = None      # where == "table"이면 칸 위치
     cell_col: int | None = None
 
@@ -237,8 +241,8 @@ class _Prober:
 
     def run(self) -> None:
         body = self.docx.element.body
+        self._sections()  # 문단의 줄 폭을 재려면 쪽 설정이 먼저 필요하다
         self._body(body, where="body", nested=False)
-        self._sections()
         self._textboxes(body)
         self.probe.toc = self._has_toc(body)
 
@@ -263,7 +267,7 @@ class _Prober:
         marker_kind = marker = sep = None
         level = None
         pua = False
-        leading = 0
+        leading = len(text) - len(text.lstrip(" \u3000"))
         if numbering is not None:
             level, marker, pua = numbering
             marker_kind = "auto"
@@ -272,7 +276,6 @@ class _Prober:
             if found is not None:
                 marker_kind = "typed"
                 marker, sep = found
-                leading = len(text) - len(text.lstrip(" \u3000"))
         spacing = ppr.get("spacing", {})
         line_rule = spacing.get("lineRule", "auto")
         line = _num(spacing.get("line"), 240.0)
@@ -314,6 +317,8 @@ class _Prober:
             offset = leading + len(marker or "") + (1 if sep in ("tab", "space") else 0)
         para.bold_pattern, para.underline = self._bold_pattern(p, style, offset)
         para.leading_wide = text[:leading].count("\u3000")
+        if where == "body":
+            para.width_ratio = self._width_ratio(para)
         if para.page_break_before or para.has_page_break:
             self.probe.page_breaks += 1
         self.probe.paragraphs.append(para)
@@ -324,6 +329,24 @@ class _Prober:
                 self._last_table = None
             self._prev_body = para
         return para
+
+    def _width_ratio(self, para: ParaProbe) -> float | None:
+        """한 줄로 쓴 글자 폭 / 줄 폭. 글자는 굵기와 상관없이 보통 글자 폭으로 잰다 — 굵은 줄이 보통 줄보다
+        얼마나 더 넓게 쓰이는지(굵기 보정)와 원본이 줄을 얼마나 꽉 채우는지를 실측으로 보려는 값."""
+        fmt = para.fmt
+        if not para.text.strip() or not fmt.east_asia or not fmt.size_pt or not self.probe.sections:
+            return None
+        section = self.probe.sections[0]
+        room = section.width_mm - section.left_mm - section.right_mm - max(para.left_mm + para.first_line_mm, 0)
+        if room <= 0:
+            return None
+        measure = TextMeasurer(fmt.east_asia, fmt.ascii or fmt.east_asia, int(fmt.size_pt * 12700),
+                               scale=(fmt.char_scale_pct or 100) / 100)
+        if not measure.font_available:
+            return None
+        text = para.text.replace("\t", " ")
+        width = measure.width(text) + (fmt.spacing_twips or 0) * 635 * len(text)
+        return round(width / (room * EMU_PER_MM), 3)
 
     def _bold_pattern(self, p, style, offset: int) -> tuple[str, bool]:
         """말머리 뒤 글자의 굵기 모양(전부·앞부분만·뒷부분만·섞임)과 밑줄 여부."""
@@ -442,6 +465,12 @@ class _Prober:
             under = rpr.find(qn("w:u"))
             if under is not None:
                 fmt.underline = under.get(qn("w:val")) != "none"
+            spacing = rpr.find(qn("w:spacing"))
+            if spacing is not None and spacing.get(qn("w:val")):
+                try:
+                    fmt.spacing_twips = int(spacing.get(qn("w:val")))
+                except ValueError:
+                    pass
             scale = rpr.find(qn("w:w"))
             if scale is not None and scale.get(qn("w:val")):
                 fmt.char_scale_pct = int(scale.get(qn("w:val")))

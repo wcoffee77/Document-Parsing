@@ -372,3 +372,23 @@ def test_leading_space_distribution_and_fullwidth(tmp_path):
     assert rows["글자 □"]["leading_spaces"][0] == {"value": 2, "count": 2, "share": 0.667}
     assert rows["글자 -"]["leading_spaces"][0]["value"] == 4
     assert rows["글자 □"]["leading_wide_share"] == 0.333 and rows["글자 -"]["leading_wide_share"] == 0.0
+
+
+def test_fitting_section_counts_spacing_and_wrapped_continuations(tmp_path):
+    path = tmp_path / "fit.docx"
+    doc = Document()
+    doc.add_paragraph("- 글자 간격을 좁힌 긴 문장")
+    doc.paragraphs[0].runs[0]._r.get_or_add_rPr().append(
+        parse_xml(f'<w:spacing {nsdecls("w")} w:val="-4"/>'))
+    doc.add_paragraph("   내려쓴 줄")                 # 말머리 없음 + 앞 공백 3칸, 윗줄이 말머리 줄
+    doc.add_paragraph("")
+    doc.add_paragraph("    별개 문단")                # 윗줄이 빈 줄이라 내려쓴 줄이 아니다
+    doc.save(path)
+    fit = summarize([probe_docx(path)])["fitting"]
+    assert fit["spacing_pt"][0]["value"] == -0.2 and fit["spaced_share"] == 0.333
+    assert fit["unmarked_after_marker"] == 1 and fit["continuation_like"] == 1
+    assert fit["continuation_spaces"][0]["value"] == 3
+    md = (tmp_path / "res")
+    from doc2report.guide_mining import write_outputs
+    write_outputs([probe_docx(path)], [], md)
+    assert "줄 맞춤 (줄 폭 사용률" in (md / "probe_summary.md").read_text(encoding="utf-8-sig")

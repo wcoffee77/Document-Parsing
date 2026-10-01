@@ -81,6 +81,9 @@ class _FakeMeasurer:
     def width(self, text):
         return sum(self.char_width(c) for c in text)
 
+    def line_height(self, multiplier=1.0):
+        return self.size * 1.15 * multiplier
+
 
 @pytest.fixture()
 def fake_fonts(monkeypatch):
@@ -174,3 +177,72 @@ def test_star_right_after_a_table_is_still_a_blue_annotation(tmp_path):
     assert note.runs[-1].font.size in (None, Pt(14)) and not (
         note.runs[-1].font.color and note.runs[-1].font.color.type and
         note.runs[-1].font.color.rgb == RGBColor(0, 0, 255))
+
+
+# ── 주석 텍스트 상자 ──────────────────────────────────────────────────
+
+_W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_V_NS = "{urn:schemas-microsoft-com:vml}"
+
+
+def test_annotation_becomes_a_text_box_under_the_line(tmp_path, fake_fonts):
+    from doc2report.guide_mining.probe import probe_docx
+
+    out = tmp_path / "box.docx"
+    convert_document(Document(blocks=[
+        Heading(level=2, runs=[Run("추진 배경")]),
+        Paragraph(runs=[Run("□ 핵심인력 선정")]),
+        Paragraph(runs=[Run("* 최근 평가 상위 이상, 영어회화 2급 이상")]),
+        Paragraph(runs=[Run("□ 다음 항목")])]), out, load_profile("formal"), polish="none")
+    paragraphs = OpenDocx(str(out)).paragraphs
+    texts = [p.text.strip() for p in paragraphs]
+    assert not any("영어회화" in t for t in texts)                        # 본문 문단으로는 안 나온다
+    anchor = next(p for p in paragraphs if "핵심인력" in p.text)
+    shapes = list(anchor._p.iter(f"{_V_NS}shape"))
+    assert len(shapes) == 1 and "영어회화" in "".join(anchor._p.itertext())
+    style = shapes[0].get("style")
+    assert "position:absolute" in style and "mso-position-vertical-relative:text" in style
+    prof = load_profile("formal")
+    line = prof.font("body").size * 1.15 * prof.font("body").line_spacing
+    assert anchor.paragraph_format.space_after >= prof.font("annotation").size   # 상자 높이만큼 아래를 비움
+    assert f"margin-top:{line / 12700:.2f}pt" in style                          # 윗줄 바로 아래
+    probe = probe_docx(out)                                                    # Word가 읽는 구조인지: 우리 probe로 되읽기
+    box = probe.textboxes[0]
+    assert box.kind == "vml" and box.floating and box.border == "none" and box.fill == "none"
+    note = next(p for p in probe.paragraphs if p.where == "textbox")
+    assert (note.fmt.size_pt, note.fmt.color) == (10.0, "0000FF")
+
+
+def test_annotation_falls_back_to_a_paragraph_without_anchor(tmp_path, fake_fonts):
+    out = tmp_path / "fallback.docx"
+    convert_document(Document(blocks=[Paragraph(runs=[Run("* 맨 앞 주석")])]),
+                     out, load_profile("formal"), polish="none")
+    (p,) = [p for p in OpenDocx(str(out)).paragraphs if "주석" in p.text]
+    assert p.text.strip() == "* 맨 앞 주석" and not list(p._p.iter(f"{_V_NS}shape"))
+
+
+def test_two_annotations_stack_under_the_same_line(tmp_path, fake_fonts):
+    out = tmp_path / "two.docx"
+    convert_document(Document(blocks=[
+        Heading(level=2, runs=[Run("추진 배경")]), Paragraph(runs=[Run("□ 핵심인력")]),
+        Paragraph(runs=[Run("* 첫째 설명")]), Paragraph(runs=[Run("* 둘째 설명")])]),
+        out, load_profile("formal"), polish="none")
+    anchor = next(p for p in OpenDocx(str(out)).paragraphs if "핵심인력" in p.text)
+    tops = [float(s.get("style").split("margin-top:")[1].split("pt")[0]) for s in anchor._p.iter(f"{_V_NS}shape")]
+    assert len(tops) == 2 and tops[1] > tops[0]
+
+
+def test_wrapped_txt_lines_become_one_bold_sentence_aligned_under_text(tmp_path, fake_fonts):
+    from doc2report.pipeline import convert
+
+    first = " ".join(["가나다라마바사아"] * 7)          # 한 줄을 거의 채우는 길이
+    src = tmp_path / "w.txt"
+    src.write_text(f"1. 추진 배경\n□ {first}\n자차카타파하 마지막 줄\n□ 다음\n", encoding="utf-8")
+    out = tmp_path / "w.docx"
+    convert(str(src), out, "formal", polish="none")
+    items = [p for p in OpenDocx(str(out)).paragraphs if p.text.strip() and not p.text.startswith("1.")]
+    assert items[-1].text.strip() == "□ 다음"
+    lines = items[:-1]
+    assert len(lines) >= 2 and lines[0].text.startswith("  □ ") and lines[1].text.startswith(" " * 5)
+    assert not any(l.text.lstrip().startswith("□") for l in lines[1:])        # 새 말머리가 붙지 않는다
+    assert all(r.bold for l in lines for r in l.runs if r.text.strip())      # 둘째 줄도 굵게

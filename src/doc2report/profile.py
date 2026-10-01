@@ -303,6 +303,10 @@ class TextRules(_Base):
     # (2026-10-01 사용자: 정식보고서의 주석은 *로 시작하는 파란 10pt 바탕체. B안 = 텍스트 상자 대신 문단).
     annotation_lead_spaces: int = 0
     annotation_mark: str = "*"
+    annotation_box: bool = False
+    # true: 주석을 윗줄 아래에 **텍스트 상자**로 띄운다(정식보고서 원본이 그렇게 쓴다). 상자는 윗줄에 붙은
+    #       글자 앞 개체라 아래 공간을 윗줄의 단락 뒤 간격으로 비워 둔다. 글꼴을 못 찾거나 윗줄이 문단이
+    #       아니면 일반 문단 주석으로 쓴다.
     # "(주석) 설명"처럼 다른 표시로 쓴 주석은 이 기호로 통일한다("* 설명").
     level_bold_original: bool = False
     # true: level_bold가 원문 말머리가 있는 줄(직접 친 1. □)에도 적용된다. 서식을 다 없앤 글(txt)을
@@ -336,7 +340,7 @@ class TextRules(_Base):
 
 
 FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
-                      "annotation_markers", "annotation_lead_spaces", "annotation_mark",
+                      "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin")
 
 
