@@ -151,7 +151,7 @@ def test_slight_overflow_condenses_instead_of_wrapping(tmp_path, fake_fonts):
         "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing") for r in items[0].runs]
     values = [int(x.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val"))
               for x in spacing if x is not None]
-    assert values and all(-10 <= v <= -2 for v in values)           # 0.1~0.5pt = -2~-10 (1/20pt)
+    assert values and all(-20 <= v <= -2 for v in values)           # 0.1~1pt (여유 0.4pt가 더해져 최대 1pt까지)
 
 
 # ── 서식 없는 txt: 제목·날짜 ──────────────────────────────────────────

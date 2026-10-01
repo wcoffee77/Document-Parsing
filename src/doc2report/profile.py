@@ -315,6 +315,8 @@ class TextRules(_Base):
     annotation_lead_spaces: int = 0
     annotation_mark: str = "*"
     annotation_box: bool = False
+    annotation_box_height: int | None = None
+    # 주석 텍스트 상자의 최소 높이 한 줄당(정식보고서: 5mm — 글자 높이에 딱 맞으면 윗줄·아랫줄과 겹쳐 보인다, 2026-10-01 사용자)
     # true: 주석을 윗줄 아래에 **텍스트 상자**로 띄운다(정식보고서 원본이 그렇게 쓴다). 상자는 윗줄에 붙은
     #       글자 앞 개체라 아래 공간을 윗줄의 단락 뒤 간격으로 비워 둔다. 글꼴을 못 찾거나 윗줄이 문단이
     #       아니면 일반 문단 주석으로 쓴다.
@@ -347,6 +349,7 @@ class TextRules(_Base):
     # 나뉘면(원본은 한 줄에 쓴 줄) 1.0으로 낮춘다 — 값은 probe의 "줄 폭 사용률"(굵은 글자·보통 글자)로 정한다.
 
     @field_validator("condense_max", "condense_step", "condense_pad", "gap_after_annotation",
+                     "annotation_box_height",
                      "gap_after_note", "gap_after_section", mode="before")
     @classmethod
     def _condense(cls, v: Any) -> Any:
@@ -375,6 +378,7 @@ class TextRules(_Base):
 
 FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
+                      "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
                       "fit_bold_factor", "condense_pad", "shorten_to_fit", "orphan_max",
                       "gap_after_annotation", "gap_after_note", "gap_after_section")
@@ -625,6 +629,7 @@ def dump_profile(profile: Profile) -> str:
     text["condense_step"] = _pt(text["condense_step"])
     for key in ("condense_pad", "gap_after_annotation", "gap_after_note", "gap_after_section"):
         text[key] = _pt(text[key])
+    text["annotation_box_height"] = _mm(text["annotation_box_height"]) if text["annotation_box_height"] is not None else None
     text["fit_margin"] = _pct(text["fit_margin"]) if text["fit_margin"] else None
     text["fit_bold_factor"] = _pct(text["fit_bold_factor"])
     data["text"] = _strip(text)

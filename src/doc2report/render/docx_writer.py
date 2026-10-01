@@ -510,7 +510,7 @@ class DocxRenderer:
             return False
         widths = [measure.char_width(c) for c in text]
         lines = fit_text(text, widths, first_room=room, cont_room=room, margin=rules.fit_margin)
-        height = int(line * len(lines))
+        height = int(max(line, rules.annotation_box_height or 0) * len(lines))   # 한 줄 최소 높이 — 글자에 딱 맞으면 겹쳐 보인다
         runs = [(run.text.replace("\n", " "), bool(run.bold)) for run in block.runs if run.text]
         runs[0] = (runs[0][0].lstrip(), runs[0][1])
         self._boxes += 1

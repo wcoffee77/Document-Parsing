@@ -76,7 +76,7 @@ numbering:
     space_after_level_change: 6pt
 
 tables:
-  align: left
+  align: right               # 표 오른쪽 끝을 여백선에 두고 폭 = 윗줄 글자 시작 ~ 오른쪽 여백이라 왼쪽 끝이 윗줄에 맞는다(left+들여쓰기는 Word에서 어긋남, 2026-10-01 사용자)
   note_space_before: 6pt     # 표 바로 아래 ※ 부연 설명은 표에 딸린 줄 — 앞 간격 18pt가 아니라 6pt (2026-10-01 사용자)
   equal_columns: true        # 같은 성격(값)의 열은 폭을 같게 (2026-10-01 사용자)
   note_columns: ["비고", "이슈", "참고", "특이사항", "의견", "코멘트"]   # 참고 열 — 핵심 데이터가 아니라 비중을 작게
@@ -105,9 +105,10 @@ text:
   condense_step: 0.1pt
   fit_margin: 0.2%           # 글꼴 폭 계산 오차 대비 여유. 크면 원본처럼 꽉 채운 줄이 나뉘어 버린다(1pt 한도의 8%를 0.5%가 먹음)
   fit_bold_factor: 100%      # 굵은 글자 폭 = 보통 글자 폭 × 이 값. 잠정(굵은 □ 줄이 두세 글자 남기고 일찍 나뉨) — probe 실측으로 확정
-  condense_pad: 0.1pt        # 계산상 0.9pt면 되는 줄을 Word는 1.0pt여야 한 줄에 넣었다(2026-10-01) — 계산값 + 0.1pt, 최대 condense_max
+  condense_pad: 0.4pt        # 계산상 0.6~0.9pt면 되는 줄을 Word는 1.0pt여야 한 줄에 넣었다(2026-10-01 두 번 실측) — 계산값 + 0.4pt, 최대 condense_max
   shorten_to_fit: true       # 좁히기 한도까지 써도 두세 글자가 넘치면 LLM이 표현을 줄여 한 줄로(LLM을 켰을 때만)
   gap_after_annotation: 18pt # 주석(*) 뒤 — 다음 항목과 붙어 보이지 않게 (단락 뒤로)
   gap_after_note: 18pt       # ※ 줄 뒤
   gap_after_section: 18pt    # 마지막 하위 항목 뒤 — 새 절(3.) 앞 간격
+  annotation_box_height: 5mm  # 주석 상자는 한 줄에 5mm (2026-10-01 사용자 — 글자 높이에 딱 맞으면 겹쳐 보임)
   annotation_box: true       # 주석은 텍스트 상자(원본과 같음). 못 만들면 일반 문단 주석으로

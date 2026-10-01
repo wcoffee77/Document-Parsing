@@ -37,7 +37,7 @@ def test_formal_profile_values():
     prof = load_profile("formal")
     assert [(lv.lead_spaces, lv.marker_sep, lv.indent, lv.hanging) for lv in prof.numbering] == [
         (0, " ", 0, 0), (1, " ", 0, 0), (3, " ", 0, 0), (6, " ", 0, 0)]
-    assert prof.tables.align == "left" and prof.tables.header_shading is None
+    assert prof.tables.align == "right" and prof.tables.header_shading is None
     assert prof.text.annotation_markers == ["*", "＊", "∗", "(주석)"] and prof.text.note_lead_spaces == 4
     assert prof.text.fit_lines and prof.text.level_bold_original
     assert prof.font("annotation").color == "0000FF" and prof.font("annotation").size == Pt(10)
@@ -113,9 +113,9 @@ def _table_xml(tmp_path, profile: str):
     return OpenDocx(str(out)).tables[0]._tbl.xml
 
 
-def test_formal_table_is_left_aligned_without_shading(tmp_path):
-    xml = _table_xml(tmp_path, "formal")
-    assert 'w:jc w:val="left"' in xml and "w:shd" not in xml
+def test_formal_table_is_right_aligned_without_shading(tmp_path):
+    xml = _table_xml(tmp_path, "formal")   # 오른쪽 끝을 여백선에 두고 폭을 윗줄 글자 시작까지로 잡아 왼쪽 끝을 맞춘다
+    assert 'w:jc w:val="right"' in xml and "w:shd" not in xml
 
 
 def test_default_table_keeps_right_alignment_and_header_shading(tmp_path):

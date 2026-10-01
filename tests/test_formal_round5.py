@@ -88,10 +88,16 @@ def test_data_columns_are_equal_and_note_column_is_small(tmp_path):
     assert sizes and all(ci == 4 for (_, ci) in sizes)                           # 글자를 줄이는 건 비고 열뿐
 
 
-def test_table_starts_at_the_line_above(tmp_path):
-    doc, _ = _convert(tmp_path, _TABLES)
-    xml = doc.element.xml
-    assert re.search(r'<w:tblInd w:w="\d+" w:type="dxa"/>', xml)                 # □ 줄의 왼쪽 끝(앞 공백 1칸)
+def test_table_left_edge_is_the_line_above_via_right_alignment(tmp_path):
+    from doc2report.profile import load_profile
+
+    doc, result = _convert(tmp_path, _TABLES)
+    layout = next(iter(result.layouts.values()))
+    prof = load_profile("formal")
+    assert layout.indent > 0                                                     # □ 줄의 왼쪽 끝(앞 공백 1칸)
+    widths = sum(c.width for c in doc.tables[0].rows[0].cells)
+    assert abs(widths - (prof.page.usable_width - layout.indent)) < 3000         # 폭 = 윗줄 글자 시작 ~ 오른쪽 여백
+    assert 'w:jc w:val="right"' in doc.element.xml
 
 
 def test_markdown_date_line_survives():
@@ -179,3 +185,24 @@ def test_tab_rows_with_trimmed_trailing_cells_stay_in_the_table(tmp_path):
     assert len(doc.tables) == 1 and len(doc.tables[0].rows) == 4
     assert [c.text for c in doc.tables[0].rows[2].cells] == ["A", "30%", "120%", ""]
     assert not any("\t" in p.text for p in doc.paragraphs)
+
+
+def test_note_column_font_alone_shrinks_so_table_stays_at_body_size(tmp_path):
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "t.md"
+    src.write_text("## 현황\n\n| 직군 | 합격 | 입사 | 입사율 | 비고 |\n|---|---|---|---|---|\n"
+                   "| 공정개발 | 40 | 33 | 83% | 처우 협상 지연 2건 |\n"
+                   "| 소자 | 32 | 22 | 69% | " + "경쟁사 중복 합격자의 포기가 다수이며 근무지 선호 차이가 주된 사유 " * 2 + " |\n",
+                   encoding="utf-8")
+    result = convert(str(src), tmp_path / "o.docx", "formal", polish="none")
+    layout = next(iter(result.layouts.values()))
+    assert layout.font_size == Pt(12)                                           # 표 전체는 12pt 그대로
+    assert {ci for (_, ci) in layout.cell_font} == {4} and all(f[0] == Pt(10) for f in layout.cell_font.values())
+
+
+def test_annotation_box_is_at_least_5mm_per_line(tmp_path, fake_fonts):
+    doc, _ = _convert(tmp_path, _MEMO)
+    xml = doc.element.xml
+    heights = [float(h) for h in re.findall(r"height:([\d.]+)pt", xml)]
+    assert heights and min(heights) >= 14.1                                      # 5mm = 14.17pt

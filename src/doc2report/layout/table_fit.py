@@ -195,9 +195,10 @@ def _shrink_long_cells(table: Table, profile: Profile, layout: TableLayout) -> N
         return
     content = [w - layout.cell_margin_x * 2 for w in layout.col_widths]
 
+    notes = note_column_set(table, profile) if profile.tables.equal_columns else set()
     for row_index, cell_index, cell, col, span in _iter_grid_indexed(table):
-        if cell.is_header or col >= len(content):
-            continue
+        if cell.is_header or col >= len(content) or col in notes:
+            continue  # 참고 열은 _apply_note_column_fonts가 따로 줄였다 — 더 줄이면 표 전체 크기와 차이가 벌어진다
         width = sum(content[col: min(col + span, len(content))])
         if _cell_total_lines(cell, profile, width, *base) <= limit:
             continue
@@ -322,8 +323,12 @@ def _try_fit(
         widths = _equalize_columns(table, profile, widths, mins, maxs, usable, size) or widths
 
     limit = profile.tables.max_cell_lines
-    if check_lines and limit and _max_cell_lines(table, profile, size, scale, widths) > limit:
-        return None
+    if check_lines and limit:
+        # 참고 열(비고·이슈)은 줄 수 제한에서 뺀다 — 글이 많아도 표 전체 글자를 줄이지 않고 그 열 글자만 작게 쓰고
+        # 줄바꿈으로 받는다(2026-10-01 사용자: 표 글씨는 가급적 맞추고 비고 내용만 10pt 내외로)
+        notes = note_column_set(table, profile) if profile.tables.equal_columns else set()
+        if _max_cell_lines(table, profile, size, scale, widths, skip=notes) > limit:
+            return None
 
     return TableLayout(
         col_widths=_to_cell_widths(widths, margin),
@@ -446,7 +451,8 @@ def _bisect(total_at, target: float, high: float) -> float:
 
 
 def _max_cell_lines(
-    table: Table, profile: Profile, size: int, scale: float, content_widths: list[float]
+    table: Table, profile: Profile, size: int, scale: float, content_widths: list[float],
+    skip: set[int] | None = None,
 ) -> int:
     """확정 폭에서 가장 많이 줄바꿈되는 '내용' 셀의 줄 수. (머리는 축약으로 따로 다룬다)
 
@@ -454,7 +460,7 @@ def _max_cell_lines(
     """
     worst = 0
     for cell, col, span in iter_grid(table):
-        if col >= len(content_widths) or (cell.is_header and _has_body(table)):
+        if col >= len(content_widths) or (cell.is_header and _has_body(table)) or (skip and col in skip):
             continue
         width = sum(content_widths[col : min(col + span, len(content_widths))])
         measurer = _measurer(cell, profile, size, scale)
