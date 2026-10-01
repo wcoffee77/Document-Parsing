@@ -55,6 +55,7 @@ def summarize(probes: list[DocProbe], *, phrases: bool = True) -> dict:
         "dates": _dates(probes),
         "table_cells": _table_cells(probes),
         "phrases": _phrases(probes) if phrases else None,
+        "charset": _charset(probes),
     }
 
 
@@ -73,6 +74,12 @@ def _docs(probes) -> dict:
                 "sections": len(p.sections),
                 "blank_ratio": _ratio(
                     sum(1 for x in _body(p) if x.blank), len(_body(p))),
+                "textboxes": len(p.textboxes),
+                "body_size_pt": _dominant(p, lambda x: x.fmt.size_pt),
+                "body_line": _dominant(p, lambda x: x.line_value),
+                "margins_mm": (f"{_r(p.sections[0].top_mm)}/{_r(p.sections[0].bottom_mm)}/"
+                               f"{_r(p.sections[0].left_mm)}/{_r(p.sections[0].right_mm)}"
+                               if p.sections else None),
             }
             for p in probes
         ],
@@ -160,7 +167,13 @@ def _blank_lines(probes) -> dict:
 def _markers(probes) -> dict:
     """말머리별 실제 서식 — 정식보고서의 계층 규칙(기호·들여쓰기·굵기)이 여기서 보인다."""
     groups: dict[str, list[ParaProbe]] = {}
+    with_child: set[int] = set()   # 바로 다음 줄이 더 깊은 말머리인 항목
     for p in probes:
+        items = _body_items(p)
+        for x, nxt in zip(items, items[1:]):
+            if x.marker_kind and nxt.marker_kind and \
+                    (nxt.left_mm, nxt.leading_spaces) > (x.left_mm, x.leading_spaces):
+                with_child.add(id(x))
         for x in _body(p):
             if x.marker_kind and not x.blank:
                 groups.setdefault(_marker_key(x), []).append(x)
@@ -182,6 +195,10 @@ def _markers(probes) -> dict:
             "ending_class": _top(Counter(_ending_class(t) for t in sentences), n=4),
             "period_ended_share": _ratio(sum(1 for t in sentences if t.rstrip().endswith(".")), len(sentences)),
             "bold_pattern": _top(Counter(x.bold_pattern for x in items), n=4),
+            "bold_by_children": {
+                label: _top(Counter(x.bold_pattern for x in group), n=3)
+                for label, group in (("하위 항목 있음", [x for x in items if id(x) in with_child]),
+                                     ("하위 항목 없음", [x for x in items if id(x) not in with_child]))},
             "underline_share": _ratio(sum(1 for x in items if x.underline), len(items)),
             "space_before_pt": _top(Counter(x.space_before_pt for x in items), n=3),
             "space_after_pt": _top(Counter(x.space_after_pt for x in items), n=3),
@@ -273,6 +290,8 @@ def _tables(probes) -> dict:
         "fill_first_col_mean": mean(t.fill_first_col_share for t in tables),
         "fill_other_mean": mean(t.fill_other_share for t in tables),
         "fill_colors": _top(Counter(c for t in tables for c in t.fill_colors)),
+        "cell_border_mean": mean(t.cell_border_share for t in tables),
+        "cell_border_kinds": _top(Counter(k for t in tables for k in t.cell_border_kinds)),
         "width_vs_text": _dist(widths),
         "indent_mm": _top(Counter(_r(t.indent_mm) for t in outer)),
         "borders": _top(Counter(", ".join(f"{k} {v}" for k, v in sorted(t.borders.items())) or "(표 수준 지정 없음)"
@@ -337,6 +356,9 @@ def _annotations(probes) -> dict:
         "floating_share": _ratio(sum(1 for b in boxes if b.floating), len(boxes)),
         "placement": _top(Counter(b.placement for b in boxes)),
         "wrap": _top(Counter(b.wrap or "(없음)" for b in boxes)),
+        "x_mm": _dist([b.x_mm for b in boxes if b.x_mm is not None]),
+        "v_offset_mm": _dist([b.v_offset_mm for b in boxes if b.v_offset_mm is not None]),
+        "behind": _top(Counter(b.behind for b in boxes)),
         "width_mm": _dist([b.width_mm for b in boxes if b.width_mm is not None]),
         "height_mm": _dist([b.height_mm for b in boxes if b.height_mm is not None]),
         "border": _top(Counter((b.border, b.border_color or "-") for b in boxes),
@@ -459,7 +481,58 @@ def _phrases(probes) -> dict:
         rows = sorted(((k, len(v)) for k, v in groups.items() if len(v) >= 2), key=lambda kv: (-kv[1], kv[0]))
         return [{"value": k, "docs": c} for k, c in rows[:n]]
 
-    return {"section_titles": repeated(titles, 25), "table_terms": repeated(terms, 30)}
+    latin: dict[str, set] = {}
+    for p in probes:
+        for x in p.paragraphs:
+            for word in re.findall(r"[A-Za-z][A-Za-z0-9&/.-]{1,11}", x.text):
+                latin.setdefault(word, set()).add(p.doc_id)
+    return {"section_titles": repeated(titles, 25), "table_terms": repeated(terms, 30),
+            "latin_terms": repeated(latin, 20)}
+
+
+def _dominant(probe: DocProbe, pick: Callable):
+    counter: Counter = Counter()
+    for x in _body_items(probe):
+        value = pick(x)
+        if value is not None:
+            counter[value] += x.text_len
+    return counter.most_common(1)[0][0] if counter else None
+
+
+_HANGUL = re.compile("[가-힣ㄱ-ㅎㅏ-ㅣ]")
+_HANJA = re.compile("[\u4e00-\u9fff]")
+
+
+def _charset(probes) -> dict:
+    """글자 종류 구성과 기호 목록 — 한자 약어(無·要)·화살표(↑)·▲ 같은 표기 관례를 본다."""
+    total = hangul = hanja = latin = digits = 0
+    symbols: Counter = Counter()
+    hanja_chars: Counter = Counter()
+    for p in probes:
+        for x in p.paragraphs:
+            if x.blank:
+                continue
+            for ch in x.text:
+                if ch.isspace():
+                    continue
+                total += 1
+                if _HANGUL.match(ch):
+                    hangul += 1
+                elif _HANJA.match(ch):
+                    hanja += 1
+                    hanja_chars[ch] += 1
+                elif ch.isascii() and ch.isalpha():
+                    latin += 1
+                elif ch.isdigit():
+                    digits += 1
+                elif ch not in ".,:;()[]'\"/%-~":
+                    symbols[ch] += 1
+    return {
+        "share": {"한글": _ratio(hangul, total), "한자": _ratio(hanja, total), "영문": _ratio(latin, total),
+                  "숫자": _ratio(digits, total)},
+        "symbols": [{"value": k, "count": c} for k, c in symbols.most_common(25)],
+        "hanja": [{"value": k, "count": c} for k, c in hanja_chars.most_common(10)],
+    }
 
 
 def _structure(probes) -> dict:

@@ -46,6 +46,9 @@ def to_markdown(s: dict) -> str:
             continue
         detail += [f"- **{r['marker']}** (n={r['count']})",
                    *_dist_rows("  굵기 모양(말머리 뒤)", r["bold_pattern"]),
+                   *[f"  - 하위 항목 {label} → 굵기: " + ", ".join(
+                       f"{e['value']} ({e['share']:.0%}, {e['count']})" for e in rows_)
+                     for label, rows_ in r["bold_by_children"].items() if rows_],
                    *_dist_rows("  단락 앞(pt)", r["space_before_pt"]),
                    *_dist_rows("  단락 뒤(pt)", r["space_after_pt"]),
                    *_dist_rows("  줄간격", r["line"]),
@@ -82,6 +85,8 @@ def to_markdown(s: dict) -> str:
                             [f"- 표 너비 / 본문 폭: {_fmt(tb['width_vs_text'])}"],
                             _dist_rows("표 왼쪽 들여쓰기(mm)", tb["indent_mm"]),
                             _dist_rows("표 테두리", tb["borders"]),
+                            [f"- 칸 테두리가 있는 칸 비율(표 평균): {tb['cell_border_mean']}"],
+                            _dist_rows("칸 테두리 종류", tb["cell_border_kinds"]),
                             _dist_rows("표 바로 위 줄", tb["before_kind"]),
                             _dist_rows("표 바로 아래 줄", tb["after_kind"])])
     cell_blocks = []
@@ -112,7 +117,10 @@ def to_markdown(s: dict) -> str:
          f"떠 있는 상자 비율 {an['floating_share']}",
          f"- 상자당 문단 {_fmt(an['paragraphs_per_box'])}, 글자 수 {_fmt(an['box_chars'])}",
          f"- 크기(mm): 너비 {_fmt(an['width_mm'])}, 높이 {_fmt(an['height_mm'])}"],
-        _dist_rows("배치", an["placement"]), _dist_rows("줄바꿈 방식", an["wrap"]),
+        _dist_rows("배치", an["placement"]), [f"- 쪽 왼쪽 끝에서 상자까지(mm): {_fmt(an['x_mm'])}",
+         f"- 세로 어긋남(문단 기준, mm): {_fmt(an['v_offset_mm'])}"],
+        _dist_rows("글 뒤로 보냄", an["behind"]),
+        _dist_rows("줄바꿈 방식", an["wrap"]),
         _dist_rows("테두리", an["border"]), _dist_rows("상자 배경색", an["fill"]),
         _dist_rows("글꼴", an["east_asia"]), _dist_rows("크기(pt)", an["size_pt"]),
         _dist_rows("글자 색", an["color"]), _dist_rows("줄간격", an["line"]),
@@ -129,6 +137,11 @@ def to_markdown(s: dict) -> str:
         f"- 목차 있는 문서 {st['toc_docs']}건, 텍스트 상자가 있는 문서 {st['textbox_docs']}건 "
         f"(문서당 {_fmt(st['textboxes_per_doc'])}), 쪽 나눔 {_fmt(st['page_breaks_per_doc'])}, "
         f"제목 스타일을 쓴 문서 {st['heading_style_docs']}건"]])
+    cs = s["charset"]
+    lines += _section("글자 구성·기호", [
+        [f"- 글자 비중: {cs['share']}",
+         "- 자주 쓰인 기호: " + (", ".join(f"{e['value']}({e['count']})" for e in cs["symbols"]) or "(없음)"),
+         "- 한자: " + (", ".join(f"{e['value']}({e['count']})" for e in cs["hanja"]) or "(없음)")]])
     ph = s.get("phrases")
     if ph is not None:
         total = s["docs"]["count"]
@@ -138,7 +151,8 @@ def to_markdown(s: dict) -> str:
 
         lines += _section("여러 문서에 반복되는 말 (2건 이상 문서에 나온 것만, 괄호는 문서 수)", [
             _dist_rows("1.·Ⅰ. 제목", rows_of(ph["section_titles"])),
-            _dist_rows("표 머리행·첫 열 용어", rows_of(ph["table_terms"]))])
+            _dist_rows("표 머리행·첫 열 용어", rows_of(ph["table_terms"])),
+            _dist_rows("영문 약어·용어", rows_of(ph["latin_terms"]))])
     return "\n".join(lines) + "\n"
 
 

@@ -226,7 +226,7 @@ def test_annotation_box_drawingml(tmp_path):
     box = probe.textboxes[0]
     assert box.kind == "drawingml" and box.floating
     assert box.placement == "오른쪽 여백 / 문단 기준 아래"
-    assert (box.width_mm, box.height_mm, box.wrap) == (15.0, 10.0, "Square")
+    assert (box.width_mm, box.height_mm, box.wrap) == (15.0, 10.0, "wrapSquare")
     assert (box.border, box.fill) == ("none", "none")
     assert (box.anchor_where, box.anchor_marker) == ("body", "□")
     note = next(p for p in probe.paragraphs if p.where == "textbox")
@@ -327,3 +327,36 @@ def test_full_markdown_renders_all_new_sections(tmp_path):
     assert "핵심인력" not in md and "영어회화" not in md      # 원문 글자는 새지 않는다
     off = CliRunner().invoke(app, ["probe", str(a.parent), "-o", str(tmp_path / "res2"), "--no-phrases"])
     assert "여러 문서에 반복되는 말" not in (tmp_path / "res2" / "probe_summary.md").read_text(encoding="utf-8-sig")
+
+
+def test_theme_shading_children_bold_and_charset(tmp_path):
+    path = tmp_path / "theme.docx"
+    doc = Document()
+    parent = doc.add_paragraph()
+    parent.add_run("□ ").bold = False
+    parent.add_run("하위 있는 항목").bold = True
+    doc.add_paragraph("   - 세부 내용 無 ▲5 ↑")
+    leaf = doc.add_paragraph()
+    leaf.add_run("□ ")
+    leaf.add_run("하위 없는 항목")
+    table = doc.add_table(rows=2, cols=1)
+    table.cell(0, 0).text = "구분 BT"
+    table.cell(1, 0).text = "값"
+    table.cell(0, 0)._tc.get_or_add_tcPr().append(parse_xml(
+        f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="auto" '
+        'w:themeFill="background1" w:themeFillShade="F2"/>'))
+    table.cell(0, 0)._tc.get_or_add_tcPr().append(parse_xml(
+        f'<w:tcBorders {nsdecls("w")}><w:bottom w:val="single" w:sz="8"/><w:top w:val="nil"/></w:tcBorders>'))
+    doc.save(path)
+    probe = probe_docx(path)
+    t = probe.tables[0]
+    assert t.header_fill == "theme:background1+shadeF2"      # fill=auto여도 테마 음영을 놓치지 않는다
+    assert t.fill_first_row_share == 1.0
+    assert t.cell_border_kinds == ["single/1pt"] and t.cell_border_share == 0.5   # nil은 테두리 아님
+    s = summarize([probe_docx(path, doc_id="a"), probe_docx(path, doc_id="b")])
+    by = next(r for r in s["markers"]["by_marker"] if r["marker"] == "글자 □")["bold_by_children"]
+    assert by["하위 항목 있음"][0]["value"] == "all" and by["하위 항목 없음"][0]["value"] == "none"
+    assert {e["value"] for e in s["charset"]["symbols"]} >= {"▲", "↑"}
+    assert s["charset"]["hanja"][0]["value"] == "無"
+    assert "BT" in {r["value"] for r in s["phrases"]["latin_terms"]}
+    assert s["docs"]["per_doc"][0]["margins_mm"] is not None

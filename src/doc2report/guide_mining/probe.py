@@ -106,6 +106,8 @@ class TextBoxProbe:
     width_mm: float | None = None
     height_mm: float | None = None
     wrap: str | None = None
+    behind: bool | None = None       # DrawingML behindDoc (글 뒤로)
+    x_mm: float | None = None        # 쪽 왼쪽 끝에서 상자 왼쪽 끝까지(계산 가능할 때)
     border: str = "unspecified"      # none | line | unspecified
     border_color: str | None = None
     fill: str = "unspecified"        # none | RRGGBB | unspecified
@@ -165,6 +167,8 @@ class TableProbe:
     fill_first_col_share: float | None = None
     fill_other_share: float | None = None
     fill_colors: list[str] = field(default_factory=list)
+    cell_border_share: float | None = None    # 칸 자체 테두리가 있는 칸의 비율
+    cell_border_kinds: list[str] = field(default_factory=list)
     before_kind: str = ""            # 표 바로 위 줄의 종류
     after_kind: str = ""             # 표 바로 아래 줄의 종류
 
@@ -536,7 +540,7 @@ class _Prober:
         if rows:
             first_tc = rows[0].find(qn("w:tc"))
             shd = first_tc.find(f"{qn('w:tcPr')}/{qn('w:shd')}") if first_tc is not None else None
-            fill = shd.get(qn("w:fill")) if shd is not None else None
+            fill = _shd_spec(shd)
         jc = tblpr.find(qn("w:jc")) if tblpr is not None else None
         margins: dict[str, float] = {}
         mar = tblpr.find(qn("w:tblCellMar")) if tblpr is not None else None
@@ -597,9 +601,9 @@ class _Prober:
                 for cond in style.findall(qn("w:tblStylePr")):
                     if cond.get(qn("w:type")) != "firstRow":
                         continue
-                    shd = cond.find(f"{qn('w:tcPr')}/{qn('w:shd')}")
-                    if shd is not None and shd.get(qn("w:fill")) not in (None, "auto"):
-                        info.style_first_row_fill = shd.get(qn("w:fill")).upper()
+                    spec = _shd_spec(cond.find(f"{qn('w:tcPr')}/{qn('w:shd')}"))
+                    if spec:
+                        info.style_first_row_fill = spec
                     bold = cond.find(f"{qn('w:rPr')}/{qn('w:b')}")
                     if bold is not None:
                         info.style_first_row_bold = bold.get(qn("w:val")) not in ("0", "false", "off")
@@ -608,14 +612,23 @@ class _Prober:
         """칸 직접 음영이 첫 행에 있는가, 첫 열에 있는가, 그 밖에 있는가."""
         first_row = first_col = other = 0
         n_first_row = n_first_col = n_other = 0
+        n_cells = bordered = 0
         colors: Counter = Counter()
+        border_kinds: Counter = Counter()
         for r, tr in enumerate(rows):
             for c, tc in enumerate(tr.findall(qn("w:tc"))):
-                shd = tc.find(f"{qn('w:tcPr')}/{qn('w:shd')}")
-                fill = shd.get(qn("w:fill")) if shd is not None else None
-                shaded = fill not in (None, "auto", "FFFFFF", "ffffff")
+                fill = _shd_spec(tc.find(f"{qn('w:tcPr')}/{qn('w:shd')}"))
+                shaded = fill is not None
                 if shaded:
-                    colors[fill.upper()] += 1
+                    colors[fill] += 1
+                borders = tc.find(f"{qn('w:tcPr')}/{qn('w:tcBorders')}")
+                n_cells += 1
+                if borders is not None:
+                    kinds = {f"{el.get(qn('w:val'))}/{_num(el.get(qn('w:sz')), 0.0) / 8:g}pt"
+                             for el in borders if el.get(qn("w:val")) not in (None, "nil", "none")}
+                    if kinds:
+                        bordered += 1
+                        border_kinds.update(kinds)
                 if r == 0:
                     n_first_row += 1
                     first_row += shaded
@@ -629,6 +642,8 @@ class _Prober:
         info.fill_first_col_share = round(first_col / n_first_col, 2) if n_first_col else None
         info.fill_other_share = round(other / n_other, 2) if n_other else None
         info.fill_colors = [k for k, _ in colors.most_common(3)]
+        info.cell_border_share = round(bordered / n_cells, 2) if n_cells else None
+        info.cell_border_kinds = [k for k, _ in border_kinds.most_common(3)]
 
     # ── 쪽·머리말·텍스트 상자 ───────────────────────────────────────────
 
@@ -741,6 +756,22 @@ def _has_page_field(element) -> bool:
                for f in element.iter(qn("w:fldSimple")))
 
 
+def _shd_spec(shd) -> str | None:
+    """음영 요소를 한 줄 설명으로: 직접 색(RRGGBB) | theme:이름+농도 | pattern:모양/색. 없으면 None."""
+    if shd is None:
+        return None
+    fill, theme, val = shd.get(qn("w:fill")), shd.get(qn("w:themeFill")), shd.get(qn("w:val"))
+    if theme:
+        shade, tint = shd.get(qn("w:themeFillShade")), shd.get(qn("w:themeFillTint"))
+        return f"theme:{theme}" + (f"+shade{shade}" if shade else "") + (f"+tint{tint}" if tint else "")
+    if fill and fill.lower() not in ("auto", "ffffff"):
+        return fill.upper()
+    if val and val not in ("clear", "nil", "none"):
+        color = shd.get(qn("w:color"))
+        return f"pattern:{val}/{color or 'auto'}"
+    return None
+
+
 def _run_text(run) -> str:
     out: list[str] = []
     for child in run:
@@ -848,9 +879,10 @@ def _drawingml_geometry(shape) -> TextBoxProbe:
     extent = shape.find(_WP + "extent")
     if extent is not None:
         info.width_mm, info.height_mm = _emu_mm(extent.get("cx")), _emu_mm(extent.get("cy"))
+    info.behind = shape.get("behindDoc") in ("1", "true") if shape.get("behindDoc") is not None else None
     for child in shape:
         if isinstance(child.tag, str) and child.tag.startswith(_WP + "wrap"):
-            info.wrap = child.tag[len(_WP + "wrap"):]
+            info.wrap = "wrap" + child.tag[len(_WP + "wrap"):]
     sppr = next(shape.iter(_WPS + "spPr"), None)
     if sppr is not None:
         line = sppr.find(_A + "ln")
@@ -911,6 +943,7 @@ def _placement(info: TextBoxProbe, page: PageProbe | None) -> str:
                  "insideMargin": page.left_mm, "outsideMargin": page.left_mm}.get(info.h_rel or "")
         if start is not None:
             x = start + info.h_offset_mm
+            info.x_mm = round(x, 1)
             width = info.width_mm or 0.0
             if x >= page.width_mm - page.right_mm - 1:
                 horizontal = "오른쪽 여백"
