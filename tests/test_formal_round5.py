@@ -57,7 +57,7 @@ def test_gaps_use_space_after_not_space_before(tmp_path, fake_fonts):
     paragraphs = {p.text.strip(): p for p in doc.paragraphs}
     gap = Pt(18)
     assert paragraphs["□ 첫째 항목"].paragraph_format.space_after >= gap        # 주석(상자) 뒤 18pt를 윗줄이 가진다
-    assert paragraphs["※ 참고 사항"].paragraph_format.space_after == gap         # ※ 뒤 18pt
+    assert paragraphs["※ 참고 사항"].paragraph_format.space_after == Pt(6)     # □ → ※ → □ 같은 계통이라 6pt
     assert paragraphs["- 마지막 하위 항목"].paragraph_format.space_after == gap  # 새 절 앞 18pt
     for text in ("2. 현황", "3. 계획"):
         before = paragraphs[text].paragraph_format.space_before
@@ -147,7 +147,7 @@ def test_note_right_below_a_table_is_close_to_it(tmp_path, fake_fonts):
     note = paragraphs["※ 표를 부연하는 설명"]
     assert note.paragraph_format.space_before == Pt(6)                       # 표 뒤 18pt가 아니라 6pt
     assert all(r.font.size == Pt(12) for r in note.runs if r.text.strip())   # 12pt
-    assert note.paragraph_format.space_after == Pt(18)                       # ※ 뒤는 그대로 18pt
+    assert note.paragraph_format.space_after == Pt(6)                        # □ → 표 → ※ → □ 같은 계통이라 ※ 뒤 6pt
     assert paragraphs["□ 다음 항목"].paragraph_format.space_before in (None, Pt(0))
 
 
@@ -206,3 +206,24 @@ def test_annotation_box_is_at_least_5mm_per_line(tmp_path, fake_fonts):
     xml = doc.element.xml
     heights = [float(h) for h in re.findall(r"height:([\d.]+)pt", xml)]
     assert heights and min(heights) >= 14.1                                      # 5mm = 14.17pt
+
+
+def test_note_gap_depends_on_whether_the_system_continues(tmp_path, fake_fonts):
+    text = ("1. 배경\n□ 가\n  - 문장1\n※ 같은 계통 설명\n  - 문장2\n  - 문장3\n※ 체계가 바뀌는 설명\n□ 문장4\n")
+    doc, _ = _convert(tmp_path, text)
+    paragraphs = {p.text.strip(): p for p in doc.paragraphs}
+    assert paragraphs["※ 같은 계통 설명"].paragraph_format.space_after == Pt(6)      # - → ※ → -
+    assert paragraphs["※ 체계가 바뀌는 설명"].paragraph_format.space_after == Pt(18)  # - → ※ → □
+
+
+def test_paren_and_circled_numbers_are_one_level_below_the_section_number(tmp_path, fake_fonts):
+    text = "1. 배경\n(1) 첫째\n- 하위\n· 더 하위\n① 둘째\n- 하위2\n"
+    doc, _ = _convert(tmp_path, text)
+    texts = [p.text.rstrip() for p in doc.paragraphs]
+    assert " (1) 첫째" in texts and "   - 하위" in texts and "     · 더 하위" in texts   # □처럼 1칸, - 3칸, · 5칸
+    assert " ① 둘째" in texts and "   - 하위2" in texts
+
+
+def test_report_tells_where_each_table_starts(tmp_path):
+    _, result = _convert(tmp_path, _TABLES)
+    assert any("위치: right 정렬" in n and "윗줄 글자 시작" in n for n in result.notes)

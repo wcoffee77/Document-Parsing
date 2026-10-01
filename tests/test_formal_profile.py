@@ -36,7 +36,7 @@ def rendered(tmp_path):
 def test_formal_profile_values():
     prof = load_profile("formal")
     assert [(lv.lead_spaces, lv.marker_sep, lv.indent, lv.hanging) for lv in prof.numbering] == [
-        (0, " ", 0, 0), (1, " ", 0, 0), (3, " ", 0, 0), (6, " ", 0, 0)]
+        (0, " ", 0, 0), (1, " ", 0, 0), (3, " ", 0, 0), (5, " ", 0, 0)]
     assert prof.tables.align == "right" and prof.tables.header_shading is None
     assert prof.text.annotation_markers == ["*", "＊", "∗", "(주석)"] and prof.text.note_lead_spaces == 4
     assert prof.text.fit_lines and prof.text.level_bold_original

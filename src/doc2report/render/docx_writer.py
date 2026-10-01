@@ -75,6 +75,8 @@ class DocxRenderer:
         self._anchor: _Anchor | None = None  # 주석 상자가 붙을 윗줄 문단
         self._last_para = None               # 줄 맞춤으로 나뉜 문단 중 마지막 것
         self._boxes = 0                      # 만든 텍스트 상자 수
+        self._plain_depth: int | None = None  # ※가 아닌 마지막 항목의 단계
+        self._shorten_notes: list[str] = []   # LLM 줄임이 실패한 이유(진단용)
         self._orphans: list[tuple[str, int]] = []      # 두세 글자가 다음 줄로 넘어간 문장 (앞 24자, 넘친 글자 수)
         self._shortened: list[tuple[str, str]] = []    # LLM이 줄여 한 줄로 만든 문장 (전, 후)
 
@@ -107,6 +109,8 @@ class DocxRenderer:
                     f"1.0 근처에 몰려 있으면 글꼴 폭 계산이 실제보다 넓다는 뜻")
         for before, after in self._shortened:
             self.notes.append(f"표현 줄임(한 줄로 맞추려고 LLM이 줄임): '{before}' → '{after}'")
+        if self._shorten_notes:
+            self.notes.append("표현 줄임 시도 결과(진단): " + " / ".join(self._shorten_notes[:8]))
         if self._orphans:
             detail = ", ".join(f"'{head}…' {n}자" for head, n in self._orphans[:8])
             self.notes.append(
@@ -279,6 +283,8 @@ class DocxRenderer:
             note_lead = self._note_lead(note_text)
             lead = note_lead if note_lead is not None else lead
             self._last_item = block
+            if not self._is_note(block.marker or plain(block.runs).lstrip()):
+                self._plain_depth = block.depth  # ※ 줄 뒤 간격이 "같은 계통"인지 가르는 기준 단계
 
         indent = level.indent
         if container is None and self._is_note(note_text):
@@ -419,14 +425,22 @@ class DocxRenderer:
         for target in (first_chars, first_chars - 2, first_chars - 4):  # 한 번에 안 맞으면 더 짧게 다시
             try:
                 candidate = (self.shortener(original, target) or "").strip()
-            except Exception:
+            except Exception as exc:
+                self._shorten_notes.append(f"'{original[:12]}…' LLM 호출 실패({type(exc).__name__})")
                 return None
-            if not candidate or len(candidate) >= len(original) or "\n" in candidate:
+            if not candidate:
+                self._shorten_notes.append(f"'{original[:12]}…' LLM 응답 없음(목표 {target}자)")
+                continue
+            if len(candidate) >= len(original) or "\n" in candidate:
+                self._shorten_notes.append(
+                    f"'{original[:12]}…' 응답이 안 짧아짐({len(original)}자 → {len(candidate)}자, 목표 {target}자)")
                 continue
             new_runs = [template.copy_with(candidate)]
             if len(layout(new_runs)[1]) == 1:
                 self._shortened.append((original, candidate))
                 return new_runs
+            self._shorten_notes.append(
+                f"'{original[:12]}…' 줄였지만 아직 두 줄({len(original)}자 → {len(candidate)}자, 목표 {target}자)")
         self._orphans.append((original[:24], len(original) - first_chars))
         return None
 
@@ -542,9 +556,14 @@ class DocxRenderer:
 
     def _note_gap(self, is_note: bool, next_block: Block | None) -> int | None:
         """※ 줄 다음에 항목이 이어지면 ※ 줄의 단락 뒤에 간격을 둔다(text.gap_after_note)."""
-        gap = self.profile.text.gap_after_note
+        rules = self.profile.text
+        gap = rules.gap_after_note
         if not is_note or gap is None or next_block is None or self._is_note_block(next_block):
             return None
+        same = rules.gap_after_note_same_level
+        if (same is not None and isinstance(next_block, ListItem) and self._plain_depth is not None
+                and next_block.depth == self._plain_depth):
+            return same  # 같은 계통(단계)으로 이어진다 — 좁게
         return gap
 
     def _is_note_block(self, block: Block | None) -> bool:
@@ -690,6 +709,10 @@ class DocxRenderer:
         if layout is None:
             layout = plan_tables(Document(blocks=[block]), self.profile)[id(block)]
         self.notes.extend(f"표 {self._table_seq + 1}: {note}" for note in layout.notes)
+        if container is None:
+            self.notes.append(
+                f"표 {self._table_seq + 1} 위치: {self.profile.tables.align} 정렬, 왼쪽 끝 {layout.indent / 36000:.1f}mm"
+                f"(윗줄 글자 시작), 폭 {layout.total_width / 36000:.1f}mm")
 
         section_switched = layout.landscape and container is None
         if section_switched:

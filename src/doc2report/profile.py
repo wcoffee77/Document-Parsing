@@ -340,6 +340,12 @@ class TextRules(_Base):
     # 이 글자 수 이하가 마지막 줄에 홀로 남으면 "두세 글자 내려쓴 줄"로 본다.
     gap_after_annotation: int | None = None
     gap_after_note: int | None = None
+    gap_after_note_same_level: int | None = None
+    # ※ 줄 다음에 윗줄과 **같은 단계** 항목이 이어지면(같은 계통) 이 간격, 단계가 달라지면 gap_after_note
+    # (2026-10-01 사용자: "- 문장1 / ※ / - 문장2"는 6pt, "- 문장1 / ※ / □ 문장2"는 18pt)
+    pattern_depths: list[dict] = Field(default_factory=list)
+    # 원문 말머리를 정규식으로 단계에 매긴다 — [{pattern: '^\\(\\d{1,2}\\)', depth: 1}]. 말머리 문자로 가리킬 수 없는 번호
+    # "(1)"·"①"을 □와 같은 단계로 둘 때(정식보고서: 1. → (1)·① → - → ·)
     gap_after_section: int | None = None
     # 단락 앞 간격 대신 **윗줄의 단락 뒤 간격**으로 띄운다(2026-10-01 사용자: "가급적 단락 앞은 쓰지 말고 단락 뒤").
     #   annotation: 주석(*) 다음에 항목이 이어질 때 · note: ※ 줄 다음에 항목이 이어질 때 ·
@@ -348,7 +354,7 @@ class TextRules(_Base):
     # 줄 맞춤에서 굵은 글자 폭 = 보통 글자 폭 × 이 값. 비우면 표 맞춤과 같은 기본 보정을 쓴다. 굵은 줄이 너무 일찍
     # 나뉘면(원본은 한 줄에 쓴 줄) 1.0으로 낮춘다 — 값은 probe의 "줄 폭 사용률"(굵은 글자·보통 글자)로 정한다.
 
-    @field_validator("condense_max", "condense_step", "condense_pad", "gap_after_annotation",
+    @field_validator("condense_max", "condense_step", "condense_pad", "gap_after_annotation", "gap_after_note_same_level",
                      "annotation_box_height",
                      "gap_after_note", "gap_after_section", mode="before")
     @classmethod
@@ -381,7 +387,8 @@ FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
                       "fit_bold_factor", "condense_pad", "shorten_to_fit", "orphan_max",
-                      "gap_after_annotation", "gap_after_note", "gap_after_section")
+                      "gap_after_annotation", "gap_after_note", "gap_after_section",
+                      "gap_after_note_same_level", "pattern_depths")
 
 
 def with_format_text(rules: TextRules, preset: TextRules) -> TextRules:
@@ -627,7 +634,8 @@ def dump_profile(profile: Profile) -> str:
     text["note_size_delta"] = _pt(text["note_size_delta"])  # EMU 그대로 쓰면 다시 읽을 때 또 변환된다
     text["condense_max"] = _pt(text["condense_max"])
     text["condense_step"] = _pt(text["condense_step"])
-    for key in ("condense_pad", "gap_after_annotation", "gap_after_note", "gap_after_section"):
+    for key in ("condense_pad", "gap_after_annotation", "gap_after_note", "gap_after_section",
+                "gap_after_note_same_level"):
         text[key] = _pt(text[key])
     text["annotation_box_height"] = _mm(text["annotation_box_height"]) if text["annotation_box_height"] is not None else None
     text["fit_margin"] = _pct(text["fit_margin"]) if text["fit_margin"] else None

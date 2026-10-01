@@ -47,6 +47,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                               plain_level: int | None = None,
                               note_marks: list[str] | None = None,
                               annotation_markers: list[str] | None = None,
+                              pattern_depths: list[dict] | None = None,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -56,6 +57,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     depths = marker_depths or {}
     openers = tuple(no_marker_openers or ())
     annotations = tuple(annotation_markers or ())
+    patterns = [(re.compile(entry["pattern"]), int(entry["depth"])) for entry in (pattern_depths or [])]
 
     def _marked_depth(runs: list[Run]) -> int | None:
         found = _find_marker(runs, marker_re)
@@ -64,6 +66,9 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         own = found[0]
         if own in depths:
             return depths[own]
+        for pattern, depth in patterns:
+            if pattern.match(own):
+                return depth
         return 0 if own[:1].isdigit() else None  # "1." "1)" = 첫 단계, 그 밖("※", "가.")은 문단 그대로
 
     def item(depth: int, runs: list[Run], own: str | None = None, *, derived: bool = False,
