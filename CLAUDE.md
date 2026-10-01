@@ -839,6 +839,10 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   말머리"에만 적용했는데 서식 없는 글은 원문 굵기 정보가 없다 → `text.level_bold_original: true`(formal)이면 원문 말머리 줄에도
   적용(`marker == ""`인 꺾쇠 줄은 제외). ③ txt 맨 위 짧은 줄 + 바로 다음 줄이 날짜면 `# 제목`으로 읽는다(`plaintext._mark_title`).
   이 값들(`annotation_mark`, `level_bold_original`, `fit_*`)도 서식이 정하므로 `FORMAT_TEXT_FIELDS`에 있다.
+- **`*`만 써도 주석 (2026-10-01 사용자: "(주석)"을 안 넣어도 되게)** — formal은 원래 `*` 시작 문단이 주석이다("(주석)"은 같은 뜻의 별칭).
+  예외였던 **표 바로 아래 `*` 줄**은 `attach_table_notes`가 표 주석(검은 10pt)으로 먼저 빼 갔다 → `formal.yaml`의
+  `tables.note_markers`에서 `*`를 빼(`["주)", "주:"]`) 본문 주석(파란 10pt)으로 남기고, ※는 본문 ※ 줄로 둔다.
+  사용자가 "글상자"라 불렀지만 실제 텍스트 상자가 아니라 윗줄에 딸린 문단이다(B안, 편집이 쉬움).
 - **줄 맞춤 (2026-10-01 사용자: 정식보고서는 줄이 길면 엔터로 나누고 왼쪽 끝을 윗줄에 맞추며, 아슬아슬하면 글자 간격 0.1~0.5pt 좁힘)** —
   `layout/lines.py::fit_text`(글자별 폭 목록 → 줄 범위·좁힐 단계; 어절 경계에서만 나눔, 넘침/글자수 ≤ `condense_max`면 나누지 않고
   `condense_step` 단위로 올림해 좁힘, `fit_margin`만큼 덜 씀)와 렌더러 `_fit`/`_emit_fitted`. **줄마다 문단 하나**(엔터), 둘째 줄부터는

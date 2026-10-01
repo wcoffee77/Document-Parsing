@@ -157,3 +157,20 @@ def test_txt_title_and_date_are_recognised():
     md = text_to_markdown("인재 운영 현황 보고\n\n2026. 10. 1\n\n1. 추진 배경\n")
     assert md.splitlines()[0] == "# 인재 운영 현황 보고"
     assert not text_to_markdown("1. 추진 배경\n2026. 10. 1\n").startswith("# ")   # 말머리 줄은 제목이 아님
+
+
+def test_star_right_after_a_table_is_still_a_blue_annotation(tmp_path):
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "s.txt"
+    src.write_text("1. 현황\n\n구분\t현황\nA\t양호\n* 표 아래 설명\n※ 표 아래 참고\n", encoding="utf-8")
+    out = tmp_path / "s.docx"
+    convert(str(src), out, "formal", polish="none")
+    paragraphs = {p.text.strip(): p for p in OpenDocx(str(out)).paragraphs}
+    star = paragraphs["* 표 아래 설명"]
+    run = star.runs[-1]
+    assert run.font.size == Pt(10) and run.font.color.rgb == RGBColor(0, 0, 255)
+    note = paragraphs["※ 표 아래 참고"]
+    assert note.runs[-1].font.size in (None, Pt(14)) and not (
+        note.runs[-1].font.color and note.runs[-1].font.color.type and
+        note.runs[-1].font.color.rgb == RGBColor(0, 0, 255))

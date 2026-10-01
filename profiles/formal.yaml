@@ -78,6 +78,7 @@ numbering:
 
 tables:
   align: left
+  note_markers: ["주)", "주:"]   # 표 아래 "*"는 표 주석이 아니라 본문 주석(파란 10pt)이고, ※는 본문 ※ 줄이다
   header_shading: null       # 정식보고서 표는 음영 없음 (실측: 직접 음영 0건)
 
 text:
