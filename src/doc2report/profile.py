@@ -302,6 +302,27 @@ class TextRules(_Base):
     # 이 기호("*")로 시작하는 문단은 주석 — fonts.annotation(파란 10pt 바탕체)으로 쓰고 항목으로 접지 않는다
     # (2026-10-01 사용자: 정식보고서의 주석은 *로 시작하는 파란 10pt 바탕체. B안 = 텍스트 상자 대신 문단).
     annotation_lead_spaces: int = 0
+    annotation_mark: str = "*"
+    # "(주석) 설명"처럼 다른 표시로 쓴 주석은 이 기호로 통일한다("* 설명").
+    level_bold_original: bool = False
+    # true: level_bold가 원문 말머리가 있는 줄(직접 친 1. □)에도 적용된다. 서식을 다 없앤 글(txt)을
+    #       정식보고서로 만들 때 — 원문에 굵기 정보가 없다(2026-10-01 사용자: □가 모두 보통체로 나옴).
+    fit_lines: bool = False
+    # true: 문장이 한 줄을 넘으면 정식보고서처럼 손으로 맞춘다 — 아슬아슬하면 글자 간격을 좁히고, 아니면 엔터로
+    #       줄을 나눠 왼쪽 끝을 윗줄 글자에 맞춘다(layout/lines.py).
+    condense_max: int | None = None   # 글자 간격을 좁히는 최대치 (0.5pt)
+    condense_step: int | None = None  # 좁히는 단위 (0.1pt)
+    fit_margin: float = 0.0           # 줄 폭을 이만큼 덜 쓴다(글꼴 측정 오차 대비)
+
+    @field_validator("condense_max", "condense_step", mode="before")
+    @classmethod
+    def _condense(cls, v: Any) -> Any:
+        return None if v is None else parse_length(v, default_unit="pt")
+
+    @field_validator("fit_margin", mode="before")
+    @classmethod
+    def _margin(cls, v: Any) -> Any:
+        return parse_ratio(v) if v is not None else 0.0
 
     @field_validator("note_size_delta", mode="before")
     @classmethod
@@ -315,7 +336,8 @@ class TextRules(_Base):
 
 
 FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
-                      "annotation_markers", "annotation_lead_spaces")
+                      "annotation_markers", "annotation_lead_spaces", "annotation_mark",
+                      "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin")
 
 
 def with_format_text(rules: TextRules, preset: TextRules) -> TextRules:
@@ -559,6 +581,9 @@ def dump_profile(profile: Profile) -> str:
     if text["note_indent"] is not None:
         text["note_indent"] = _mm(text["note_indent"])
     text["note_size_delta"] = _pt(text["note_size_delta"])  # EMU 그대로 쓰면 다시 읽을 때 또 변환된다
+    text["condense_max"] = _pt(text["condense_max"])
+    text["condense_step"] = _pt(text["condense_step"])
+    text["fit_margin"] = _pct(text["fit_margin"]) if text["fit_margin"] else None
     data["text"] = _strip(text)
     choices = _strip(profile.choices.model_dump())
     if choices:

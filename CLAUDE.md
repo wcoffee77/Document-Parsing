@@ -833,6 +833,20 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   다음 실측에서 공백 수 분포를 보고 확정), 제목 밑줄(default는 있음, 실측 38%), □ 굵기(default 문장 전체 굵게, 실측 전부 39%).
   Markdown의 `* 문장`은 목록으로 읽혀 주석 표시가 사라진다 — 주석은 Confluence·Word·붙여넣은 글에서 문단으로 들어올 때만 인식한다.
   이 샌드박스의 LibreOffice는 변경 전 코드의 docx도 못 열어(환경 문제) 렌더 실측은 못 했다 — **Word 실측 필요**.
+- **정식보고서 실사용 1차(2026-10-01, 서식을 없앤 txt로 변환) 후속**: 사용자가 txt에 "(주석)"이라고 표시했는데 주석이 안 나왔고, □가 전부
+  보통체였다. ① `text.annotation_markers`에 "(주석)"도 넣고 `structure.normalize_annotations`가 "* 설명"으로 통일한다(문구 다듬기는
+  주석을 건드리지 않음 — `_Engine`이 건너뜀; 순서: 다듬기 → 표 주석 → **주석 통일** → 제목 접기). ② 1.·□ 굵게는 원래 "도구가 붙인
+  말머리"에만 적용했는데 서식 없는 글은 원문 굵기 정보가 없다 → `text.level_bold_original: true`(formal)이면 원문 말머리 줄에도
+  적용(`marker == ""`인 꺾쇠 줄은 제외). ③ txt 맨 위 짧은 줄 + 바로 다음 줄이 날짜면 `# 제목`으로 읽는다(`plaintext._mark_title`).
+  이 값들(`annotation_mark`, `level_bold_original`, `fit_*`)도 서식이 정하므로 `FORMAT_TEXT_FIELDS`에 있다.
+- **줄 맞춤 (2026-10-01 사용자: 정식보고서는 줄이 길면 엔터로 나누고 왼쪽 끝을 윗줄에 맞추며, 아슬아슬하면 글자 간격 0.1~0.5pt 좁힘)** —
+  `layout/lines.py::fit_text`(글자별 폭 목록 → 줄 범위·좁힐 단계; 어절 경계에서만 나눔, 넘침/글자수 ≤ `condense_max`면 나누지 않고
+  `condense_step` 단위로 올림해 좁힘, `fit_margin`만큼 덜 씀)와 렌더러 `_fit`/`_emit_fitted`. **줄마다 문단 하나**(엔터), 둘째 줄부터는
+  접두(공백+말머리+구분) 폭을 `TextMeasurer`로 재서 **그만큼 공백**을 친다(바탕체는 전각 □=반각 2칸). 내어쓰기가 있는 프로파일은
+  내어쓰기로 맞춘다. 좁히기는 본문 run에만 걸고(`oxml.set_char_spacing`, w:spacing −2~−10) 접두 공백·말머리는 안 좁혀 윗줄과 정렬이
+  어긋나지 않는다. 한 문장의 줄들은 `keep_with_next`. 글꼴 파일이 없으면(`font_available` False) 건너뛰고 --report에 남긴다.
+  `text.fit_lines`가 켜진 formal만 해당. **글꼴 폭 계산이 Word와 다르면 Word가 줄을 또 바꿔 들쭉날쭉해진다 — 이 샌드박스엔 바탕체가
+  없어 합성 폭(`_FakeMeasurer`)으로만 검증했다. 사내 PC의 Word 실측 필요**(어긋나면 `fit_margin`을 올림).
 - **진행 상태**: 1단계 probe(서식·형식·문장 통계, 층별 종결·길이, 주석 상자 포함)를 합성 docx로 검증하고 사내 문서 8건으로
   1차 실측했다. 다음: 샘플 리포트로 변환 결과와의 차이 확인 →
   `rules/*.yaml` 검수기(임계값은 실측으로 채움) → 변환 결과 채점기 → 파일럿 후 LLM 단계.

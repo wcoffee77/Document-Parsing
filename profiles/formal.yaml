@@ -84,5 +84,13 @@ text:
   note_size_delta: 0pt       # ※는 본문과 같은 크기 (실측 14pt)
   note_indent: 0mm           # ※ 들여쓰기는 공백으로 (note_lead_spaces)
   note_lead_spaces: 4
-  annotation_markers: ["*"]
+  annotation_markers: ["*", "(주석)"]   # "(주석) 설명"으로 쳐도 "* 설명"으로 통일해 파란 10pt로 쓴다
+  annotation_mark: "*"
   annotation_lead_spaces: 4
+  level_bold_original: true  # 서식을 다 없앤 글(txt)도 1.·□ 문장은 굵게 (실측: □ 전부 굵게 39%·앞부분 36%)
+  # 줄 맞춤 — 정식보고서는 줄이 길면 엔터로 나누고 왼쪽 끝을 윗줄 글자에 맞추며, 아슬아슬하게 넘치면
+  # 글자 간격을 0.1~0.5pt 좁혀 줄 바뀜을 막는다(2026-10-01 사용자 — "아주 많음").
+  fit_lines: true
+  condense_max: 0.5pt
+  condense_step: 0.1pt
+  fit_margin: 1%             # 글꼴 폭 계산이 Word와 조금 달라도 Word가 줄을 다시 바꾸지 않게 1% 덜 씀

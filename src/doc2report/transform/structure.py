@@ -136,6 +136,28 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
 
+def normalize_annotations(doc: Document, markers: list[str], mark: str) -> tuple[Document, list[Change]]:
+    """"(주석) 설명"처럼 다른 표시로 쓴 주석을 표준 표시("* 설명")로 통일한다. 이미 표준 표시면 그대로.
+    주석이 정해진 모양(파란 10pt)으로 나오려면 먼저 표시가 하나로 맞아야 한다(2026-10-01 사용자)."""
+    if not markers:
+        return doc, []
+    changes: list[Change] = []
+    blocks: list[Block] = []
+    for block in doc.blocks:
+        if isinstance(block, Paragraph):
+            text = plain(block.runs)
+            stripped = text.lstrip()
+            found = next((m for m in markers if stripped.startswith(m)), None)
+            if found is not None and found != mark:
+                rest = _drop_prefix(block.runs, len(text) - len(stripped) + len(found))
+                if rest:
+                    rest = [rest[0].copy_with(rest[0].text.lstrip()), *rest[1:]]
+                block = Paragraph(runs=[Run(f"{mark} "), *rest], align=block.align)
+                changes.append(Change(text, plain(block.runs), "주석 표시 통일"))
+        blocks.append(block)
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
 def clean_page_titles(doc: Document, patterns: list[str]) -> tuple[Document, list[Change]]:
     """쪽 제목(`Heading.page_title` — 불러온 연결 문서·입력마다 새 쪽의 제목) 앞의 번호표를 뗀다.
     Confluence에서 "(첨부 1) 세부 계획"처럼 페이지 제목에 붙여 둔 첨부 번호는 보고서에선 군더더기다

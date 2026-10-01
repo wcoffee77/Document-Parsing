@@ -38,7 +38,8 @@ def test_formal_profile_values():
     assert [(lv.lead_spaces, lv.marker_sep, lv.indent, lv.hanging) for lv in prof.numbering] == [
         (0, " ", 0, 0), (2, " ", 0, 0), (4, " ", 0, 0), (6, " ", 0, 0)]
     assert prof.tables.align == "left" and prof.tables.header_shading is None
-    assert prof.text.annotation_markers == ["*"] and prof.text.note_lead_spaces == 4
+    assert prof.text.annotation_markers == ["*", "(주석)"] and prof.text.note_lead_spaces == 4
+    assert prof.text.fit_lines and prof.text.level_bold_original
     assert prof.font("annotation").color == "0000FF" and prof.font("annotation").size == Pt(10)
 
 
@@ -86,7 +87,7 @@ def test_note_mark_uses_spaces_and_body_size(rendered):
 
 def test_web_preset_keeps_format_text_values():
     docs = [_doc()]
-    for name, expected in (("formal", ["*"]), ("confluence", [])):
+    for name, expected in (("formal", ["*", "(주석)"]), ("confluence", [])):
         prof = options.build_profile({"preset": name}, docs, ["text"], llm_ready=False)[0]
         assert prof.text.annotation_markers == expected
     prof = options.build_profile({"preset": "formal", "mode": "manual"}, docs, ["text"], llm_ready=False)[0]

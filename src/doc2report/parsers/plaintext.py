@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import re
 
+from ..ir import DATE_LINE
+
+_TITLE_STOP = ("□", "■", "○", "●", "※", "(", "[", "【", "〈", "ㅁ")
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_LIST = re.compile(r"^(\s*)([-*+>]|\d{1,9}[.)])(\s+)")
@@ -26,11 +29,25 @@ def looks_like_markdown(text: str) -> bool:
     return bool(_MARKDOWN_SIGNS.search(text))
 
 
+def _mark_title(lines: list[str]) -> None:
+    """맨 위 짧은 한 줄 + 바로 다음 줄이 날짜면 문서 제목으로 본다("# 제목") — 서식이 없는 글에서도 제목·날짜
+    줄이 정식보고서 모양(가운데 큰 글씨 + 오른쪽 날짜)으로 나오게."""
+    filled = [i for i, line in enumerate(lines) if line.strip()]
+    if len(filled) < 2:
+        return
+    first, second = filled[0], filled[1]
+    title = lines[first].strip()
+    if (len(title) <= 60 and DATE_LINE.match(lines[second].strip())
+            and not _MD_LIST.match(title) and not title.startswith(_TITLE_STOP)):
+        lines[first] = "# " + title
+
+
 def text_to_markdown(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if looks_like_markdown(text):
         return text
     lines = text.split("\n")
+    _mark_title(lines)
     out: list[str] = []
     in_fence = False
     i = 0

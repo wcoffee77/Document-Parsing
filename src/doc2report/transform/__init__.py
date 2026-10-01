@@ -53,6 +53,7 @@ class _Engine:
         self.gaechosik = (Gaechosik(noun_ending=rules.noun_ending)
                           if self.use_endings or rules.split_long_sentences else None)
         self.notation = Notation(_notation_rules(profile)) if self.use_notation else None
+        self.annotations = tuple(rules.annotation_markers)
 
     @property
     def changes(self) -> list[Change]:
@@ -79,6 +80,10 @@ class _Engine:
             # 제목은 개조식(~함/~음) 대상이 아니라 표기 정리 + 명사 종결만 한다.
             return [Heading(level=block.level, runs=self.heading_runs(block.runs),
                             section_title=block.section_title, page_title=block.page_title)]
+
+        if isinstance(block, Paragraph) and self.annotations and not in_table \
+                and plain(block.runs).lstrip().startswith(self.annotations):
+            return [block]  # 주석은 문구를 다듬지 않는다 — 글쓴이가 쓴 설명 그대로
 
         if isinstance(block, (Paragraph, ListItem)):
             return self.sentence_block(block, in_table=in_table)

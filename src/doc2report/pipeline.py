@@ -23,6 +23,7 @@ from .transform.structure import (
     drop_blank_blocks,
     fold_headings_into_levels,
     merge_short_list_items,
+    normalize_annotations,
 )
 
 
@@ -242,6 +243,11 @@ def convert_document(
         # 제목 접기보다 먼저 — 접은 뒤에는 제목도 ListItem이라 소제목과 섞여 합쳐질 수 있다.
         doc, merge_changes = merge_short_list_items(doc, prof.text.max_sentence_chars)
         changes.extend(merge_changes)
+    if prof.text.annotation_markers:
+        # 접기 전에 — "(주석)" 같은 표시를 "*"로 통일해야 주석이 □ 항목으로 접히지 않는다.
+        doc, annotation_changes = normalize_annotations(
+            doc, prof.text.annotation_markers, prof.text.annotation_mark)
+        changes.extend(annotation_changes)
     if prof.text.headings_as_levels:
         # 문구를 다듬은 뒤에 접는다 (제목과 본문은 다듬는 규칙이 다르므로 순서가 중요).
         doc, fold_changes = fold_headings_into_levels(

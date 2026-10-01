@@ -30,8 +30,11 @@ from ..ir import (
     plain,
 )
 from ..layout.flow import FlowPlan
+from ..layout.lines import fit_text
+from ..layout.measure import TextMeasurer
 from ..layout.table_fit import TableLayout, plan_tables
 from ..profile import FontSpec, Profile
+from ..units import emu_to_dxa
 from . import oxml
 from .base_template import open_base_template
 from .markers import format_marker
@@ -64,6 +67,9 @@ class DocxRenderer:
         self._break_before = False  # 다음 본문 문단을 새 쪽에서 시작 (PageBreak)
         self._base_indent = 0  # 마지막 (※가 아닌) 문단의 왼쪽 들여쓰기 — ※ 문단은 이보다 더 들여쓴다
         self._last_item: ListItem | None = None  # 주석 줄의 단계 간격을 윗줄 기준으로 잡기 위해
+        self._fit_wrapped = 0    # 엔터로 줄을 나눈 문장 수
+        self._fit_condensed = 0  # 글자 간격을 좁힌 줄 수
+        self._fit_warned = False
 
     # ── 진입점 ──────────────────────────────────────────────────────────
 
@@ -80,6 +86,10 @@ class DocxRenderer:
 
         blocks = self._dateline(doc.blocks)
         self._blocks(blocks)
+        if self._fit_wrapped or self._fit_condensed:
+            self.notes.append(
+                f"줄 맞춤: {self._fit_wrapped}개 문장은 엔터로 줄을 나누고 왼쪽 끝을 윗줄에 맞춤, "
+                f"{self._fit_condensed}개 줄은 글자 간격을 좁혀 한 줄로 맞춤 (글꼴 폭 계산 기준 — Word에서 확인)")
         return RenderResult(document=self.docx, notes=self.notes)
 
     def _dateline(self, blocks: list[Block]) -> list[Block]:
@@ -144,16 +154,21 @@ class DocxRenderer:
             if (container is None and isinstance(self._previous, Heading) and self._previous.page_title
                     and self.profile.has_font("date") and DATE_LINE.match(text.strip())):
                 spec = self.profile.font("date")  # 쪽 제목 바로 아래 날짜
-            runs = block.runs
             lead = self._note_lead(text) if container is None else None
-            if lead:
-                runs = [Run(" " * lead)] + runs  # 들여쓰기 기능 대신 공백으로 (정식보고서)
-            paragraph = self._paragraph(runs, spec, container)
-            if container is None:
-                if self._is_note(text):
-                    paragraph.paragraph_format.left_indent = Emu(self._note_indent())
-                else:
-                    self._base_indent = 0
+            head = " " * lead if lead else ""
+            is_note = container is None and self._is_note(text)
+            indent = self._note_indent() if is_note else int(spec.indent or 0)
+            plan = self._fit(block.runs, spec, head, indent=indent, hanging=0, container=container)
+            if plan is not None:
+                paragraph = self._emit_fitted(plan, spec, head=head, indent=indent, hanging=0,
+                                              space=None, before=None, container=container)
+            else:
+                runs = ([Run(head)] if head else []) + block.runs  # 들여쓰기 기능 대신 공백으로 (정식보고서)
+                paragraph = self._paragraph(runs, spec, container)
+                if is_note:
+                    paragraph.paragraph_format.left_indent = Emu(indent)
+            if container is None and not is_note:
+                self._base_indent = 0
             self._after_table_gap(paragraph, container)
         elif isinstance(block, ListItem):
             self._list_item(block, container, next_block)
@@ -209,10 +224,13 @@ class DocxRenderer:
         spec = self.profile.font("body")
         if level.size:
             spec = spec.resized(level.size)
-        if self.profile.text.level_bold and block.marker is None and level.bold is not None:
+        rules = self.profile.text
+        if (rules.level_bold and level.bold is not None and block.marker != ""
+                and (block.marker is None or rules.level_bold_original)):
             # 말머리뿐 아니라 그 항목 문장 전체에 적용된다 ("1. □로 시작하는 문장은 굵은체").
-            # **도구가 말머리를 붙인 항목에만** — 원문에 말머리가 있던 줄(Confluence·Word·직접 친 □)은
-            # 원문 굵기 그대로다(2026-09-30 사용자: 원문에서 굵은 글씨만 굵게).
+            # 기본은 **도구가 말머리를 붙인 항목에만** — 원문에 말머리가 있던 줄(Confluence·Word·직접 친 □)은
+            # 원문 굵기 그대로다(2026-09-30 사용자). 서식이 없는 글(txt)을 정식보고서로 만들 때만
+            # level_bold_original로 원문 말머리 줄에도 적용한다(2026-10-01 사용자).
             spec = spec.model_copy(update={"bold": level.bold})
         elif block.from_heading:
             # 단계 굵게를 끈 프로파일: 굵은 건 원문 굵은 글씨(run)와 제목뿐이다.
@@ -223,32 +241,119 @@ class DocxRenderer:
         spec = self._noted(spec, note_text)
         lead = level.lead_spaces
         if container is None:
-            lead = self._note_lead(note_text) if self._note_lead(note_text) is not None else lead
+            note_lead = self._note_lead(note_text)
+            lead = note_lead if note_lead is not None else lead
             self._last_item = block
 
-        paragraph = self._new_paragraph(container)
-        oxml.apply_paragraph_format(paragraph, spec, indent=False)
         indent = level.indent
-        note = container is None and self._is_note(block.marker or plain(block.runs).lstrip())
-        if note:
+        if container is None and self._is_note(note_text):
             indent = self._note_indent()
         elif container is None:
             self._base_indent = indent
         # 말머리를 일부러 뺀 항목(꺾쇠 표기)은 내어쓰기 없이 첫 줄과 나머지 줄을 맞춘다.
         hanging = 0 if block.marker == "" else level.hanging
-        oxml.set_list_indent(paragraph, indent, hanging)
-
         space = self._item_spacing(block, level, next_block)
+        before = self._space_before(block, level)
+        head = (" " * lead + marker + level.marker_sep) if marker else ""
+
+        plan = self._fit(block.runs, spec, head, indent=indent, hanging=hanging or 0, container=container)
+        if plan is not None:
+            self._emit_fitted(plan, spec, head=head, indent=indent, hanging=hanging or 0,
+                              space=space, before=before, container=container)
+            return
+
+        paragraph = self._new_paragraph(container)
+        oxml.apply_paragraph_format(paragraph, spec, indent=False)
+        oxml.set_list_indent(paragraph, indent, hanging)
         if space is not None:
             paragraph.paragraph_format.space_after = Emu(space)
-        before = self._space_before(block, level)
         if before:
             paragraph.paragraph_format.space_before = Emu(before)
-
-        if marker:
-            run = paragraph.add_run(" " * lead + marker + level.marker_sep)
+        if head:
+            run = paragraph.add_run(head)
             oxml.apply_run_format(run, spec)
         self._runs(paragraph, block.runs, spec)
+
+    # ── 줄 맞춤 (정식보고서: 엔터로 줄 나눔 + 글자 간격 좁히기) ────────────
+
+    def _measurer(self, spec: FontSpec, bold: bool) -> TextMeasurer:
+        return TextMeasurer(spec.east_asia, spec.latin or spec.east_asia, spec.size, bold=bold,
+                            scale=spec.char_scale or 1.0)
+
+    def _fit(self, runs: list[Run], spec: FontSpec, head: str, *, indent: int, hanging: int,
+             container=None, extra: str = ""):
+        """문장이 한 줄에 안 들어가면 (줄별 runs, 좁힐 양) 계획을 돌려준다. 계획이 필요 없으면 None.
+
+        head = 첫 줄 앞 접두(공백+말머리), extra = 둘째 줄부터 접두 폭에 더할 글자(주석의 "* ").
+        둘째 줄부터는 접두 폭만큼 공백을 쳐서 왼쪽 끝을 윗줄 글자에 맞춘다 — 내어쓰기가 있으면 내어쓰기로.
+        """
+        rules = self.profile.text
+        if not rules.fit_lines or container is not None:
+            return None
+        text = "".join(run.text for run in runs)
+        if not text.strip() or "\n" in text or "\t" in text:
+            return None
+        measure = self._measurer(spec, bool(spec.bold))
+        if not measure.font_available:
+            if not self._fit_warned:
+                self.notes.append(f"글꼴({spec.east_asia})을 찾지 못해 줄 맞춤(글자 간격 좁히기·줄 나눔)을 건너뜀")
+                self._fit_warned = True
+            return None
+        space_w = measure.char_width(" ")
+        usable = self.profile.page.usable_width
+        head_w = measure.width(head)
+        if hanging:
+            first_room = cont_room = usable - indent - hanging
+            cont_spaces, cont_indent = 0, indent + hanging
+        else:
+            first_room = usable - indent - head_w
+            cont_spaces = round((head_w + measure.width(extra)) / space_w) if space_w else 0
+            cont_room = usable - indent - cont_spaces * space_w
+            cont_indent = indent
+        widths: list[float] = []
+        for run in runs:
+            widths.extend(self._measurer(spec, bool(spec.bold or run.bold)).char_width(c) for c in run.text)
+        lines = fit_text(text, widths, first_room=first_room, cont_room=cont_room,
+                         max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
+                         margin=rules.fit_margin)
+        if len(lines) <= 1 and not any(line.steps for line in lines):
+            return None
+        if len(lines) > 1:
+            self._fit_wrapped += 1
+        self._fit_condensed += sum(1 for line in lines if line.steps)
+        pieces = [(_slice_runs(runs, line.start, line.end),
+                   emu_to_dxa(line.steps * (rules.condense_step or 0))) for line in lines]
+        return _FitPlan(pieces, cont_spaces, cont_indent)
+
+    def _emit_fitted(self, plan: _FitPlan, spec: FontSpec, *, head: str, indent: int, hanging: int,
+                     space: int | None, before: int | None, container=None):
+        """줄마다 문단 하나 — 글쓴이가 엔터로 줄을 나눈 모양. 첫 문단을 돌려준다."""
+        first = None
+        for i, (line_runs, condense) in enumerate(plan.pieces):
+            last = i == len(plan.pieces) - 1
+            paragraph = self._new_paragraph(container)
+            oxml.apply_paragraph_format(paragraph, spec, indent=False)
+            fmt = paragraph.paragraph_format
+            if i == 0:
+                first = paragraph
+                oxml.set_list_indent(paragraph, indent, hanging)
+                if before:
+                    fmt.space_before = Emu(before)
+                if head:
+                    oxml.apply_run_format(paragraph.add_run(head), spec)
+            else:
+                oxml.set_list_indent(paragraph, plan.cont_indent, 0)
+                fmt.space_before = Emu(0)
+                if plan.cont_spaces:
+                    oxml.apply_run_format(paragraph.add_run(" " * plan.cont_spaces), spec)
+            self._runs(paragraph, line_runs, spec, condense=condense)
+            if last:
+                if space is not None:
+                    fmt.space_after = Emu(space)
+            else:
+                fmt.space_after = Emu(0)
+                fmt.keep_with_next = True  # 한 문장의 줄들이 쪽 사이에서 떨어지지 않게
+        return first
 
     def _note_lead(self, text: str) -> int | None:
         """※ 줄 앞에 칠 공백 수(text.note_lead_spaces). ※ 줄이 아니거나 안 쓰면 None."""
@@ -267,13 +372,18 @@ class DocxRenderer:
     def _annotation(self, block: Paragraph, next_block: Block | None) -> None:
         """"* 설명" 주석 — 윗줄에 딸린 파란 작은 글씨 문단. 단계가 바뀌는 간격은 주석이 아니라 윗줄 기준이다."""
         rules = self.profile.text
-        runs = block.runs
-        if rules.annotation_lead_spaces:
-            runs = [Run(" " * rules.annotation_lead_spaces)] + runs
-        paragraph = self._paragraph(runs, self.profile.font("annotation"))
+        spec = self.profile.font("annotation")
+        head = " " * rules.annotation_lead_spaces
+        indent = int(spec.indent or 0)
         gap = self._annotation_gap(next_block)
-        if gap is not None:
-            paragraph.paragraph_format.space_after = Emu(gap)
+        plan = self._fit(block.runs, spec, head, indent=indent, hanging=0, extra=rules.annotation_mark + " ")
+        if plan is not None:
+            paragraph = self._emit_fitted(plan, spec, head=head, indent=indent, hanging=0,
+                                          space=gap, before=None)
+        else:
+            paragraph = self._paragraph(([Run(head)] if head else []) + block.runs, spec)
+            if gap is not None:
+                paragraph.paragraph_format.space_after = Emu(gap)
         self._after_table_gap(paragraph, None)
 
     def _annotation_gap(self, next_block: Block | None) -> int | None:
@@ -553,7 +663,7 @@ class DocxRenderer:
         self._runs(paragraph, runs, spec)
         return paragraph
 
-    def _runs(self, paragraph, runs: list[Run], spec: FontSpec) -> None:
+    def _runs(self, paragraph, runs: list[Run], spec: FontSpec, condense: int = 0) -> None:
         for item in runs:
             if not item.text:
                 continue
@@ -574,6 +684,8 @@ class DocxRenderer:
                 run_spec = run_spec.model_copy(update=updates)
             run = paragraph.add_run(item.text)
             oxml.apply_run_format(run, run_spec)
+            if condense:
+                oxml.set_char_spacing(run, -condense)
 
     def _new_paragraph(self, container=None):
         target = container if container is not None else self.docx
@@ -586,6 +698,24 @@ class DocxRenderer:
     def _paragraphs(self, container=None):
         target = container if container is not None else self.docx
         return target.paragraphs
+
+
+@dataclass
+class _FitPlan:
+    pieces: list[tuple[list[Run], int]]   # (줄의 runs, 좁힌 양 1/20pt)
+    cont_spaces: int                      # 둘째 줄부터 앞에 칠 공백 수
+    cont_indent: int                      # 둘째 줄부터 문단 왼쪽 들여쓰기
+
+
+def _slice_runs(runs: list[Run], start: int, end: int) -> list[Run]:
+    out: list[Run] = []
+    pos = 0
+    for run in runs:
+        lo, hi = max(start, pos), min(end, pos + len(run.text))
+        if lo < hi:
+            out.append(run.copy_with(run.text[lo - pos:hi - pos]))
+        pos += len(run.text)
+    return out
 
 
 def _drop_leading_blank(docx_cell) -> None:

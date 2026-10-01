@@ -129,6 +129,12 @@ def apply_run_format(run, spec: FontSpec) -> None:
         scale.set(qn("w:val"), str(int(round(spec.char_scale * 100))))
 
 
+def set_char_spacing(run, twips: int) -> None:
+    """글자 간격(1/20pt). 음수는 좁힘 — 줄이 아슬아슬하게 넘칠 때 줄 바뀜을 막는다."""
+    spacing = _ordered(run._element.get_or_add_rPr(), "w:spacing")
+    spacing.set(qn("w:val"), str(twips))
+
+
 def apply_paragraph_format(paragraph, spec: FontSpec, *, indent: bool = True) -> None:
     fmt = paragraph.paragraph_format
     if spec.align:
