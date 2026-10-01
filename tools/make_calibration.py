@@ -20,6 +20,7 @@ from docx.shared import Emu, Pt  # noqa: E402
 
 from doc2report.profile import load_profile  # noqa: E402
 from doc2report.render import oxml  # noqa: E402
+from doc2report.render.base_template import open_base_template  # noqa: E402
 
 HANGUL = "가나다라마바사아자차카타파하" * 6
 TESTS = [
@@ -36,7 +37,7 @@ TESTS = [
 def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else "formal"
     profile = load_profile(name)
-    doc = Document()
+    doc = Document(profile.template or open_base_template())  # python-docx 기본 .docx 파일은 사내 보안이 막는다(CLAUDE.md)
     section = doc.sections[0]
     page = profile.page
     section.page_width, section.page_height = Emu(page.width), Emu(page.height)
