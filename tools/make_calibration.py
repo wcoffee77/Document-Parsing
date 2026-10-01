@@ -62,6 +62,19 @@ def main() -> None:
     out.parent.mkdir(exist_ok=True)
     doc.save(out)
     print(f"저장: {out} (글꼴 {body.east_asia}, {body.size / 12700:g}pt)")
+    # 같은 내용을 문서 설정만 바꿔 저장 — 사용자의 새 Word 문서와 줄 폭이 다른 원인(호환 모드 등)을 가린다.
+    settings = doc.settings.element
+    compat = settings.find(qn("w:compat"))
+    for suffix, mode, control in (("B_호환15", "15", None), ("C_호환15_문장부호압축", "15", "compressPunctuation")):
+        for item in compat.findall(qn("w:compatSetting")):
+            if item.get(qn("w:name")) == "compatibilityMode":
+                item.set(qn("w:val"), mode)
+        spacing_control = settings.find(qn("w:characterSpacingControl"))
+        if control and spacing_control is not None:
+            spacing_control.set(qn("w:val"), control)
+        variant = out.with_name(f"calibration_{suffix}.docx")
+        doc.save(variant)
+        print(f"저장: {variant}")
 
 
 if __name__ == "__main__":
