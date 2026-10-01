@@ -163,3 +163,19 @@ def test_cli_has_llm_and_shorten_flags():
 
     out = CliRunner().invoke(app, ["convert", "--help"]).output
     assert "--llm" in out and "--shorten" in out
+
+
+def test_formal_does_not_merge_short_list_items(tmp_path, fake_fonts):
+    src = tmp_path / "m.md"
+    src.write_text("## 비교\n\n- A사 솔루션: 기능 우수\n- B사 솔루션: 비용 낮음\n", encoding="utf-8")
+    out = tmp_path / "o.docx"
+    convert(str(src), out, "formal", polish="none")
+    texts = [p.text.strip() for p in OpenDocx(str(out)).paragraphs]
+    assert "□ A사 솔루션: 기능 우수" in texts and "□ B사 솔루션: 비용 낮음" in texts   # 둘로 남는다("및"으로 안 합침)
+
+
+def test_tab_rows_with_trimmed_trailing_cells_stay_in_the_table(tmp_path):
+    doc, _ = _convert(tmp_path, "1. 현황\n□ 표\n등급\t비율\t지급률\t비고\nS\t10%\t150%\t최상위\nA\t30%\t120%\nB\t40%\t100%\t기준\n")
+    assert len(doc.tables) == 1 and len(doc.tables[0].rows) == 4
+    assert [c.text for c in doc.tables[0].rows[2].cells] == ["A", "30%", "120%", ""]
+    assert not any("\t" in p.text for p in doc.paragraphs)

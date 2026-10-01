@@ -161,13 +161,16 @@ def _literal(line: str) -> str:
 
 
 def _tab_block(lines: list[str], start: int) -> int:
-    """start부터 탭으로 나뉜(칸 수가 같은) 줄이 몇 줄 이어지는지. 2줄 미만이면 0."""
+    """start부터 탭으로 나뉜 줄이 몇 줄 이어지는지. 2줄 미만이면 0.
+
+    머리 줄의 칸 수가 기준이다. 뒤 줄이 그보다 칸이 **적으면**(엑셀에서 복사할 때 끝의 빈 칸 탭이 잘려 나온
+    줄 — "A\t30%\t120%") 표의 줄로 보고 빈 칸을 채운다. 칸이 더 많거나 탭이 없는 줄은 표의 끝이다."""
     width = lines[start].count("\t")
     if width == 0:
         return 0
     count = 0
     for line in lines[start:]:
-        if line.count("\t") != width or not line.strip():
+        if not line.strip() or not 1 <= line.count("\t") <= width:
             break
         count += 1
     return count if count >= 2 else 0
@@ -175,6 +178,8 @@ def _tab_block(lines: list[str], start: int) -> int:
 
 def _tab_table(rows: list[str]) -> list[str]:
     cells = [[c.strip().replace("|", "\\|") for c in row.split("\t")] for row in rows]
+    width = len(cells[0])
+    cells = [row + [""] * (width - len(row)) for row in cells]  # 끝 칸이 빈 줄은 탭이 잘려 칸이 모자라다
     header, body = cells[0], cells[1:]
     out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     out += ["| " + " | ".join(row) + " |" for row in body]
