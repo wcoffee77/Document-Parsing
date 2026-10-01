@@ -45,6 +45,8 @@ def to_markdown(s: dict) -> str:
         if r["count"] < 3:
             continue
         detail += [f"- **{r['marker']}** (n={r['count']})",
+                   *_dist_rows("  앞 공백 수", r["leading_spaces"]),
+                   f"  - 전각 공백이 섞인 비율 {r['leading_wide_share']}",
                    *_dist_rows("  굵기 모양(말머리 뒤)", r["bold_pattern"]),
                    *[f"  - 하위 항목 {label} → 굵기: " + ", ".join(
                        f"{e['value']} ({e['share']:.0%}, {e['count']})" for e in rows_)

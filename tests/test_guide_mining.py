@@ -360,3 +360,15 @@ def test_theme_shading_children_bold_and_charset(tmp_path):
     assert s["charset"]["hanja"][0]["value"] == "無"
     assert "BT" in {r["value"] for r in s["phrases"]["latin_terms"]}
     assert s["docs"]["per_doc"][0]["margins_mm"] is not None
+
+
+def test_leading_space_distribution_and_fullwidth(tmp_path):
+    path = tmp_path / "lead.docx"
+    doc = Document()
+    for text in ("  □ 하나", "  □ 둘", "\u3000□ 셋", "    - 넷", "    - 다섯", "    - 여섯"):
+        doc.add_paragraph(text)
+    doc.save(path)
+    rows = {r["marker"]: r for r in summarize([probe_docx(path)])["markers"]["by_marker"]}
+    assert rows["글자 □"]["leading_spaces"][0] == {"value": 2, "count": 2, "share": 0.667}
+    assert rows["글자 -"]["leading_spaces"][0]["value"] == 4
+    assert rows["글자 □"]["leading_wide_share"] == 0.333 and rows["글자 -"]["leading_wide_share"] == 0.0

@@ -187,6 +187,8 @@ def _markers(probes) -> dict:
             "left_mm_median": _median([x.left_mm for x in items]),
             "first_line_mm_median": _median([x.first_line_mm for x in items]),
             "leading_spaces_median": _median([x.leading_spaces for x in items]),
+            "leading_spaces": _top(Counter(x.leading_spaces for x in items), n=5),
+            "leading_wide_share": _ratio(sum(1 for x in items if x.leading_wide), len(items)),
             "size_pt_median": _median(sizes),
             "bold_share": _ratio(sum(1 for x in items if x.fmt.bold), len(items)),
             "sep": dict(Counter(x.marker_sep or "-" for x in items).most_common(3)),

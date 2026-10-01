@@ -88,6 +88,7 @@ class ParaProbe:
     box: int | None = None           # where == "textbox"이면 DocProbe.textboxes의 번호
     bold_pattern: str = "none"       # 말머리 뒤 글자 기준: all | none | prefix | suffix | mixed
     underline: bool = False          # 말머리 뒤 글자의 과반이 밑줄
+    leading_wide: int = 0            # 앞 공백 중 전각 공백(U+3000) 개수 — 반각 두 칸과 폭이 다르다
     cell_row: int | None = None      # where == "table"이면 칸 위치
     cell_col: int | None = None
 
@@ -312,6 +313,7 @@ class _Prober:
         if marker_kind == "typed":
             offset = leading + len(marker or "") + (1 if sep in ("tab", "space") else 0)
         para.bold_pattern, para.underline = self._bold_pattern(p, style, offset)
+        para.leading_wide = text[:leading].count("\u3000")
         if para.page_break_before or para.has_page_break:
             self.probe.page_breaks += 1
         self.probe.paragraphs.append(para)
