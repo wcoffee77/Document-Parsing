@@ -1,0 +1,88 @@
+# 정식보고서 서식 — 상급 조직 보고용. default를 물려받고 아래 값만 바꾼다.
+#
+# 목적이 다른 두 서식이 있다 (2026-10-01 사용자):
+#   - 정식보고서(이 파일): 상급 조직에 보고하는 문서. 사내 정식보고서 8건 실측(guide_mining probe)에 맞춘다.
+#   - Confluence 변환(confluence.yaml): Confluence 문서를 A4로 인쇄해 편하게 읽기 위한 것. 이 파일과 무관.
+#
+# 정식보고서 실측과 사용자 설명으로 정한 것:
+#   1) 단계는 들여쓰기 기능이 아니라 **앞 공백**으로 구분한다: 1.은 0칸, □는 2칸, -는 거기서 2칸 더(4칸).
+#      말머리 뒤도 공백 한 칸(탭 아님). 그래서 indent·hanging은 0이다 — 둘째 줄은 왼쪽 여백에서 시작한다.
+#      (probe 중앙값은 □ 1칸, - 3칸, ※ 4칸으로 나왔다 — 사용자 설명(2·4칸)을 따르되, 다음 실측에서
+#       공백 수 분포를 확인한다.)
+#   2) 표는 왼쪽 정렬, 머리행 음영 없음. 표 안 글자는 가운데 정렬 + 머리행 굵게(실측 70%·78%).
+#   3) 주석은 "* 설명" — 바탕체 10pt 파란 글씨. 실제 문서는 텍스트 상자로 줄 아래에 띄우지만(B안) 여기서는
+#      윗줄에 딸린 일반 문단으로 쓴다. 공백 4칸은 임시값(상자 위치 실측 전).
+#   4) ※는 본문과 같은 크기(실측 14pt)이고 앞 공백 4칸.
+
+extends: default
+name: formal
+description: 정식보고서 (상급 조직 보고용 — 공백으로 단계 구분, 왼쪽 정렬 표, 파란 주석)
+label: 정식보고서
+preset_order: 3
+
+fonts:
+  body:
+    line_spacing: 143%       # 실측 1.429배 63%
+  # 주석 "* …" — 바탕체 10pt 파란 글씨(실측: 크기 10pt 80%, 색 0000FF 53%·3333FF 21%, 줄간격 1.0 86%)
+  annotation:
+    size: 10pt
+    color: "0000FF"
+    line_spacing: 100%
+    space_before: 0pt
+    space_after: 0pt
+    align: left
+
+# 목록은 통째로 덮어써지므로 네 단계를 모두 적는다 (간격·굵기는 default와 같다).
+numbering:
+  - marker: "{n}."
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 0
+    marker_sep: " "
+    bold: true
+    space_before: 14pt
+    space_after: 0pt
+    space_after_level_change: 6pt
+
+  - marker: "□"
+    ordered_marker: "□"
+    aliases: ["■", "◻", "ㅁ"]
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 2
+    marker_sep: " "
+    bold: true
+    space_before: 3pt
+    space_after: 0pt
+    space_after_level_change: 6pt
+
+  - marker: "-"
+    ordered_marker: "-"
+    aliases: ["–", "—"]
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 4
+    marker_sep: " "
+    space_after: 0pt
+    space_after_level_change: 6pt
+
+  - marker: "·"
+    ordered_marker: "·"
+    aliases: ["ㆍ", "ᆞ", "‧", "∙", "•", "."]
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 6
+    marker_sep: " "
+    space_after: 0pt
+    space_after_level_change: 6pt
+
+tables:
+  align: left
+  header_shading: null       # 정식보고서 표는 음영 없음 (실측: 직접 음영 0건)
+
+text:
+  note_size_delta: 0pt       # ※는 본문과 같은 크기 (실측 14pt)
+  note_indent: 0mm           # ※ 들여쓰기는 공백으로 (note_lead_spaces)
+  note_lead_spaces: 4
+  annotation_markers: ["*"]
+  annotation_lead_spaces: 4

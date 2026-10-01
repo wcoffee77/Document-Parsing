@@ -817,6 +817,22 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   36%·없음 26%로 갈려 하위 항목 유무와 대조하는 항목을 넣었다. ④ 한자 약어(無·要·日)·↑·▲·영문 약어가 보여 글자 구성·기호
   절을 넣었다. ⑤ 칸 테두리(표 수준 테두리는 91%가 미지정 — 스타일·칸 테두리에 있을 것), 상자 x·세로 어긋남, 문서별
   대표 크기·줄간격·여백도 추가.
+- **정식보고서 서식 분리 (2026-10-01 사용자 결정)** — 목적이 다른 두 서식이다: **정식보고서 = 상급 조직 보고용**(이 도구가
+  `profiles/formal.yaml`로 따로 구현), **Confluence 변환 = A4로 인쇄해 편하게 읽기용**(`confluence.yaml`, 그대로 유지). `formal`은
+  `extends: default`지만 `default`·`confluence`는 한 글자도 안 바꿨다(테스트 `test_other_profiles_are_unchanged`가 지킴).
+  실측 8건 + 사용자 설명으로 정한 값: ① **단계는 들여쓰기 기능이 아니라 앞 공백**(1.은 0칸, □ 2칸, - 4칸, · 6칸; 말머리 뒤도 공백
+  한 칸) — `NumberingLevel.lead_spaces`·`marker_sep` 새 필드, indent·hanging은 0이라 **둘째 줄은 왼쪽 여백에서 시작**한다
+  (probe가 left=0·first_line=0으로 이미 보여 줬던 것). ② 표 왼쪽 정렬·음영 없음(`header_shading: null`). ③ **주석 = B안**:
+  `*`로 시작하는 문단은 `fonts.annotation`(바탕체 10pt, 0000FF)으로 쓰고 □ 항목으로 접지 않는다(`text.annotation_markers`,
+  `fold_headings_into_levels(annotation_markers=)`). 실제 문서는 텍스트 상자지만 여기서는 윗줄에 딸린 일반 문단(편집하기 쉬움).
+  주석 줄이 끼어도 단계 바뀌는 간격은 **윗줄 기준**(`_annotation_gap`, `_item_spacing`, `_space_before`). ④ ※는 본문과 같은 크기
+  (`note_size_delta: 0pt`)이고 공백 4칸(`note_lead_spaces`). ⑤ 본문 줄간격 143%(실측 1.429배 63%).
+  **웹 화면 주의**: preset 서식에 규칙(text)을 끼울 때 ※·주석 표시 방식은 서식이 정한다 — `profile.with_format_text`가
+  `FORMAT_TEXT_FIELDS`를 preset 쪽으로 지킨다(안 그러면 formal을 골라도 규칙 프로파일의 text로 덮여 주석이 사라진다).
+  **아직 안 정해진 것**: 주석 줄의 앞 공백 4칸은 임시값(상자 x 위치 실측 전), □·- 공백 수(사용자 2·4칸 vs probe 중앙값 1·3칸 —
+  다음 실측에서 공백 수 분포를 보고 확정), 제목 밑줄(default는 있음, 실측 38%), □ 굵기(default 문장 전체 굵게, 실측 전부 39%).
+  Markdown의 `* 문장`은 목록으로 읽혀 주석 표시가 사라진다 — 주석은 Confluence·Word·붙여넣은 글에서 문단으로 들어올 때만 인식한다.
+  이 샌드박스의 LibreOffice는 변경 전 코드의 docx도 못 열어(환경 문제) 렌더 실측은 못 했다 — **Word 실측 필요**.
 - **진행 상태**: 1단계 probe(서식·형식·문장 통계, 층별 종결·길이, 주석 상자 포함)를 합성 docx로 검증하고 사내 문서 8건으로
   1차 실측했다. 다음: 샘플 리포트로 변환 결과와의 차이 확인 →
   `rules/*.yaml` 검수기(임계값은 실측으로 채움) → 변환 결과 채점기 → 파일럿 후 LLM 단계.

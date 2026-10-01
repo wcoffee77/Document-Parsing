@@ -249,7 +249,7 @@ def convert_document(
             marker_depths=prof.marker_depths(), normalize=prof.text.normalize_levels,
             no_marker_openers=prof.text.no_marker_openers,
             auto_markers=prof.text.auto_markers, plain_level=prof.text.plain_paragraph_level,
-            note_marks=prof.text.note_marks)
+            note_marks=prof.text.note_marks, annotation_markers=prof.text.annotation_markers)
         changes.extend(fold_changes)
     if use_llm:
         from .transform.llm_polish import polish_document

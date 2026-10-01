@@ -45,6 +45,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                               auto_markers: bool = True,
                               plain_level: int | None = None,
                               note_marks: list[str] | None = None,
+                              annotation_markers: list[str] | None = None,
                               ) -> tuple[Document, list[Change]]:
     """제목을 ListItem으로 바꾸고, 그 아래 목록의 깊이를 한 단계씩 민다."""
     blocks: list[Block] = []
@@ -53,6 +54,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     marker_re = _marker_pattern(markers or [])
     depths = marker_depths or {}
     openers = tuple(no_marker_openers or ())
+    annotations = tuple(annotation_markers or ())
 
     def _marked_depth(runs: list[Run]) -> int | None:
         found = _find_marker(runs, marker_re)
@@ -97,6 +99,9 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
         elif isinstance(block, ListItem):
             blocks.append(item(heading_depth + 1 + block.depth, block.runs, block.marker,
                                ordered=block.ordered, number=block.number))
+        elif (isinstance(block, Paragraph) and annotations
+              and plain(block.runs).lstrip().startswith(annotations)):
+            blocks.append(block)  # 주석("* …")은 항목이 아니라 윗줄에 딸린 줄 — 문단 그대로 둔다
         elif isinstance(block, Paragraph) and heading_depth >= 0:
             # 제목 아래 본문 문단도 그 단계의 항목으로 붙인다. 원문 말머리를 살리는 경우엔
             # 그 말머리가 가리키는 단계("-"면 - 단계)로 둔다 — 제목보다 얕아지지는 않게.
@@ -122,7 +127,7 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
             isinstance(b, (ListItem, Heading)) for b in blocks):
         # 제목도 말머리도 없는 메모 — 문단마다 말머리를 달아 개조식으로 구분한다. 날짜 줄·꺾쇠 표기·
         # ※ 참고는 문단 그대로 둔다.
-        skip = tuple(openers) + tuple(note_marks or ())
+        skip = tuple(openers) + tuple(note_marks or ()) + annotations
         blocks = [ListItem(depth=plain_level, runs=b.runs)
                   if isinstance(b, Paragraph) and not DATE_LINE.match(plain(b.runs).strip())
                   and not plain(b.runs).lstrip().startswith(skip or ("\0",)) else b

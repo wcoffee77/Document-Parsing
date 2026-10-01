@@ -63,6 +63,7 @@ class DocxRenderer:
         self._previous: Block | None = None  # 바로 앞에 무엇이 왔는지 (표 뒤 간격 판단용)
         self._break_before = False  # 다음 본문 문단을 새 쪽에서 시작 (PageBreak)
         self._base_indent = 0  # 마지막 (※가 아닌) 문단의 왼쪽 들여쓰기 — ※ 문단은 이보다 더 들여쓴다
+        self._last_item: ListItem | None = None  # 주석 줄의 단계 간격을 윗줄 기준으로 잡기 위해
 
     # ── 진입점 ──────────────────────────────────────────────────────────
 
@@ -136,11 +137,18 @@ class DocxRenderer:
             self._after_table_gap(self._heading(block, container), container)
         elif isinstance(block, Paragraph):
             text = plain(block.runs).lstrip()
+            if container is None and self._is_annotation(text):
+                self._annotation(block, next_block)
+                return
             spec = self._noted(self.profile.font("body"), text)
             if (container is None and isinstance(self._previous, Heading) and self._previous.page_title
                     and self.profile.has_font("date") and DATE_LINE.match(text.strip())):
                 spec = self.profile.font("date")  # 쪽 제목 바로 아래 날짜
-            paragraph = self._paragraph(block.runs, spec, container)
+            runs = block.runs
+            lead = self._note_lead(text) if container is None else None
+            if lead:
+                runs = [Run(" " * lead)] + runs  # 들여쓰기 기능 대신 공백으로 (정식보고서)
+            paragraph = self._paragraph(runs, spec, container)
             if container is None:
                 if self._is_note(text):
                     paragraph.paragraph_format.left_indent = Emu(self._note_indent())
@@ -174,6 +182,7 @@ class DocxRenderer:
     def _heading(self, block: Heading, container=None) -> None:
         self._counters.clear()  # 제목이 나오면 항목 번호를 다시 1부터
         self._base_indent = 0
+        self._last_item = None
         if block.page_title and self.profile.has_font("title"):
             # 입력마다 새 쪽 — 쪽 제목은 문서 제목 서식(큰 글씨·가운데·밑줄)
             return self._paragraph(block.runs, self.profile.font("title"), container)
@@ -210,7 +219,12 @@ class DocxRenderer:
             spec = spec.model_copy(update={"bold": True})
 
         marker = self._marker(block, level)
-        spec = self._noted(spec, block.marker or plain(block.runs).lstrip())
+        note_text = block.marker or plain(block.runs).lstrip()
+        spec = self._noted(spec, note_text)
+        lead = level.lead_spaces
+        if container is None:
+            lead = self._note_lead(note_text) if self._note_lead(note_text) is not None else lead
+            self._last_item = block
 
         paragraph = self._new_paragraph(container)
         oxml.apply_paragraph_format(paragraph, spec, indent=False)
@@ -232,9 +246,46 @@ class DocxRenderer:
             paragraph.paragraph_format.space_before = Emu(before)
 
         if marker:
-            run = paragraph.add_run(marker + "\t")
+            run = paragraph.add_run(" " * lead + marker + level.marker_sep)
             oxml.apply_run_format(run, spec)
         self._runs(paragraph, block.runs, spec)
+
+    def _note_lead(self, text: str) -> int | None:
+        """※ 줄 앞에 칠 공백 수(text.note_lead_spaces). ※ 줄이 아니거나 안 쓰면 None."""
+        rules = self.profile.text
+        if rules.note_lead_spaces is not None and any(text.startswith(m) for m in rules.note_marks):
+            return rules.note_lead_spaces
+        return None
+
+    def _is_annotation(self, text: str) -> bool:
+        marks = self.profile.text.annotation_markers
+        return bool(marks) and text.startswith(tuple(marks))
+
+    def _is_annotation_block(self, block: Block | None) -> bool:
+        return isinstance(block, Paragraph) and self._is_annotation(plain(block.runs).lstrip())
+
+    def _annotation(self, block: Paragraph, next_block: Block | None) -> None:
+        """"* 설명" 주석 — 윗줄에 딸린 파란 작은 글씨 문단. 단계가 바뀌는 간격은 주석이 아니라 윗줄 기준이다."""
+        rules = self.profile.text
+        runs = block.runs
+        if rules.annotation_lead_spaces:
+            runs = [Run(" " * rules.annotation_lead_spaces)] + runs
+        paragraph = self._paragraph(runs, self.profile.font("annotation"))
+        gap = self._annotation_gap(next_block)
+        if gap is not None:
+            paragraph.paragraph_format.space_after = Emu(gap)
+        self._after_table_gap(paragraph, None)
+
+    def _annotation_gap(self, next_block: Block | None) -> int | None:
+        last = self._last_item
+        if last is None:
+            return None
+        level = self.profile.numbering_level(last.depth)
+        if self._is_annotation_block(next_block):
+            return 0
+        if isinstance(next_block, ListItem) and next_block.depth == last.depth:
+            return level.space_after
+        return level.level_change_space(self.flow.relaxed)
 
     def _is_note(self, text: str) -> bool:
         rules = self.profile.text
@@ -274,6 +325,8 @@ class DocxRenderer:
 
     def _item_spacing(self, block: ListItem, level, next_block: Block | None) -> int | None:
         """단계가 바뀌는 자리(1. → □ → -)에서만 단락 뒤 간격을 준다."""
+        if self._is_annotation_block(next_block):
+            return 0  # 주석이 윗줄에 딸려 붙는다 — 단계 간격은 주석 줄이 대신 준다
         same_level = isinstance(next_block, ListItem) and next_block.depth == block.depth
         if same_level:
             return level.space_after
@@ -284,6 +337,8 @@ class DocxRenderer:
         previous = self._previous
         if previous is None:
             return 0  # 문서 첫 항목은 제목·날짜 간격으로 충분하다
+        if self._is_annotation_block(previous) and self._last_item is not None:
+            previous = self._last_item  # 주석은 건너뛰고 그 윗줄로 판단
 
         before = 0
         deeper_before = isinstance(previous, ListItem) and previous.depth > block.depth

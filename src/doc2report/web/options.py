@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date as _date
 
 from ..ir import Document, Heading, ListItem, Paragraph, Table, is_blank, iter_tables, plain
-from ..profile import PROFILE_DIR, Profile, load_profile
+from ..profile import PROFILE_DIR, Profile, load_profile, with_format_text
 from ..transform.structure import has_leading_marker
 from ..units import emu_to_mm, fmt_pt
 
@@ -213,8 +213,9 @@ def manual_rules(prof: Profile, options: dict) -> tuple[Profile, str, bool]:
         table_updates["allow_landscape"] = bool(table_opts["allow_landscape"])
     if table_opts.get("align") in dict(TABLE_CHOICES["align"]):
         table_updates["align"] = table_opts["align"]
-    prof = prof.model_copy(update={"text": text.model_copy(update=text_updates),
-                                   "tables": prof.tables.model_copy(update=table_updates)})
+    prof = prof.model_copy(update={
+        "text": with_format_text(text.model_copy(update=text_updates), prof.text),
+        "tables": prof.tables.model_copy(update=table_updates)})
     polish = options.get("polish") or ("none" if text.polish == "none" else "rules")
     if polish not in ("none", "rules", "llm"):
         raise ValueError(f"알 수 없는 문장 다듬기 방식: {polish}")
@@ -276,7 +277,7 @@ def auto_decide(docs: list[Document], kinds: list[str], *, allow_llm: bool,
                        f"'{label}' 서식이 더 잘 맞을 수 있음(서식은 고른 그대로 둠)")
 
     text_profile = load_profile("confluence" if structured else "default")
-    prof = preset.model_copy(update={"text": text_profile.text})
+    prof = preset.model_copy(update={"text": with_format_text(text_profile.text, preset.text)})
     polish = "none" if structured else "rules"
     llm = allow_llm and llm_ready
     if llm:

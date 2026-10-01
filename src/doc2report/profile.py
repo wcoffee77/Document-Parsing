@@ -155,6 +155,11 @@ class NumberingLevel(_Base):
     space_after_level_change_max: int | None = None  # 지면에 여유가 있을 때까지 늘릴 값
     bold: bool | None = None
     size: int | None = None
+    lead_spaces: int = 0
+    # 말머리 앞에 칠 공백 개수. 정식보고서는 들여쓰기 기능 대신 공백(□ 2칸, - 4칸)으로 단계를
+    # 구분한다(2026-10-01 사용자). 이때는 indent·hanging을 0으로 둔다.
+    marker_sep: str = "\t"
+    # 말머리와 본문 사이: "\t"(탭 — 내어쓰기 정렬용) 또는 " "(공백 — 정식보고서 실측 100%).
 
     @field_validator("indent", "hanging", mode="before")
     @classmethod
@@ -291,6 +296,12 @@ class TextRules(_Base):
     # (2026-09-30 사용자). 떼고 나면 빈 제목이 되는 경우는 그대로 둔다.
     note_indent: int | None = None
     # ※ 참고사항 문단은 바로 윗줄 문단의 들여쓰기보다 이만큼 더 들여쓴다(2026-09-29 사용자: +0.4cm).
+    note_lead_spaces: int | None = None
+    # 있으면 ※ 줄 앞에 이 개수만큼 공백을 친다(정식보고서: 들여쓰기 기능 대신 공백).
+    annotation_markers: list[str] = Field(default_factory=list)
+    # 이 기호("*")로 시작하는 문단은 주석 — fonts.annotation(파란 10pt 바탕체)으로 쓰고 항목으로 접지 않는다
+    # (2026-10-01 사용자: 정식보고서의 주석은 *로 시작하는 파란 10pt 바탕체. B안 = 텍스트 상자 대신 문단).
+    annotation_lead_spaces: int = 0
 
     @field_validator("note_size_delta", mode="before")
     @classmethod
@@ -301,6 +312,16 @@ class TextRules(_Base):
     @classmethod
     def _indent(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="mm")
+
+
+FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
+                      "annotation_markers", "annotation_lead_spaces")
+
+
+def with_format_text(rules: TextRules, preset: TextRules) -> TextRules:
+    """규칙(text)은 자동 판단·직접 선택이 정하지만, ※·주석을 어떻게 **보이게** 하는지는 서식의 몫이다.
+    웹 화면이 preset 서식에 규칙 text를 끼울 때 서식이 정한 이 값들은 preset 쪽을 지킨다."""
+    return rules.model_copy(update={f: getattr(preset, f) for f in FORMAT_TEXT_FIELDS})
 
 
 class Choices(_Base):
