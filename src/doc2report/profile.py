@@ -348,6 +348,12 @@ class TextRules(_Base):
     # Word 호환 옵션 "한글·영문 글자 폭 균형"(balanceSingleByteDoubleByteWidth)을 문서에 켠다. 한글 판 Word의
     # 새 문서는 이것이 켜져 있어, 같은 글자 간격 −1pt에서 한 줄에 40자(끄면 37자)가 들어간다 — 2026-10-02 사용자 실측
     # (calibration J·L 40자, 나머지 37자). 줄 맞춤(fit_lines)이 사용자가 Word에서 보는 폭과 같아지게 한다.
+    condense_wide_weight: float = 1.0
+    # 글자 간격을 c만큼 줄이면 한글 같은 전각 글자는 폭이 c × 이 값만큼 줄어든다(영문·숫자·공백은 c). 한글·영문 폭 균형
+    # 옵션을 켠 Word에서 14pt 바탕체 한글 한 줄이 간격 0/0.2/0.4/0.7/1.0pt에 34/35/36/38/40자였다 — 값 2(2026-10-02 실측).
+    latin_min_width: float | None = None
+    # 반각 글자(영문·숫자 — 공백은 제외, 미측정)의 폭을 글자 크기의 이 비율 이상으로 잰다. 같은 옵션에서 한글 24자 + 영문숫자 16자가 한 줄
+    # (간격 0)이었는데 반각 0.5em이면 26자까지 들어가야 한다 — 실제 반각 폭은 약 0.6em(8.2~9.1pt)이다.
     condense_pad: int | None = None
     # 좁힐 양을 계산값보다 이만큼 더 준다(상한은 condense_max). 계산상 0.9pt면 되는 줄을 Word는 1.0pt여야
     # 한 줄에 넣는 일이 있다(2026-10-01 사용자 실측) — 글꼴 폭 계산 오차를 흡수한다.
@@ -382,7 +388,7 @@ class TextRules(_Base):
     def _condense(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
 
-    @field_validator("fit_bold_factor", mode="before")
+    @field_validator("fit_bold_factor", "latin_min_width", mode="before")
     @classmethod
     def _bold_factor(cls, v: Any) -> Any:
         return None if v is None else parse_ratio(v)
@@ -407,7 +413,7 @@ FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
-                      "fit_bold_factor", "condense_pad", "balance_sbcs_dbcs", "shorten_to_fit", "orphan_max",
+                      "fit_bold_factor", "condense_pad", "balance_sbcs_dbcs", "condense_wide_weight", "latin_min_width", "shorten_to_fit", "orphan_max",
                       "gap_after_annotation", "gap_after_note", "gap_after_section",
                       "gap_after_note_same_level", "pattern_depths", "levels_by_order")
 
@@ -661,6 +667,7 @@ def dump_profile(profile: Profile) -> str:
     text["annotation_box_height"] = _mm(text["annotation_box_height"]) if text["annotation_box_height"] is not None else None
     text["fit_margin"] = _pct(text["fit_margin"]) if text["fit_margin"] else None
     text["fit_bold_factor"] = _pct(text["fit_bold_factor"])
+    text["latin_min_width"] = _pct(text["latin_min_width"]) if text["latin_min_width"] else None
     data["text"] = _strip(text)
     choices = _strip(profile.choices.model_dump())
     if choices:

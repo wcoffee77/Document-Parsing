@@ -28,8 +28,11 @@ class Line:
 
 def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: float,
              max_condense: float = 0.0, step: float = 0.0, margin: float = 0.0,
-             pad: float = 0.0) -> list[Line]:
-    """text를 줄로 나눈다. widths[i]는 text[i]의 폭, room은 글자가 쓸 수 있는 줄 폭(같은 단위)."""
+             pad: float = 0.0, weights: list[float] | None = None) -> list[Line]:
+    """text를 줄로 나눈다. widths[i]는 text[i]의 폭, room은 글자가 쓸 수 있는 줄 폭(같은 단위).
+
+    weights[i]는 text[i]에 글자 간격 1을 줬을 때 실제로 줄어드는 폭의 배수다(기본 1). Word의 "한글·영문 폭 균형"
+    옵션 아래에서는 한글이 간격의 2배, 영문·숫자가 1배 줄었다(2026-10-02 사용자 실측)."""
     lines: list[Line] = []
     n = len(text)
     pos = 0
@@ -42,9 +45,11 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
         best: Line | None = None
         need = 0.0
         total = 0.0
+        effect = 0.0  # 글자 간격 1을 줬을 때 이 줄에서 줄어드는 폭(글자 수 × 배수)
         j = pos
         while j < n:
             total += widths[j]
+            effect += weights[j] if weights else 1.0
             j += 1
             if j < n and text[j] != " ":
                 continue  # 어절 중간 — 줄을 끝낼 수 없다
@@ -52,13 +57,13 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             overflow = total - room
             if overflow <= 1e-6:
                 best = Line(pos, j)
-            elif max_condense > 0 and step > 0 and overflow <= max_condense * count:
-                steps = max(1, math.ceil(overflow / count / step - 1e-9))
+            elif max_condense > 0 and step > 0 and overflow <= max_condense * effect:
+                steps = max(1, math.ceil(overflow / effect / step - 1e-9))
                 if pad > 0:  # 계산 오차 대비 여유 — 단, 최대치는 넘기지 않는다
                     steps = min(steps + math.ceil(pad / step - 1e-9), int(max_condense / step + 1e-9))
                 best = Line(pos, j, steps)
             else:
-                need = overflow / count
+                need = overflow / effect
                 break
         if best is not None and need:
             best = Line(best.start, best.end, best.steps, need)

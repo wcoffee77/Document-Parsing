@@ -31,7 +31,7 @@ from ..ir import (
 )
 from ..layout.flow import FlowPlan
 from ..layout.lines import Line, fit_text
-from ..layout.measure import TextMeasurer
+from ..layout.measure import TextMeasurer, is_wide
 from ..layout.table_fit import TableLayout, plan_tables
 from ..profile import FontSpec, Profile
 from ..units import emu_to_dxa
@@ -362,22 +362,33 @@ class DocxRenderer:
                 self.notes.append(f"글꼴({spec.east_asia})을 찾지 못해 줄 맞춤(글자 간격 좁히기·줄 나눔)을 건너뜀")
                 self._fit_warned = True
             return None
-        space_w = measure.char_width(" ")
+        latin_min = (rules.latin_min_width or 0.0) * spec.size * (spec.char_scale or 1.0)
+
+        def char_w(measurer: TextMeasurer, c: str) -> float:
+            width = measurer.char_width(c)
+            # 영문·숫자는 Word에서 더 넓다. 공백은 실측 못 했으니(한글+공백 시험이 줄바꿈 위치를 못 가렸다) 글꼴 폭 그대로 —
+            # 접두 공백으로 윗줄 글자에 맞추는 계산도 공백 폭에 기대고 있다.
+            return width if is_wide(c) or c.isspace() or not latin_min else max(width, latin_min)
+
+        def text_w(text: str) -> float:
+            return sum(char_w(measure, c) for c in text)
+
+        space_w = char_w(measure, " ")
         usable = self.profile.page.usable_width
-        head_w = measure.width(head)
+        head_w = text_w(head)
         if hanging:
             first_room = cont_room = usable - indent - hanging
             cont_spaces, cont_indent = 0, indent + hanging
         else:
             first_room = usable - indent - head_w
-            cont_spaces = round((head_w + measure.width(extra)) / space_w) if space_w else 0
+            cont_spaces = round((head_w + text_w(extra)) / space_w) if space_w else 0
             cont_room = usable - indent - cont_spaces * space_w
             cont_indent = indent
         def layout(current: list[Run]) -> tuple[str, list[Line], int]:
             current_text = "".join(run.text for run in current)
             widths: list[float] = []
             for run in current:
-                widths.extend(self._measurer(spec, bool(spec.bold or run.bold)).char_width(c) for c in run.text)
+                widths.extend(char_w(self._measurer(spec, bool(spec.bold or run.bold)), c) for c in run.text)
             made: list[Line] = []
             offset = 0
             count = 0
@@ -388,7 +399,8 @@ class DocxRenderer:
                         segment, widths[offset:offset + len(segment)],
                         first_room=cont_room if made else first_room, cont_room=cont_room,
                         max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
-                        margin=rules.fit_margin, pad=rules.condense_pad or 0)]
+                        margin=rules.fit_margin, pad=rules.condense_pad or 0,
+                        weights=[rules.condense_wide_weight if is_wide(c) else 1.0 for c in segment])]
                 offset += len(segment) + 1
             return current_text, made, count
 
@@ -415,7 +427,7 @@ class DocxRenderer:
         # 글꼴 폭 계산이 Word와 달라 Word가 줄을 한 번 더 바꾸더라도 윗줄 글자에 맞도록, 접두(공백+말머리) 폭만큼
         # 내어쓰기를 같이 준다. 줄이 맞게 들어가면 눈에 안 보인다.
         return _FitPlan(pieces, cont_spaces, cont_indent,
-                        first_hang=0 if hanging else int(head_w + measure.width(extra)),
+                        first_hang=0 if hanging else int(head_w + text_w(extra)),
                         cont_hang=0 if hanging else int(cont_spaces * space_w))
 
     def _shorten(self, runs: list[Run], text: str, first_chars: int, layout) -> list[Run] | None:

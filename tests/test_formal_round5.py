@@ -121,7 +121,8 @@ def test_orphan_is_shortened_by_llm_or_reported(tmp_path, fake_fonts):
         widths = [per * (0.5 if c == " " else 1.0) for c in text]
         lines = fit_text(text, widths, first_room=prof.page.usable_width, cont_room=prof.page.usable_width,
                          max_condense=rules.condense_max, step=rules.condense_step, margin=rules.fit_margin,
-                         pad=rules.condense_pad)
+                         pad=rules.condense_pad,
+                         weights=[rules.condense_wide_weight if c != " " else 1.0 for c in text])
         if len(lines) == 2 and lines[1].end - lines[1].start <= rules.orphan_max:
             break
     else:
@@ -275,3 +276,25 @@ def test_balance_sbcs_dbcs_flag_only_in_formal():
 
     assert flag("formal") is True
     assert flag("confluence") is False
+
+
+def test_condense_model_matches_word_measurements():
+    """사용자 Word 실측(2026-10-02): 14pt 바탕체 한글 한 줄 34/35/36/38/40자 @ 간격 0/0.2/0.4/0.7/1.0pt."""
+    prof = load_profile("formal")
+    rules = prof.text
+    size = 14.0
+    room = prof.page.usable_width / 12700                      # pt
+    weights_for = lambda text: [rules.condense_wide_weight] * len(text)
+
+    def per_line(spacing: float) -> int:
+        n = 20
+        while True:
+            text = "가" * (n + 1)
+            lines = fit_text(text, [size] * len(text), first_room=room, cont_room=room,
+                             max_condense=spacing, step=0.1, weights=weights_for(text))
+            if len(lines) > 1:
+                return n
+            n += 1
+
+    # 간격 한도(max_condense)가 곧 그 줄의 간격 — 넘치면 줄을 나누므로 한 줄 글자 수가 실측과 같아야 한다
+    assert [per_line(c) for c in (0.0, 0.2, 0.4, 0.7, 1.0)] == [34, 35, 36, 38, 40]
