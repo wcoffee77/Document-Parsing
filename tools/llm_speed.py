@@ -78,14 +78,27 @@ def main() -> None:
         prompt = (_PARA * 8) + "\n\n위 글을 300자 안팎의 개조식 항목 3개로 정리해 주세요."
         show("② 1,500자→300자", ask(client, base, model, headers, prompt, max_tokens=1500))
         show("③ 같은 질문, 추론 끄기", ask(client, base, model, headers, prompt, max_tokens=1500, no_think=True))
-        filler = (_PARA * (args.long // len(_PARA) + 1))[:args.long]
-        long_prompt = filler + "\n\n위 글에서 '공정 직군'이라는 말이 몇 번 나오는지 숫자만 답하세요."
-        expected = filler.count("공정 직군")
-        result = ask(client, base, model, headers, long_prompt, max_tokens=64, no_think=True)
-        show(f"④ 긴 입력 {args.long:,}자", result)
-        if "error" not in result:
-            numbers = re.findall(r"\d+", result["answer"])
-            print(f"   정답 {expected}번 → {'일치' if numbers and int(numbers[-1]) == expected else '불일치'}")
+        # ④ 긴 입력에서 찾기 시험 — 세기는 LLM이 원래 약해서(이전 판은 "몇 번 나오나"였고 불일치가 나와도 길이 탓인지
+        #    알 수 없었다) 문서 곳곳에 심은 고유한 사실 3개를 위치별로 묻는다. 문장마다 숫자를 달리해 입력 캐시가 안 걸리게 한다.
+        import random
+
+        rng = random.Random(args.long)
+        count = max(30, args.long // 70)
+        sentences = [f"{rng.randint(1, 99)}번 팀은 {rng.randint(100, 999)}명 중 {rng.randint(10, 99)}명을 {rng.randint(1, 12)}월에 "
+                     f"배치했고 예산은 {rng.randint(100, 9999)}만 원이었습니다. " for _ in range(count)]
+        needles = {"앞(10%)": 0.10, "중간(50%)": 0.50, "뒤(90%)": 0.90}
+        facts = {name: f"{rng.randint(10000, 99999)}" for name in needles}
+        for name, at in needles.items():
+            sentences.insert(int(len(sentences) * at), f"참고로 {name} 위치의 확인 코드는 {facts[name]}입니다. ")
+        document = "".join(sentences)
+        print(f"④ 긴 입력 {len(document):,}자 찾기 시험")
+        for name in needles:
+            question = f"\n\n위 글에서 '{name} 위치의 확인 코드'는 무엇입니까? 숫자만 답하세요."
+            result = ask(client, base, model, headers, document + question, max_tokens=64, no_think=True)
+            show(f"   {name}", result)
+            if "error" not in result:
+                found = re.findall(r"\d+", result["answer"])
+                print(f"     정답 {facts[name]} → {'일치' if facts[name] in found else '불일치'}")
 
 
 if __name__ == "__main__":
