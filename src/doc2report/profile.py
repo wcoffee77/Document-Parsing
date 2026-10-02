@@ -344,6 +344,10 @@ class TextRules(_Base):
     condense_max: int | None = None   # 글자 간격을 좁히는 최대치 (0.5pt)
     condense_step: int | None = None  # 좁히는 단위 (0.1pt)
     fit_margin: float = 0.0           # 줄 폭을 이만큼 덜 쓴다(글꼴 측정 오차 대비)
+    balance_sbcs_dbcs: bool = False
+    # Word 호환 옵션 "한글·영문 글자 폭 균형"(balanceSingleByteDoubleByteWidth)을 문서에 켠다. 한글 판 Word의
+    # 새 문서는 이것이 켜져 있어, 같은 글자 간격 −1pt에서 한 줄에 40자(끄면 37자)가 들어간다 — 2026-10-02 사용자 실측
+    # (calibration J·L 40자, 나머지 37자). 줄 맞춤(fit_lines)이 사용자가 Word에서 보는 폭과 같아지게 한다.
     condense_pad: int | None = None
     # 좁힐 양을 계산값보다 이만큼 더 준다(상한은 condense_max). 계산상 0.9pt면 되는 줄을 Word는 1.0pt여야
     # 한 줄에 넣는 일이 있다(2026-10-01 사용자 실측) — 글꼴 폭 계산 오차를 흡수한다.
@@ -403,7 +407,7 @@ FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
-                      "fit_bold_factor", "condense_pad", "shorten_to_fit", "orphan_max",
+                      "fit_bold_factor", "condense_pad", "balance_sbcs_dbcs", "shorten_to_fit", "orphan_max",
                       "gap_after_annotation", "gap_after_note", "gap_after_section",
                       "gap_after_note_same_level", "pattern_depths", "levels_by_order")
 

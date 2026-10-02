@@ -259,3 +259,19 @@ def test_gaps_same_level_6pt_up_12_or_18pt(tmp_path, fake_fonts):
     assert after["- 다"] == Pt(6)                          # - → - 같은 단계
     assert after["- 라"] in (Pt(12), Pt(18))               # - → □ 올라감
     assert after["□ 나"] == Pt(6)                          # □ → - 내려감은 6pt 그대로
+
+
+def test_balance_sbcs_dbcs_flag_only_in_formal():
+    """한글·영문 폭 균형 호환 옵션은 정식보고서만 켠다(Confluence 변환은 그대로)."""
+    from docx.oxml.ns import qn
+
+    from doc2report.ir import Document, Paragraph, Run
+
+    def flag(profile_name: str) -> bool:
+        renderer = docx_writer.DocxRenderer(load_profile(profile_name))
+        result = renderer.render(Document(blocks=[Paragraph([Run("가")])]))
+        compat = result.document.settings.element.find(qn("w:compat"))
+        return compat.find(qn("w:balanceSingleByteDoubleByteWidth")) is not None
+
+    assert flag("formal") is True
+    assert flag("confluence") is False

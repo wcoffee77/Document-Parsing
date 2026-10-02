@@ -143,6 +143,8 @@ class DocxRenderer:
 
         표 안 문단처럼 우리가 직접 만들지 않는 요소까지 일관되게 하기 위함이다.
         """
+        if self.profile.text.balance_sbcs_dbcs:
+            oxml.set_compat_flag(self.docx.settings.element, "balanceSingleByteDoubleByteWidth")
         body = self.profile.font("body")
         style = self.docx.styles["Normal"]
         if body.latin:

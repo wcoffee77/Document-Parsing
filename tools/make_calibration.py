@@ -38,6 +38,8 @@ def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else "formal"
     profile = load_profile(name)
     doc = Document(profile.template or open_base_template())  # python-docx 기본 .docx 파일은 사내 보안이 막는다(CLAUDE.md)
+    if profile.text.balance_sbcs_dbcs:  # 변환기와 같은 호환 옵션(없으면 한글 간격 −1pt에서 37자, 있으면 40자)
+        oxml.set_compat_flag(doc.settings.element, "balanceSingleByteDoubleByteWidth")
     section = doc.sections[0]
     page = profile.page
     section.page_width, section.page_height = Emu(page.width), Emu(page.height)
@@ -62,41 +64,6 @@ def main() -> None:
     out.parent.mkdir(exist_ok=True)
     doc.save(out)
     print(f"저장: {out} (글꼴 {body.east_asia}, {body.size / 12700:g}pt)")
-    # 같은 내용을 문서 설정만 바꿔 저장 — 사용자 새 문서(40자)와 이 문서(37자)의 차이를 가린다.
-    # 배제됨(2026-10-02 실측 모두 37자): 호환 모드, 문장부호 압축, 언어 ko-KR.
-    # 사용자 문서 대비 차이(docx_diff 출력): docDefaults의 양쪽 맞춤(jc=both)·커닝(kern=2),
-    # 설정의 balanceSingleByteDoubleByteWidth·noPunctuationKerning 등 한글 판 Word의 기본값.
-    import io
-
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    # 2026-10-02 실측: F(양쪽 맞춤)·G(커닝)는 37자, H(전부)는 40자 → 호환 플래그·구두점 커닝이 원인.
-    # 아래는 그 안에서 하나씩 가르는 변형이다(모두 호환 모드 14 기준, 해당 항목만 추가).
-    compat_flags = ("spaceForUL", "balanceSingleByteDoubleByteWidth", "doNotLeaveBackslashAlone",
-                    "ulTrailSpace", "doNotExpandShiftReturn", "adjustLineHeightInTable")
-    for suffix, mode, flags, punct in (
-        ("I_구두점커닝끔", None, (), True),
-        ("J_한영폭균형", None, ("balanceSingleByteDoubleByteWidth",), False),
-        ("K_나머지호환플래그", None,
-         tuple(f for f in compat_flags if f != "balanceSingleByteDoubleByteWidth"), False),
-        ("L_H에서양쪽맞춤커닝뺌", "15", compat_flags, True),
-    ):
-        variant_doc = Document(io.BytesIO(buffer.getvalue()))
-        settings = variant_doc.settings.element
-        compat = settings.find(qn("w:compat"))
-        first = compat[0]
-        for tag in flags:
-            first.addprevious(compat.makeelement(qn(f"w:{tag}"), {}))
-        if punct:
-            settings.find(qn("w:characterSpacingControl")).addprevious(
-                settings.makeelement(qn("w:noPunctuationKerning"), {}))
-        if mode:
-            for item in compat.findall(qn("w:compatSetting")):
-                if item.get(qn("w:name")) == "compatibilityMode":
-                    item.set(qn("w:val"), mode)
-        variant = out.with_name(f"calibration_{suffix}.docx")
-        variant_doc.save(variant)
-        print(f"저장: {variant}")
 
 
 if __name__ == "__main__":

@@ -177,6 +177,21 @@ def add_text_box(paragraph, *, runs: list[tuple[str, bool]], spec: FontSpec, x: 
     paragraph._p.append(holder)
 
 
+def set_compat_flag(settings_element, tag: str) -> None:
+    """settings.xml의 w:compat에 호환 옵션을 켠다(이미 있으면 그대로). 스키마상 compatSetting보다 앞에 둔다."""
+    compat = settings_element.find(qn("w:compat"))
+    if compat is None or compat.find(qn(f"w:{tag}")) is not None:
+        return
+    flag = compat.makeelement(qn(f"w:{tag}"), {})
+    anchor = compat.find(qn("w:useFELayout"))
+    if anchor is None:
+        anchor = compat.find(qn("w:compatSetting"))
+    if anchor is not None:
+        anchor.addprevious(flag)
+    else:
+        compat.append(flag)
+
+
 def set_char_spacing(run, twips: int) -> None:
     """글자 간격(1/20pt). 음수는 좁힘 — 줄이 아슬아슬하게 넘칠 때 줄 바뀜을 막는다."""
     spacing = _ordered(run._element.get_or_add_rPr(), "w:spacing")

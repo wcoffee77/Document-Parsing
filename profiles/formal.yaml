@@ -126,6 +126,7 @@ text:
   condense_step: 0.1pt
   fit_margin: 0.2%           # 글꼴 폭 계산 오차 대비 여유. 크면 원본처럼 꽉 채운 줄이 나뉘어 버린다(1pt 한도의 8%를 0.5%가 먹음)
   fit_bold_factor: 100%      # 굵은 글자 폭 = 보통 글자 폭 × 이 값. 잠정(굵은 □ 줄이 두세 글자 남기고 일찍 나뉨) — probe 실측으로 확정
+  balance_sbcs_dbcs: true    # Word "한글·영문 폭 균형" 호환 옵션 — 한글 판 Word 새 문서와 같은 줄 폭(−1pt에서 40자)이 나오게 (2026-10-02 사용자 실측)
   condense_pad: 0.4pt        # 계산상 0.6~0.9pt면 되는 줄을 Word는 1.0pt여야 한 줄에 넣었다(2026-10-01 두 번 실측) — 계산값 + 0.4pt, 최대 condense_max
   shorten_to_fit: true       # 좁히기 한도까지 써도 두세 글자가 넘치면 LLM이 표현을 줄여 한 줄로(LLM을 켰을 때만)
   # gap_after_annotation·gap_after_note는 정하지 않는다 — 주석·※ 뒤도 일반 항목과 같은 규칙(같은 단계 6pt, 올라가면 12·18pt)
