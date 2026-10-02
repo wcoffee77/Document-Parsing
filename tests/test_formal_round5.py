@@ -122,7 +122,7 @@ def test_orphan_is_shortened_by_llm_or_reported(tmp_path, fake_fonts):
         lines = fit_text(text, widths, first_room=prof.page.usable_width, cont_room=prof.page.usable_width,
                          max_condense=rules.condense_max, step=rules.condense_step, margin=rules.fit_margin,
                          pad=rules.condense_pad,
-                         weights=[rules.condense_wide_weight if c != " " else 1.0 for c in text])
+                         weights=[rules.condense_space_weight if c == " " else rules.condense_wide_weight for c in text])
         if len(lines) == 2 and lines[1].end - lines[1].start <= rules.orphan_max:
             break
     else:
@@ -315,7 +315,7 @@ def test_shortened_sentence_is_written_even_when_it_needs_no_condensing(tmp_path
         lines = fit_text(text, widths, first_room=prof.page.usable_width, cont_room=prof.page.usable_width,
                          max_condense=prof.text.condense_max, step=prof.text.condense_step,
                          margin=prof.text.fit_margin, pad=prof.text.condense_pad,
-                         weights=[prof.text.condense_wide_weight if c != " " else 1.0 for c in text])
+                         weights=[prof.text.condense_space_weight if c == " " else prof.text.condense_wide_weight for c in text])
         if len(lines) == 2 and lines[1].end - lines[1].start <= prof.text.orphan_max:
             break
     else:
@@ -325,3 +325,33 @@ def test_shortened_sentence_is_written_even_when_it_needs_no_condensing(tmp_path
     docx_writer.DocxRenderer(prof, plan_tables(doc, prof), shortener=lambda original, limit: "가나다 가나다").save(doc, out)
     body = [p.text for p in OpenDocx(str(out)).paragraphs if "가" in p.text]
     assert len(body) == 1 and "가나다 가나다" in body[0] and len(body[0]) < len(text) // 2    # 줄인 글이 나온다
+
+
+def test_width_model_matches_word_measurements_for_ascii_space_and_mixed():
+    """사용자 Word 실측(2026-10-02, 14pt 바탕체, 본문 폭 481.89pt): 숫자·대문자·소문자·% 100자는 간격 0에 68자, 1.0pt에 80자(폭 0.5em,
+    효과 1배) / 한글+공백 번갈아 23자·28자(공백 폭 0.5em, 효과 2배) / 한글 24+영문숫자 16자 @0, 27+20 @1.0(한글↔영문 경계 1/4em)."""
+    from doc2report.layout.lines import apply_autospace
+    from doc2report.layout.measure import is_wide
+
+    rules = load_profile("formal").text
+    room, size = load_profile("formal").page.usable_width / 12700, 14.0
+
+    def count(text, spacing):
+        widths = [size if is_wide(c) else size / 2 for c in text]
+        widths = apply_autospace(text, widths, rules.autospace * size, is_wide,
+                                 lambda c: c.isascii() and c.isalnum())
+        total = 0.0
+        for i, c in enumerate(text):
+            weight = rules.condense_wide_weight if is_wide(c) else rules.condense_space_weight if c == " " else 1.0
+            total += widths[i] - weight * spacing
+            if total > room:
+                return i
+        return len(text)
+
+    assert (count("1234567890" * 10, 0), count("1234567890" * 10, 1.0)) == (68, 80)
+    assert (count("ABCDEFGHIJ" * 10, 0), count("%" * 100, 1.0)) == (68, 80)
+    # 공백은 어절 경계에서만 끊는다 — 한글 수는 "가 " 번갈아 글자에서 센다
+    spaced = "가 " * 60
+    assert (count(spaced, 0) + 1) // 2 == 23 and (count(spaced, 1.0) + 1) // 2 == 28
+    mixed = "".join("가나다라마" + "ab12" for _ in range(14))
+    assert count(mixed, 0) == 40 and count(mixed, 1.0) == 47

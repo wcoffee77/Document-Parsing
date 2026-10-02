@@ -30,7 +30,7 @@ from ..ir import (
     plain,
 )
 from ..layout.flow import FlowPlan
-from ..layout.lines import Line, fit_text
+from ..layout.lines import Line, apply_autospace, fit_text
 from ..layout.measure import TextMeasurer, is_wide
 from ..layout.table_fit import TableLayout, plan_tables
 from ..profile import FontSpec, Profile
@@ -362,13 +362,11 @@ class DocxRenderer:
                 self.notes.append(f"글꼴({spec.east_asia})을 찾지 못해 줄 맞춤(글자 간격 좁히기·줄 나눔)을 건너뜀")
                 self._fit_warned = True
             return None
-        latin_min = (rules.latin_min_width or 0.0) * spec.size * (spec.char_scale or 1.0)
-
         def char_w(measurer: TextMeasurer, c: str) -> float:
-            width = measurer.char_width(c)
-            # 영문·숫자는 Word에서 더 넓다. 공백은 실측 못 했으니(한글+공백 시험이 줄바꿈 위치를 못 가렸다) 글꼴 폭 그대로 —
-            # 접두 공백으로 윗줄 글자에 맞추는 계산도 공백 폭에 기대고 있다.
-            return width if is_wide(c) or c.isspace() or not latin_min else max(width, latin_min)
+            return measurer.char_width(c)
+
+        def is_latin(c: str) -> bool:  # 한글 옆에서 자동 간격이 붙는 글자 — 영문·숫자(기호·공백은 아님)
+            return c.isascii() and c.isalnum()
 
         def text_w(text: str) -> float:
             return sum(char_w(measure, c) for c in text)
@@ -389,6 +387,9 @@ class DocxRenderer:
             widths: list[float] = []
             for run in current:
                 widths.extend(char_w(self._measurer(spec, bool(spec.bold or run.bold)), c) for c in run.text)
+            if rules.autospace:  # 한글↔영문·숫자 경계마다 폭이 더해진다(좁히기와 무관)
+                widths = apply_autospace(current_text, widths, rules.autospace * spec.size * (spec.char_scale or 1.0),
+                                         is_wide, is_latin)
             made: list[Line] = []
             offset = 0
             count = 0
@@ -400,7 +401,8 @@ class DocxRenderer:
                         first_room=cont_room if made else first_room, cont_room=cont_room,
                         max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
                         margin=rules.fit_margin, pad=rules.condense_pad or 0,
-                        weights=[rules.condense_wide_weight if is_wide(c) else 1.0 for c in segment])]
+                        weights=[rules.condense_wide_weight if is_wide(c)
+                                 else rules.condense_space_weight if c == " " else 1.0 for c in segment])]
                 offset += len(segment) + 1
             return current_text, made, count
 

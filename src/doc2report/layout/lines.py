@@ -26,6 +26,18 @@ class Line:
     need: float = 0.0   # 다음 어절까지 한 줄에 넣으려면 글자마다 좁혀야 했던 양(0 = 어절이 남지 않았거나 끊은 이유가 다름)
 
 
+def apply_autospace(text: str, widths: list[float], gap: float, is_wide, is_latin) -> list[float]:
+    """한글(전각)과 영문·숫자가 맞닿는 자리마다 gap만큼 폭을 더한다 — Word의 "한글과 영문 사이 간격 자동 조절"
+    (autoSpaceDE, 글자 크기의 1/4). 간격 값이 아니라 글자 폭이라 좁히기와 무관하게 그대로다(2026-10-02 사용자 실측:
+    한글 24자 + 영문숫자 16자 @0, 27 + 20 @1.0pt가 한 줄 — 경계 8·10곳 × 3.5pt로 맞음)."""
+    out = list(widths)
+    for i in range(1, len(text)):
+        before, after = text[i - 1], text[i]
+        if (is_wide(before) and is_latin(after)) or (is_latin(before) and is_wide(after)):
+            out[i] += gap
+    return out
+
+
 def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: float,
              max_condense: float = 0.0, step: float = 0.0, margin: float = 0.0,
              pad: float = 0.0, weights: list[float] | None = None) -> list[Line]:
