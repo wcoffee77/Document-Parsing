@@ -194,6 +194,37 @@ def _ask_anthropic(texts: list[str], system: str = _SYSTEM) -> list[str]:
     return out
 
 
+def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool = False) -> str:
+    """한 번의 질문 → 한 덩어리 답(여러 줄 JSON 등). 줄 수를 맞추는 `_ask_llm`과 달리 형식은 호출자가 검증한다.
+
+    온프렘(OpenAI 호환)이면 그쪽, 아니면 Anthropic. thinking=True면 추론 모드를 켠다(기본은 끔 — 같은 답이 약 9배 빠르다)."""
+    base_url = os.environ.get("DOC2REPORT_LLM_BASE_URL")
+    if base_url:
+        model = os.environ.get("DOC2REPORT_MODEL")
+        if not model:
+            raise RuntimeError("DOC2REPORT_LLM_BASE_URL 사용 시 DOC2REPORT_MODEL 이 필수입니다")
+        api_key = os.environ.get("DOC2REPORT_LLM_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        body = {"model": model, "temperature": 0, "max_tokens": max_tokens,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if not thinking:
+            body["chat_template_kwargs"] = {"enable_thinking": False}
+        with httpx.Client(timeout=600.0) as client:
+            response = client.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=body)
+            response.raise_for_status()
+            return _THINK_BLOCK.sub("", response.json()["choices"][0]["message"].get("content") or "").strip()
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError("LLM 설정이 없습니다 (DOC2REPORT_LLM_BASE_URL 또는 ANTHROPIC_API_KEY)")
+    try:
+        from anthropic import Anthropic
+    except ImportError as exc:
+        raise RuntimeError("anthropic 패키지가 없습니다 (uv pip install anthropic)") from exc
+    message = Anthropic().messages.create(
+        model=os.environ.get("DOC2REPORT_MODEL", DEFAULT_ANTHROPIC_MODEL), max_tokens=max_tokens,
+        system=system, messages=[{"role": "user", "content": user}])
+    return message.content[0].text.strip()
+
+
 def _chunks(items: list[str], size: int):
     for start in range(0, len(items), size):
         yield items[start : start + size]

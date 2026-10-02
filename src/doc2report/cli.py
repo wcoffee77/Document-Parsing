@@ -35,6 +35,37 @@ app.add_typer(profile_app, name="profile")
 
 
 @app.command()
+def draft(
+    source: Path = typer.Argument(..., help="줄글 .txt 파일"),
+    output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로(기본: 입력 이름_보고서.docx)"),
+    profile: str = typer.Option("formal", "-p", "--profile", help="서식(기본 formal)"),
+    date: str = typer.Option(None, "--date", help="제목 아래 날짜 ('today' 또는 '2026. 10. 2')"),
+    shorten: bool = typer.Option(False, "--shorten", help="줄 맞춤에서 두세 글자 넘치는 문장만 LLM으로 줄임"),
+    report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
+) -> None:
+    """줄글을 보고서 구조(1. → □ → -)로 배치해 변환한다. LLM은 배치만, 문장은 원문 그대로(drafting.py)."""
+    from .account import load_and_apply
+    from .drafting import draft as make_draft
+    from .pipeline import convert_many
+
+    load_and_apply()
+    out = output or source.with_name(source.stem + "_보고서.docx")
+    result = make_draft(source.read_text(encoding="utf-8-sig"))
+    structure_file = out.with_name(out.stem + "_구조.txt")
+    structure_file.write_text(result.text, encoding="utf-8")
+    converted = convert_many([str(structure_file)], out, profile, date=date, title=result.structure.title or None,
+                             shorten=shorten, section_titles=False)
+    typer.echo(f"[완료] {out}  (LLM 배치 {'사용' if result.used_llm else '실패 — 규칙 기본 구조'}, "
+               f"절 {len(result.structure.sections)}개)")
+    for note in result.notes + converted.notes:
+        typer.echo(f"  · {note}")
+    if report:
+        lines = ["# 줄글 → 보고서 구조 판단", "", *[f"- {n}" for n in result.notes], "", converted.report()]
+        report.write_text("\n".join(lines), encoding="utf-8")
+        typer.echo(f"  리포트: {report}")
+
+
+@app.command()
 def convert(
     source: str = typer.Argument(..., help="입력 .md/.docx/.txt 파일, Confluence URL, 또는 '-'(표준입력)"),
     output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로"),
