@@ -298,3 +298,30 @@ def test_condense_model_matches_word_measurements():
 
     # 간격 한도(max_condense)가 곧 그 줄의 간격 — 넘치면 줄을 나누므로 한 줄 글자 수가 실측과 같아야 한다
     assert [per_line(c) for c in (0.0, 0.2, 0.4, 0.7, 1.0)] == [34, 35, 36, 38, 40]
+
+
+def test_shortened_sentence_is_written_even_when_it_needs_no_condensing(tmp_path, fake_fonts):
+    """LLM이 줄인 문장이 좁히지 않아도 한 줄에 들어가면, 예전엔 계획이 None이라 **원문(긴 문장)이 그대로** 나왔다
+    (2026-10-02 사용자: 줄바꿈 조치도 왼쪽 끝 맞춤도 안 된 채 쭉 내려써짐)."""
+    from doc2report.ir import Document, Heading, Paragraph, Run
+    from doc2report.layout.table_fit import plan_tables
+
+    prof = load_profile("formal")
+    per = prof.font("body").size
+    text = ""
+    for n in range(8, 40):                                       # 좁히기 한도로도 못 넣고 두세 글자만 다음 줄로 넘어가는 길이
+        text = "□ " + " ".join(["가나다"] * n)
+        widths = [per * (0.5 if c == " " else 1.0) for c in text]
+        lines = fit_text(text, widths, first_room=prof.page.usable_width, cont_room=prof.page.usable_width,
+                         max_condense=prof.text.condense_max, step=prof.text.condense_step,
+                         margin=prof.text.fit_margin, pad=prof.text.condense_pad,
+                         weights=[prof.text.condense_wide_weight if c != " " else 1.0 for c in text])
+        if len(lines) == 2 and lines[1].end - lines[1].start <= prof.text.orphan_max:
+            break
+    else:
+        pytest.fail("테스트 문장을 못 만듦")
+    doc = Document(blocks=[Heading(level=2, runs=[Run("배경")]), Paragraph(runs=[Run(text)])])
+    out = tmp_path / "o.docx"
+    docx_writer.DocxRenderer(prof, plan_tables(doc, prof), shortener=lambda original, limit: "가나다 가나다").save(doc, out)
+    body = [p.text for p in OpenDocx(str(out)).paragraphs if "가" in p.text]
+    assert len(body) == 1 and "가나다 가나다" in body[0] and len(body[0]) < len(text) // 2    # 줄인 글이 나온다

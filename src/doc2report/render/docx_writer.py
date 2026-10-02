@@ -405,6 +405,7 @@ class DocxRenderer:
             return current_text, made, count
 
         text, lines, segments = layout(runs)
+        shortened_text = False
         if not hard and len(lines) == 2 and lines[1].end - lines[1].start <= rules.orphan_max:
             # 좁히기 한도까지 써도 두세 글자가 다음 줄로 넘어간다 — 표현을 줄여 한 줄로 쓰는 것이 가장 좋다
             # (2026-10-01 사용자). LLM이 있으면 줄이고, 없으면 리포트에 남긴다.
@@ -412,11 +413,12 @@ class DocxRenderer:
             shortened = self._shorten(runs, text, lines[0].end - lines[0].start, layout) if rules.shorten_to_fit else None
             if shortened is not None:
                 runs = shortened
+                shortened_text = True
                 text, lines, segments = layout(runs)
             else:
                 self._orphans.append((text.strip()[:24], orphan))
-        if not hard and len(lines) <= 1 and not any(line.steps for line in lines):
-            return None
+        if not hard and len(lines) <= 1 and not any(line.steps for line in lines) and not shortened_text:
+            return None  # 줄일 필요도 좁힐 필요도 없는 문장 — 단, LLM이 줄인 문장은 줄인 글을 써야 하니 계획을 낸다
         if len(lines) > segments:
             self._fit_wrapped += 1  # 글쓴이의 줄바꿈 말고 우리가 더 나눈 문장
             # 어디서 나눴는지 가늠하려고, 한 줄에 넣으려면 글자마다 얼마나 좁혀야 했는지(pt)를 모아 둔다(글자는 안 남김)
