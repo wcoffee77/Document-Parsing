@@ -62,16 +62,21 @@ def main() -> None:
     out.parent.mkdir(exist_ok=True)
     doc.save(out)
     print(f"저장: {out} (글꼴 {body.east_asia}, {body.size / 12700:g}pt)")
-    # 같은 내용을 문서 설정만 바꿔 저장 — 사용자의 새 Word 문서와 줄 폭이 다른 원인(호환 모드 등)을 가린다.
+    # 같은 내용을 문서 설정만 바꿔 저장 — 사용자의 새 Word 문서와 줄 폭이 다른 원인을 가린다.
+    # (호환 모드·문장부호 압축은 B·C로 이미 배제됨 — 2026-10-01 실측: 모두 37자)
+    # 사용자 새 문서는 언어(eastAsia)가 ko-KR이고 이 문서는 ja-JP/en-US였다 → 언어 설정을 바꾼 변형.
     settings = doc.settings.element
-    compat = settings.find(qn("w:compat"))
-    for suffix, mode, control in (("B_호환15", "15", None), ("C_호환15_문장부호압축", "15", "compressPunctuation")):
-        for item in compat.findall(qn("w:compatSetting")):
-            if item.get(qn("w:name")) == "compatibilityMode":
-                item.set(qn("w:val"), mode)
-        spacing_control = settings.find(qn("w:characterSpacingControl"))
-        if control and spacing_control is not None:
-            spacing_control.set(qn("w:val"), control)
+    styles = doc.styles.element
+    theme_lang = settings.find(qn("w:themeFontLang"))
+    defaults_lang = styles.find(qn("w:docDefaults")).find(qn("w:rPrDefault")).find(qn("w:rPr")).find(qn("w:lang"))
+    for suffix, east_asia, val in (("D_언어ko", "ko-KR", None), ("E_언어ko_라틴ko", "ko-KR", "ko-KR")):
+        if theme_lang is not None:
+            theme_lang.set(qn("w:eastAsia"), east_asia)
+            if val:
+                theme_lang.set(qn("w:val"), val)
+        defaults_lang.set(qn("w:eastAsia"), east_asia)
+        if val:
+            defaults_lang.set(qn("w:val"), val)
         variant = out.with_name(f"calibration_{suffix}.docx")
         doc.save(variant)
         print(f"저장: {variant}")
