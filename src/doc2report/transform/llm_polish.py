@@ -139,6 +139,9 @@ def _ask_openai_compatible(texts: list[str], base_url: str, system: str = _SYSTE
         raise RuntimeError("DOC2REPORT_LLM_BASE_URL 사용 시 DOC2REPORT_MODEL 이 필수입니다")
     api_key = os.environ.get("DOC2REPORT_LLM_API_KEY")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    # Qwen3 계열은 기본이 추론(thinking) 모드라 같은 답에 10배 가까이 걸린다(2026-10-02 실측: 1,500자→300자 10.4초 vs 끄면 1.2초).
+    # 교열·줄임은 닫힌 짧은 작업이라 끈다. 켜려면 DOC2REPORT_LLM_THINKING=1.
+    extra = {} if os.environ.get("DOC2REPORT_LLM_THINKING") == "1" else {"chat_template_kwargs": {"enable_thinking": False}}
 
     out: list[str] = []
     with httpx.Client(timeout=120.0) as client:
@@ -149,6 +152,7 @@ def _ask_openai_compatible(texts: list[str], base_url: str, system: str = _SYSTE
                 json={
                     "model": model,
                     "temperature": 0,
+                    **extra,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": "\n".join(chunk)},
