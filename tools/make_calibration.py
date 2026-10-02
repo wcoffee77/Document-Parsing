@@ -70,32 +70,30 @@ def main() -> None:
 
     buffer = io.BytesIO()
     doc.save(buffer)
-    for suffix, jc, kern, flags in (
-        ("F_양쪽맞춤", True, False, False),
-        ("G_커닝", False, True, False),
-        ("H_사용자문서설정", True, True, True),
+    # 2026-10-02 실측: F(양쪽 맞춤)·G(커닝)는 37자, H(전부)는 40자 → 호환 플래그·구두점 커닝이 원인.
+    # 아래는 그 안에서 하나씩 가르는 변형이다(모두 호환 모드 14 기준, 해당 항목만 추가).
+    compat_flags = ("spaceForUL", "balanceSingleByteDoubleByteWidth", "doNotLeaveBackslashAlone",
+                    "ulTrailSpace", "doNotExpandShiftReturn", "adjustLineHeightInTable")
+    for suffix, mode, flags, punct in (
+        ("I_구두점커닝끔", None, (), True),
+        ("J_한영폭균형", None, ("balanceSingleByteDoubleByteWidth",), False),
+        ("K_나머지호환플래그", None,
+         tuple(f for f in compat_flags if f != "balanceSingleByteDoubleByteWidth"), False),
+        ("L_H에서양쪽맞춤커닝뺌", "15", compat_flags, True),
     ):
         variant_doc = Document(io.BytesIO(buffer.getvalue()))
-        styles = variant_doc.styles.element
-        defaults = styles.find(qn("w:docDefaults"))
-        if jc:
-            ppr = defaults.find(qn("w:pPrDefault")).find(qn("w:pPr"))
-            oxml._ordered(ppr, "w:jc").set(qn("w:val"), "both")
-        if kern:
-            rpr = defaults.find(qn("w:rPrDefault")).find(qn("w:rPr"))
-            oxml._ordered(rpr, "w:kern").set(qn("w:val"), "2")
-        if flags:
-            settings = variant_doc.settings.element
-            compat = settings.find(qn("w:compat"))
-            first = compat[0]
-            for tag in ("spaceForUL", "balanceSingleByteDoubleByteWidth", "doNotLeaveBackslashAlone",
-                        "ulTrailSpace", "doNotExpandShiftReturn", "adjustLineHeightInTable"):
-                first.addprevious(compat.makeelement(qn(f"w:{tag}"), {}))
-            control = settings.find(qn("w:characterSpacingControl"))
-            control.addprevious(settings.makeelement(qn("w:noPunctuationKerning"), {}))
+        settings = variant_doc.settings.element
+        compat = settings.find(qn("w:compat"))
+        first = compat[0]
+        for tag in flags:
+            first.addprevious(compat.makeelement(qn(f"w:{tag}"), {}))
+        if punct:
+            settings.find(qn("w:characterSpacingControl")).addprevious(
+                settings.makeelement(qn("w:noPunctuationKerning"), {}))
+        if mode:
             for item in compat.findall(qn("w:compatSetting")):
                 if item.get(qn("w:name")) == "compatibilityMode":
-                    item.set(qn("w:val"), "15")
+                    item.set(qn("w:val"), mode)
         variant = out.with_name(f"calibration_{suffix}.docx")
         variant_doc.save(variant)
         print(f"저장: {variant}")
