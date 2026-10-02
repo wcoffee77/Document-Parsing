@@ -62,23 +62,42 @@ def main() -> None:
     out.parent.mkdir(exist_ok=True)
     doc.save(out)
     print(f"저장: {out} (글꼴 {body.east_asia}, {body.size / 12700:g}pt)")
-    # 같은 내용을 문서 설정만 바꿔 저장 — 사용자의 새 Word 문서와 줄 폭이 다른 원인을 가린다.
-    # (호환 모드·문장부호 압축은 B·C로 이미 배제됨 — 2026-10-01 실측: 모두 37자)
-    # 사용자 새 문서는 언어(eastAsia)가 ko-KR이고 이 문서는 ja-JP/en-US였다 → 언어 설정을 바꾼 변형.
-    settings = doc.settings.element
-    styles = doc.styles.element
-    theme_lang = settings.find(qn("w:themeFontLang"))
-    defaults_lang = styles.find(qn("w:docDefaults")).find(qn("w:rPrDefault")).find(qn("w:rPr")).find(qn("w:lang"))
-    for suffix, east_asia, val in (("D_언어ko", "ko-KR", None), ("E_언어ko_라틴ko", "ko-KR", "ko-KR")):
-        if theme_lang is not None:
-            theme_lang.set(qn("w:eastAsia"), east_asia)
-            if val:
-                theme_lang.set(qn("w:val"), val)
-        defaults_lang.set(qn("w:eastAsia"), east_asia)
-        if val:
-            defaults_lang.set(qn("w:val"), val)
+    # 같은 내용을 문서 설정만 바꿔 저장 — 사용자 새 문서(40자)와 이 문서(37자)의 차이를 가린다.
+    # 배제됨(2026-10-02 실측 모두 37자): 호환 모드, 문장부호 압축, 언어 ko-KR.
+    # 사용자 문서 대비 차이(docx_diff 출력): docDefaults의 양쪽 맞춤(jc=both)·커닝(kern=2),
+    # 설정의 balanceSingleByteDoubleByteWidth·noPunctuationKerning 등 한글 판 Word의 기본값.
+    import io
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    for suffix, jc, kern, flags in (
+        ("F_양쪽맞춤", True, False, False),
+        ("G_커닝", False, True, False),
+        ("H_사용자문서설정", True, True, True),
+    ):
+        variant_doc = Document(io.BytesIO(buffer.getvalue()))
+        styles = variant_doc.styles.element
+        defaults = styles.find(qn("w:docDefaults"))
+        if jc:
+            ppr = defaults.find(qn("w:pPrDefault")).find(qn("w:pPr"))
+            oxml._ordered(ppr, "w:jc").set(qn("w:val"), "both")
+        if kern:
+            rpr = defaults.find(qn("w:rPrDefault")).find(qn("w:rPr"))
+            oxml._ordered(rpr, "w:kern").set(qn("w:val"), "2")
+        if flags:
+            settings = variant_doc.settings.element
+            compat = settings.find(qn("w:compat"))
+            first = compat[0]
+            for tag in ("spaceForUL", "balanceSingleByteDoubleByteWidth", "doNotLeaveBackslashAlone",
+                        "ulTrailSpace", "doNotExpandShiftReturn", "adjustLineHeightInTable"):
+                first.addprevious(compat.makeelement(qn(f"w:{tag}"), {}))
+            control = settings.find(qn("w:characterSpacingControl"))
+            control.addprevious(settings.makeelement(qn("w:noPunctuationKerning"), {}))
+            for item in compat.findall(qn("w:compatSetting")):
+                if item.get(qn("w:name")) == "compatibilityMode":
+                    item.set(qn("w:val"), "15")
         variant = out.with_name(f"calibration_{suffix}.docx")
-        doc.save(variant)
+        variant_doc.save(variant)
         print(f"저장: {variant}")
 
 
