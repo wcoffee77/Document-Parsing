@@ -375,3 +375,32 @@ def test_autospace_applies_to_latin_and_digits_not_symbols():
                 break
             n += 1
         assert n == 37
+
+
+def _spacing_after(tmp_path, blocks, relaxed):
+    from doc2report.ir import Document
+    from doc2report.layout.flow import FlowPlan
+
+    prof = load_profile("formal")
+    out = tmp_path / "o.docx"
+    docx_writer.DocxRenderer(prof, {}, FlowPlan(relaxed=relaxed)).save(Document(blocks=blocks), out)
+    return {p.text.strip(): (p.paragraph_format.space_after.pt if p.paragraph_format.space_after is not None else None)
+            for p in OpenDocx(str(out)).paragraphs}
+
+
+def test_dot_level_spacing_rules(tmp_path):
+    """2026-10-03 사용자: "- · -"에서 · 뒤는 12pt(18pt는 너무 큼), · 목록끼리는 단락 뒤 간격 없이 줄간격만."""
+    from doc2report.ir import ListItem, Run
+
+    def item(text, depth):
+        return ListItem(runs=[Run(text)], depth=depth, marker={2: "-", 3: "·", 1: "□"}[depth])
+
+    blocks = [item("대시1", 2), item("점1", 3), item("점2", 3), item("대시2", 2), item("점3", 3), item("네모", 1)]
+    for relaxed in (False, True):
+        after = _spacing_after(tmp_path, blocks, relaxed)
+        assert after["- 대시1"] == 6                       # - → · 내려감은 6pt 그대로
+        assert after["· 점1"] == 0                         # · → · : 간격 없음
+        assert after["· 점2"] == 12                        # · → - : 12pt (여유 모드에서도 18pt로 늘리지 않는다)
+    after = _spacing_after(tmp_path, blocks, True)
+    assert after["· 점3"] == 18                            # · → □ 로 올라갈 때는 여유 모드의 18pt
+    assert _spacing_after(tmp_path, blocks, False)["· 점3"] == 12

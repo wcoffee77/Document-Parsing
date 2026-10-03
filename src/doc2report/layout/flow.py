@@ -219,7 +219,9 @@ def _extra_if_relaxed(doc: Document, profile: Profile,
                 continue
             level = profile.numbering_level(block.depth)
             if isinstance(following, ListItem) and following.depth < block.depth:
-                gap = (level.level_up_space(True) or 0) - (level.level_up_space(False) or 0)
+                until = profile.text.level_up_relaxed_until
+                gap = ((level.level_up_space(True, following.depth, until) or 0)
+                       - (level.level_up_space(False, following.depth, until) or 0))
             else:
                 gap = (level.level_change_space(True) or 0) - (level.level_change_space(False) or 0)
             extra += max(0, gap)

@@ -81,7 +81,7 @@ numbering:
     hanging: 0mm
     lead_spaces: 5
     marker_sep: " "
-    space_after: 6pt
+    space_after: 0pt         # · 목록은 단락 뒤 간격 없이 줄간격만 (2026-10-03 사용자)
     space_after_level_change: 6pt
     space_after_level_up: 12pt
     space_after_level_up_max: 18pt
@@ -91,7 +91,7 @@ numbering:
     hanging: 0mm
     lead_spaces: 7
     marker_sep: " "
-    space_after: 6pt
+    space_after: 0pt         # 같은 · 목록 — 단락 뒤 간격 없이 줄간격만
     space_after_level_change: 6pt
     space_after_level_up: 12pt
     space_after_level_up_max: 18pt
@@ -136,6 +136,7 @@ text:
   levels_by_order: true      # 말머리 단계는 문서에 나온 순서로(1. □ - / 1. □ (1)·① - / □ - / (1) □ - …), 한 단계씩 내려간다 (2026-10-01 사용자)
   pattern_depths:            # 종류 구분용: (1)과 ①은 같은 종류
     - {pattern: '^(?:\(\d{1,2}\)|[①-⑳])', depth: 1}
+  level_up_relaxed_until: 1  # 넉넉한 간격(18pt)은 □·1.로 올라갈 때만. -·· 로 올라갈 때는 12pt (2026-10-03 사용자: "- · -"에서 · 뒤)
   gap_after_section: 18pt    # 마지막 하위 항목 뒤 — 새 절(3.) 앞 간격
   annotation_box_height: 5mm  # 주석 상자는 한 줄에 5mm (2026-10-01 사용자 — 글자 높이에 딱 맞으면 겹쳐 보임)
   annotation_box: true       # 주석은 텍스트 상자(원본과 같음). 못 만들면 일반 문단 주석으로

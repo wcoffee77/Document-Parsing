@@ -573,7 +573,7 @@ class DocxRenderer:
             if next_block.depth == depth:
                 return level.space_after
             if next_block.depth < depth:
-                return level.level_up_space(relaxed)
+                return level.level_up_space(relaxed, next_block.depth, self.profile.text.level_up_relaxed_until)
         return level.level_change_space(relaxed)
 
     def _is_note(self, text: str) -> bool:

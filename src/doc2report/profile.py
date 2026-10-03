@@ -186,8 +186,12 @@ class NumberingLevel(_Base):
         return self.space_after
 
 
-    def level_up_space(self, relaxed: bool) -> int | None:
-        """더 얕은 단계로 올라가는 자리의 간격(지면에 여유가 있으면 넉넉한 값)."""
+    def level_up_space(self, relaxed: bool, to_depth: int | None = None, relaxed_until: int | None = None) -> int | None:
+        """더 얕은 단계로 올라가는 자리의 간격(지면에 여유가 있으면 넉넉한 값).
+
+        relaxed_until: 올라가 도착하는 단계(to_depth)가 이 값보다 깊으면(= 작은 단위) 넉넉한 값을 쓰지 않는다."""
+        if relaxed_until is not None and to_depth is not None and to_depth > relaxed_until:
+            relaxed = False
         if relaxed and self.space_after_level_up_max is not None:
             return self.space_after_level_up_max
         if self.space_after_level_up is not None:
@@ -357,6 +361,9 @@ class TextRules(_Base):
     autospace: float | None = None
     # 한글과 영문·숫자가 맞닿는 자리마다 글자 크기의 이 비율만큼 폭이 더해진다(Word "한글과 영문 사이 간격 자동 조절", 보통 25%).
     # 영문·숫자 폭은 글꼴 그대로(0.5em)임이 낱글자 시험으로 확정됐다(숫자·대문자·소문자·% 100자가 간격 0에 68자, 1.0pt에 80자).
+    level_up_relaxed_until: int | None = None
+    # 올라가서 도착하는 단계가 이 값 이하(1 = □·1.)일 때만 지면에 여유가 있으면 넉넉한 간격(18pt)을 쓴다. 더 작은 단위인
+    # -·· 로 올라갈 때는 늘 12pt(2026-10-03 사용자: "- · -"에서 · 뒤 18pt는 너무 크다).
     condense_pad: int | None = None
     # 좁힐 양을 계산값보다 이만큼 더 준다(상한은 condense_max). 계산상 0.9pt면 되는 줄을 Word는 1.0pt여야
     # 한 줄에 넣는 일이 있다(2026-10-01 사용자 실측) — 글꼴 폭 계산 오차를 흡수한다.
@@ -416,7 +423,7 @@ FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
-                      "fit_bold_factor", "condense_pad", "balance_sbcs_dbcs", "condense_wide_weight", "condense_space_weight", "autospace", "shorten_to_fit", "orphan_max",
+                      "fit_bold_factor", "condense_pad", "balance_sbcs_dbcs", "condense_wide_weight", "condense_space_weight", "autospace", "level_up_relaxed_until", "shorten_to_fit", "orphan_max",
                       "gap_after_annotation", "gap_after_note", "gap_after_section",
                       "gap_after_note_same_level", "pattern_depths", "levels_by_order")
 
