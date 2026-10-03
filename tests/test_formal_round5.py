@@ -404,3 +404,18 @@ def test_dot_level_spacing_rules(tmp_path):
     after = _spacing_after(tmp_path, blocks, True)
     assert after["· 점3"] == 18                            # · → □ 로 올라갈 때는 여유 모드의 18pt
     assert _spacing_after(tmp_path, blocks, False)["· 점3"] == 12
+
+
+def test_note_gap_follows_level_it_belongs_to(tmp_path):
+    """2026-10-03 사용자: ※ 뒤 간격은 ※가 속한 계층 기준 — ·→2.는 큰 변화라 18pt 유지, ·→-는 6pt(여유 시 12pt)."""
+    from doc2report.ir import ListItem, Run
+
+    def item(text, depth, marker):
+        return ListItem(runs=[Run(text)], depth=depth, marker=marker)
+
+    to_section = [item("점", 3, "·"), item("참고1", 3, "※"), item("절", 0, "2.")]
+    to_dash = [item("점", 3, "·"), item("참고2", 3, "※"), item("대시", 2, "-")]
+    for relaxed in (False, True):
+        assert _spacing_after(tmp_path, to_section, relaxed)["※ 참고1"] == 18
+    assert _spacing_after(tmp_path, to_dash, False)["※ 참고2"] == 6
+    assert _spacing_after(tmp_path, to_dash, True)["※ 참고2"] == 12

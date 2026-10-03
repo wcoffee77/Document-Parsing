@@ -588,8 +588,19 @@ class DocxRenderer:
         if not is_note or next_block is None or self._is_note_block(next_block):
             return None
         if gap is None:  # 따로 정한 값이 없으면 일반 항목과 같은 규칙(같은 단계 6pt, 올라가면 12·18pt)
-            return (self._transition_gap(self._plain_depth, next_block)
-                    if self._plain_depth is not None else None)
+            depth = self._plain_depth
+            if depth is None:
+                return None
+            if isinstance(next_block, ListItem) and next_block.depth < depth:
+                # ※ 뒤 간격은 ※가 속한 계층 기준(2026-10-03 사용자): 절이 바뀌면(·→2.) 큰 변화라 여유와
+                # 상관없이 18pt, 작은 단계(·→-)로 올라가면 6pt(여유 있으면 12pt)
+                if next_block.depth == 0 and rules.gap_after_section is not None:
+                    return rules.gap_after_section
+                until = rules.level_up_relaxed_until
+                if until is not None and next_block.depth > until:
+                    level = self.profile.numbering_level(depth)
+                    return level.level_up_space(False) if self.flow.relaxed else level.level_change_space(False)
+            return self._transition_gap(depth, next_block)
         same = rules.gap_after_note_same_level
         if (same is not None and isinstance(next_block, ListItem) and self._plain_depth is not None
                 and next_block.depth == self._plain_depth):
