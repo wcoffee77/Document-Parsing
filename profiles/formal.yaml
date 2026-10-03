@@ -71,6 +71,7 @@ numbering:
     marker_sep: " "
     space_after: 6pt
     space_after_level_change: 6pt
+    space_after_level_down_tight: 0pt   # - 다음 · : 여유 있으면 6pt, 내용이 많으면 0(2026-10-03 사용자)
     space_after_level_up: 12pt
     space_after_level_up_max: 18pt
 

@@ -153,6 +153,7 @@ class NumberingLevel(_Base):
     space_after: int | None = None
     space_after_level_change: int | None = None
     space_after_level_change_max: int | None = None  # 지면에 여유가 있을 때까지 늘릴 값
+    space_after_level_down_tight: int | None = None  # 더 깊은 단계로 내려갈 때, 지면에 여유가 없으면 쓸 값(정식보고서: - 다음 · 는 0)
     space_after_level_up: int | None = None
     space_after_level_up_max: int | None = None
     # 더 얕은 단계로 올라가는 자리(- 다음의 □)의 간격 — 없으면 space_after_level_change를 쓴다
@@ -172,10 +173,16 @@ class NumberingLevel(_Base):
 
     @field_validator("space_before", "space_after", "space_after_level_change",
                      "space_after_level_change_max", "space_after_level_up",
-                     "space_after_level_up_max", "size", mode="before")
+                     "space_after_level_up_max", "space_after_level_down_tight", "size", mode="before")
     @classmethod
     def _pt(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
+
+    def level_down_space(self, relaxed: bool) -> int | None:
+        """더 깊은 단계(- 다음의 ·)로 내려가는 자리의 간격 — 지면이 빡빡하면 tight 값(없으면 level_change)."""
+        if not relaxed and self.space_after_level_down_tight is not None:
+            return self.space_after_level_down_tight
+        return self.level_change_space(relaxed)
 
     def level_change_space(self, relaxed: bool) -> int | None:
         """단계가 바뀌는 자리의 간격. 지면에 여유가 있으면 넉넉한 값을 쓴다."""
@@ -718,7 +725,7 @@ def _dump_level(level: NumberingLevel) -> dict:
         data[key] = _mm(data[key])
     for key in ("space_before", "space_after", "space_after_level_change",
                 "space_after_level_change_max", "space_after_level_up",
-                "space_after_level_up_max", "size"):
+                "space_after_level_up_max", "space_after_level_down_tight", "size"):
         data[key] = _pt(data[key])
     return data
 

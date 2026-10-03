@@ -398,7 +398,7 @@ def test_dot_level_spacing_rules(tmp_path):
     blocks = [item("대시1", 2), item("점1", 3), item("점2", 3), item("대시2", 2), item("점3", 3), item("네모", 1)]
     for relaxed in (False, True):
         after = _spacing_after(tmp_path, blocks, relaxed)
-        assert after["- 대시1"] == 6                       # - → · 내려감은 6pt 그대로
+        assert after["- 대시1"] == (6 if relaxed else 0)    # - → · 내려감: 여유 6pt, 빡빡하면 0
         assert after["· 점1"] == 0                         # · → · : 간격 없음
         assert after["· 점2"] == 12                        # · → - : 12pt (여유 모드에서도 18pt로 늘리지 않는다)
     after = _spacing_after(tmp_path, blocks, True)

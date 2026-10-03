@@ -102,7 +102,9 @@ def _block_height(block: Block, profile: Profile, layouts: dict[int, TableLayout
         same_level = isinstance(following, ListItem) and following.depth == block.depth
         up = isinstance(following, ListItem) and following.depth < block.depth
         after = (level.space_after if same_level
-                 else level.level_up_space(False) if up else level.level_change_space(False))
+                 else level.level_up_space(False) if up
+                 else level.level_down_space(False) if isinstance(following, ListItem)
+                 else level.level_change_space(False))
         before = 0
         if isinstance(previous, ListItem) and previous.depth > block.depth:
             before = level.space_before or 0
@@ -222,6 +224,8 @@ def _extra_if_relaxed(doc: Document, profile: Profile,
                 until = profile.text.level_up_relaxed_until
                 gap = ((level.level_up_space(True, following.depth, until) or 0)
                        - (level.level_up_space(False, following.depth, until) or 0))
+            elif isinstance(following, ListItem):
+                gap = (level.level_down_space(True) or 0) - (level.level_down_space(False) or 0)
             else:
                 gap = (level.level_change_space(True) or 0) - (level.level_change_space(False) or 0)
             extra += max(0, gap)
