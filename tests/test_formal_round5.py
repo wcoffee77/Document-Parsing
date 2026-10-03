@@ -232,7 +232,7 @@ def test_report_tells_where_each_table_starts(tmp_path):
 
 def _lines(tmp_path, text):
     doc, _ = _convert(tmp_path, text)
-    return [p.text.rstrip() for p in doc.paragraphs]
+    return [p.text.rstrip() for p in doc.paragraphs if p.text.strip() != "- 이 상 -"]   # 맺음말은 빼고 본다
 
 
 def test_levels_follow_the_order_markers_appear(tmp_path, fake_fonts):
@@ -427,3 +427,12 @@ def test_heading_like_square_gets_12pt_but_sentence_square_6pt(tmp_path, fake_fo
     after = {p.text.strip(): p.paragraph_format.space_after for p in doc.paragraphs}
     assert after["□ 추진 방향"] == Pt(12)
     assert after["□ 채용 현황 : 입사 확정 27명, 처우 협의 6명"] == Pt(6)
+
+
+def test_end_mark_is_added_once_right_aligned(tmp_path, fake_fonts):
+    """2026-10-03: 정답 5건 모두 문서 끝에 오른쪽 "- 이 상 -". 원문 끝에 이미 있으면 한 번만."""
+    for text in ("□ 가\n", "□ 가\n- 이 상 -\n"):
+        doc, _ = _convert(tmp_path, text)
+        marks = [p for p in doc.paragraphs if p.text.strip() == "- 이 상 -"]
+        assert len(marks) == 1 and doc.paragraphs[-1].text.strip() == "- 이 상 -"
+        assert marks[0].alignment == 2   # WD_ALIGN_PARAGRAPH.RIGHT

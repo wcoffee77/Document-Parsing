@@ -219,7 +219,8 @@ def _row(tokens: list[Token], is_header: bool, depth: int) -> Row:
                     runs, images = _inline(tokens[j])
             blocks: list[Block] = []
             if plain(runs).strip() or not images:
-                blocks.append(Paragraph(runs=runs))
+                # 칸 안 <br>은 줄마다 문단으로(줄글 다듬기의 표: "- 장점1<br>- 장점2")
+                blocks += [Paragraph(runs=part) for part in _split_lines(runs)] or [Paragraph(runs=runs)]
             blocks.extend(images)
             cells.append(Cell(blocks=blocks, is_header=is_header, align=_align(t)))
             i = close
@@ -270,12 +271,30 @@ def _inline(token: Token) -> tuple[list[Run], list[Image]]:
         elif ty == "image":
             images.append(Image(src=child.attrGet("src") or "",
                                 caption=(child.content or None)))
+        elif ty == "html_inline" and _BR.fullmatch(child.content.strip()):
+            runs.append(Run("\n", bold=bool(bold), italic=bool(italic), href=href))  # 표 칸 안 줄바꿈(<br>)
         elif ty in ("softbreak", "hardbreak"):
             # 강제 줄바꿈("\n")은 글쓴이가 엔터로 줄을 나눈 자리 — 줄 맞춤이 켜진 서식만 살리고 나머지는
             # pipeline이 공백으로 바꾼다(soften_hard_breaks).
             runs.append(Run("\n" if ty == "hardbreak" else " ", bold=bool(bold), italic=bool(italic), href=href))
 
     return _merge_runs(runs), images
+
+
+_BR = re.compile(r"<br\s*/?>", re.I)
+
+
+def _split_lines(runs: list[Run]) -> list[list[Run]]:
+    """런 목록을 줄바꿈("\n") 자리에서 나눈다."""
+    parts: list[list[Run]] = [[]]
+    for run in runs:
+        pieces = run.text.split("\n")
+        for k, piece in enumerate(pieces):
+            if k:
+                parts.append([])
+            if piece:
+                parts[-1].append(run.copy_with(piece))
+    return [p for p in parts if plain(p).strip()]
 
 
 def _merge_runs(runs: list[Run]) -> list[Run]:

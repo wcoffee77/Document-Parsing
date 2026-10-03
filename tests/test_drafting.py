@@ -31,7 +31,7 @@ def test_split_sentences_title_and_dates():
 
 
 def test_draft_keeps_original_sentences_and_places_them():
-    result = draft(TEXT, ask=_ok)
+    result = draft(TEXT, mode="place", ask=_ok)
     assert result.used_llm and not [n for n in result.notes if "실패" in n]
     lines = result.text.splitlines()
     assert "1. 현황" in lines and "2. 대응" in lines
@@ -47,7 +47,7 @@ def test_invented_number_in_summary_is_dropped():
         data["sections"][0]["groups"][0]["summary"] = "경력 채용 35명 입사 확정"     # 원문에 없는 35
         return json.dumps(data, ensure_ascii=False)
 
-    result = draft(TEXT, ask=bad)
+    result = draft(TEXT, mode="place", ask=bad)
     assert any("원문에 없는 숫자" in n for n in result.notes)
     assert "35명" not in result.text and "□ 9월 말 기준으로 40명" in result.text      # 요지를 버리고 첫 문장이 □
 
@@ -59,7 +59,7 @@ def test_missing_sentence_triggers_retry_then_fallback():
         calls.append(user)
         return json.dumps({"sections": [{"heading": "현황", "groups": [{"summary": "", "ids": [1, 2], "notes": []}]}]})
 
-    result = draft(TEXT, ask=lossy)
+    result = draft(TEXT, mode="place", ask=lossy)
     assert len(calls) == 2 and "이전 응답의 문제" in calls[1]
     assert not result.used_llm and "규칙 기본 구조" in " ".join(result.notes)
     for sentence in _sentences()[1]:
@@ -70,7 +70,7 @@ def test_llm_error_falls_back_without_crashing():
     def boom(_s, _u):
         raise RuntimeError("연결 실패")
 
-    result = draft(TEXT, ask=boom)
+    result = draft(TEXT, mode="place", ask=boom)
     assert not result.used_llm and any("연결 실패" in n for n in result.notes)
 
 
@@ -85,7 +85,7 @@ def test_order_must_follow_original():
 def test_draft_text_goes_through_formal_converter(tmp_path):
     from doc2report.pipeline import convert_many
 
-    result = draft(TEXT, ask=_ok)
+    result = draft(TEXT, mode="place", ask=_ok)
     src = tmp_path / "s.txt"
     src.write_text(result.text, encoding="utf-8")
     out = convert_many([str(src)], tmp_path / "o.docx", "formal", title=result.structure.title, section_titles=False)
@@ -100,7 +100,7 @@ def test_title_is_not_duplicated_in_converted_document(tmp_path):
 
     from doc2report.pipeline import convert_many
 
-    result = draft(TEXT, ask=_ok)
+    result = draft(TEXT, mode="place", ask=_ok)
     assert result.structure.title == "충원 현황 정리"           # 원문 제목이 있으면 원문 그대로
     src = tmp_path / "s.txt"
     src.write_text(result.text, encoding="utf-8")

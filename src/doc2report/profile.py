@@ -314,6 +314,8 @@ class TextRules(_Base):
     # 표 바로 아래 ※(표를 부연하는 줄)만 따로 줄이는 값. 비우면 note_size_delta(2026-10-03 사용자: 본문 ※는 14pt,
     # 표 아래 ※는 예전대로 12pt).
     heading_item_max_chars: int | None = None
+    end_mark: str = ""
+    # 문서 끝 맺음말("- 이 상 -", 정답 5건 모두 오른쪽). fonts.end_mark 서식으로 쓴다. 원문 끝에 이미 있으면 그것을 대신 쓴다.
     # 이 글자 수 이하이고 "항목명 : 값"도 쉼표도 없는 항목은 제목 같은 항목("□ 추진 방향")으로 본다 —
     # 바로 아래 하위 항목 앞 간격을 numbering[].space_after_heading_down으로(2026-10-03 사용자).
     # 참고사항 표시(※ 등)로 시작하는 문단·항목은 본문보다 이만큼 작게 쓴다(2026-09-29 사용자:
@@ -442,7 +444,7 @@ class TextRules(_Base):
         return None if v is None else parse_length(v, default_unit="mm")
 
 
-FORMAT_TEXT_FIELDS = ("note_size_delta", "note_size_delta_after_table", "heading_item_max_chars", "note_indent", "note_lead_spaces",
+FORMAT_TEXT_FIELDS = ("end_mark", "note_size_delta", "note_size_delta_after_table", "heading_item_max_chars", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",

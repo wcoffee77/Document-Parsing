@@ -128,7 +128,8 @@ def test_long_item_is_split_and_aligned_under_text(tmp_path, fake_fonts):
     long = " ".join(["가나다라마바사아"] * 12)                      # 한 줄(약 170mm)을 넘는 문장
     paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
                                     Paragraph(runs=[Run("□ " + long)])])
-    items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")]
+    items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")
+             and p.text.strip() != "- 이 상 -"]
     assert len(items) >= 2
     first, second = items[0], items[1]
     assert first.text.startswith(" □ ")
@@ -240,7 +241,8 @@ def test_wrapped_txt_lines_become_one_bold_sentence_aligned_under_text(tmp_path,
     src.write_text(f"1. 추진 배경\n□ {first}\n자차카타파하 마지막 줄\n□ 다음\n", encoding="utf-8")
     out = tmp_path / "w.docx"
     convert(str(src), out, "formal", polish="none")
-    items = [p for p in OpenDocx(str(out)).paragraphs if p.text.strip() and not p.text.startswith("1.")]
+    items = [p for p in OpenDocx(str(out)).paragraphs if p.text.strip() and not p.text.startswith("1.")
+             and p.text.strip() != "- 이 상 -"]
     assert items[-1].text.strip() == "□ 다음"
     lines = items[:-1]
     assert len(lines) >= 2 and lines[0].text.startswith(" □ ") and lines[1].text.startswith(" " * 4)
@@ -269,7 +271,7 @@ def test_hard_line_breaks_are_kept_and_continuations_align_and_stay_bold(tmp_pat
         "- 짧은 항목\n"
         "내려쓴 짧은 줄\n"
         "□ 다음 항목\n"))
-    texts = [p.text for p in paragraphs]
+    texts = [p.text for p in paragraphs if p.text.strip() != "- 이 상 -"]
     assert texts == ["1. 추진 배경",
                      " □ 핵심인력 선정 기준을 마련하여 인사 운영 체계를 개선하며,",
                      " " * 4 + "평가 결과를 공정하게 반영하고,",           # 쉼표로 끝나도 "."로 안 바뀌고 윗줄 글자에 맞춘다
@@ -352,7 +354,8 @@ def test_wrapped_lines_carry_a_hanging_indent_so_word_rewrap_still_aligns(tmp_pa
     long = " ".join(["가나다라마바사아"] * 12)
     paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
                                     Paragraph(runs=[Run("□ " + long)])])
-    items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")]
+    items = [p for p in paragraphs if p.text.strip() and not p.text.startswith("1.")
+             and p.text.strip() != "- 이 상 -"]
     size = load_profile("formal").font("body").size
     head = 4 * size // 2                                        # 첫 줄 접두 " □ " = 반각 4칸
     first, second = items[0].paragraph_format, items[1].paragraph_format

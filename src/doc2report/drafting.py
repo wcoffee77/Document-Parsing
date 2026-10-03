@@ -66,9 +66,12 @@ class Structure:
 @dataclass
 class DraftResult:
     text: str                      # 정식보고서 변환기가 읽는 글
-    structure: Structure
+    structure: Structure | None    # 배치 모드의 구조(다듬기 모드는 None)
     notes: list[str]               # --report에 남길 판단·실패 사유
     used_llm: bool
+    title: str = ""
+    mode: str = "place"            # rewrite(다듬기) | place(배치만) | fallback(규칙 기본 구조)
+    sections: int = 0
 
 
 def split_sentences(text: str) -> tuple[str, list[str]]:
@@ -163,8 +166,8 @@ def render(structure: Structure, sentences: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
-def draft(text: str, ask: Ask | None = None) -> DraftResult:
-    """줄글 → 구조. ask(system, user)가 없으면 설정된 LLM을 쓴다. LLM이 없거나 실패하면 기본 구조."""
+def place(text: str, ask: Ask | None = None) -> DraftResult:
+    """배치 모드: 원문 문장 그대로 구조만. ask(system, user)가 없으면 설정된 LLM을 쓴다. LLM이 없거나 실패하면 기본 구조."""
     title, sentences = split_sentences(text)
     notes: list[str] = []
     if not sentences:
@@ -198,4 +201,355 @@ def draft(text: str, ask: Ask | None = None) -> DraftResult:
         structure.title = structure.title or title
         if title and structure.title != title:
             structure.title = title  # 원문 제목이 있으면 그대로
-    return DraftResult(render(structure, sentences), structure, notes, used)
+    return DraftResult(render(structure, sentences), structure, notes, used, title=structure.title,
+                       mode="place" if used else "fallback", sections=len(structure.sections))
+
+
+# ── 다듬기 모드 (B안, 2026-10-03 사용자) ─────────────────────────────────────────────
+# "내가 생각하는 바를 줄글로 쓰면 보고서로 깔끔하게 바꾸는 기능" — LLM이 문장을 보고서 말투로 다시 쓰고 배열한다(때로는 표).
+# 단 **사실은 절대 바뀌면 안 된다**: 줄마다 근거 원문 번호(src)를 받아 파이썬(transform/factcheck.py)이 숫자·날짜·요일·영문·한자·
+# 방향·확정 여부를 대조한다. 걸린 줄은 한 번 고쳐 달라고 하고, 그래도 걸리면 그 줄을 **원문 문장 그대로** 바꾼다.
+# 문체 규칙은 정답 5건(docs/drafting-answers-analysis.md)에서 뽑았다.
+
+REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호가 붙은 원문 문장(줄글)을 상급자 보고용 개조식 보고서로 다시 씁니다.
+거친 문장을 보고서 말투로 매끄럽게 다듬고, 보고 흐름에 맞게 배열합니다. 내용은 원문 그대로여야 합니다.
+
+[절대 규칙 — 사실]
+1. 원문에 없는 사실·숫자·날짜·기한·요일·이름·평가를 만들지 않습니다. 숫자는 값 그대로, 표기만 바꿀 수 있습니다
+   (10월 15일 → 10.15, 300만 원 → 300만원, 연 4억 원 → 4억원/년, 두 곳 → 2개, 둘째 주 → 2주차).
+2. 방향·정도·확정 여부를 바꾸지 않습니다(늘었다↔줄었다 금지, '검토 중'을 '확정'으로, '~할 수 있다'를 '~한다'로 바꾸기 금지).
+   원문의 단서(약, 정도, 예정, 검토, 가능성)는 남깁니다.
+3. 줄마다 src에 그 줄의 근거 원문 문장 번호를 모두 적습니다. 근거 없는 줄은 쓰지 않습니다.
+4. 보고에 필요 없는 문장(말투, 개인 소감, 중복, 자잘한 부연)은 쓰지 않고 dropped에 번호를 적습니다.
+   모든 문장 번호는 어느 줄의 src나 dropped에 한 번 이상 나와야 합니다.
+
+[구성]
+- 보고서 유형에 맞게 절을 나눕니다(예):
+  현황 보고 → □ 목표·현황(항목명 : 값) → □ 추진 방향
+  방안 검토 → 1. 배 경 / 2. 검토 방안(대안 비교 표) / 3. 추진 방향
+  결과 보고 → □ 운영 경과 → □ 주요 결과 → □ 향후 계획(①②③)
+  추진 계획 → □ 대 상 → □ 일 정 → □ 세부 프로그램 → □ 소요 예산 → ※ 기타 사항
+  이슈·건의 → □ 배경 및 이슈 → □ 검토 가능(안)(①②③) → □ 건의 사항
+- 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 쓰고 그 아래 "□".
+- 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
+  "→"(목표·결과), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
+- 사실 나열은 "항목명 : 값"으로 씁니다(채용 목표 : 총 40명 / 대 상 : 입사 10년차 이상 30명).
+- 대안이 2개면 표로 씁니다: {"m": "표", "rows": [["구분", "(1안) …", "(2안) …"], ["장점", "- …", "- …"], ["단점", "- …\\n- …", "- …"]], "src": [...]}.
+  칸 안 여러 줄은 \\n으로 나눕니다. 대안이 3개 이상이면 ①②③ "안 : 비용·난점"으로 씁니다.
+- 결론·제안은 마지막 절에 두고, 앞의 대안 번호를 다시 부릅니다(우선 ① …, 내년부터는 ② …).
+
+[문장]
+- 화자·말투를 지웁니다(저는, 일단, ~입니다, 보고드립니다, ~로 보입니다, ~것 같습니다).
+- 문장 끝은 명사나 한자 한 글자로 끝냅니다(추진, 검토, 예정, 필요, 확보, 高, 中, 可, 必).
+  '~합니다', '~함', '~임', 마침표는 쓰지 않습니다.
+- 한자 약어는 高 中 現 可 必 時 順 內 人 月 만 씁니다(처우 협의 中, 확인 必, 보고時, 3회/人, 1회/月).
+- 숫자: 만원·억원은 붙여 씁니다. 날짜 M.D, 기한 (~10.15일), 변화 (기존 25% → 30%), 비율 (67.5%), 분모 15명 中 12명.
+- 특정 회사명(A사·B사)은 '경쟁사'로 묶습니다.
+- 한 줄은 40자 안팎, 길어도 두 줄 분량. 전체 분량은 원문의 60~75%.
+- 날짜 줄과 맺음말("- 이 상 -")은 쓰지 않습니다(변환기가 붙입니다).
+
+출력은 JSON 하나뿐입니다(설명·코드 블록 금지):
+{"title": "보고서 제목(명사형)", "lines": [{"m": "□", "text": "...", "src": [1]}, ...], "dropped": [번호, ...]}
+
+[예시]
+원문:
+[1] 신입사원 입문교육을 9월 1일부터 사흘간 진행했습니다.
+[2] 대상은 하반기 입사자 85명이었고 82명이 수료했습니다.
+[3] 만족도는 5점 만점에 4.3점으로 작년 4.1점보다 올랐습니다.
+[4] 다만 직무 실습 시간이 부족하다는 의견이 많았습니다.
+[5] 내년에는 실습을 하루 더 늘리는 방안을 검토하겠습니다.
+[6] 예산은 추가로 1,500만 원 정도 필요할 것 같은데 재무팀과 협의가 필요합니다.
+[7] 개인적으로는 반응이 좋아서 다행이라고 생각합니다.
+출력:
+{"title": "신입사원 입문교육 결과 보고", "lines": [
+ {"m": "□", "text": "운영 결과", "src": [1, 2, 3]},
+ {"m": "-", "text": "기 간 : 9.1 ~ 3 (3일간)", "src": [1]},
+ {"m": "-", "text": "대 상 : 하반기 입사자 85명 中 82명 수료", "src": [2]},
+ {"m": "-", "text": "만족도 : 4.3점/5점 (전년 4.1점 대비 상승)", "src": [3]},
+ {"m": "□", "text": "개선 방향", "src": [4, 5, 6]},
+ {"m": "-", "text": "직무 실습 시간 부족 의견 다수", "src": [4]},
+ {"m": "→", "text": "차년도 실습 1일 확대 검토", "src": [5]},
+ {"m": "※", "text": "추가 예산 약 1,500만원 소요 예상, 재무팀 협의 필요", "src": [6]}],
+ "dropped": [7]}
+"""
+
+_ORDINAL = re.compile(r"^[①-⑳]$")
+_SECTION_MARK = re.compile(r"^\d{1,2}\.$")
+_PLAIN_MARKS = ("□", "-", "∙", "→", "※", "*")
+_LABEL = re.compile(r"^(?P<label>[^:：\d][^:：]{0,15}?)\s*:\s+(?P<value>\S.*)$")
+_POLITE_END = re.compile(r"(?:습니다|니다|어요|아요|해요|세요|입니다)\.?$")
+
+
+@dataclass
+class Line:
+    m: str
+    text: str = ""
+    src: list[int] = field(default_factory=list)
+    rows: list[list[str]] | None = None
+    original: bool = False         # 사실 검증에 걸려 원문 문장으로 바꾼 줄
+
+    @property
+    def is_table(self) -> bool:
+        return self.rows is not None
+
+    def content(self) -> str:
+        if self.rows is not None:
+            return " ".join(cell for row in self.rows for cell in row)
+        return self.text
+
+
+@dataclass
+class Rewrite:
+    title: str
+    lines: list[Line]
+    dropped: list[int]
+
+
+def _valid_mark(mark: str) -> bool:
+    return mark in _PLAIN_MARKS or mark == "표" or bool(_ORDINAL.match(mark) or _SECTION_MARK.match(mark))
+
+
+def parse_rewrite(raw: str, count: int) -> Rewrite:
+    """LLM 응답 → Rewrite. 형식이 어긋나면 ValueError(사유)."""
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("JSON을 찾지 못함")
+    try:
+        data = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON 해석 실패({exc.msg})") from exc
+    lines: list[Line] = []
+    for item in data.get("lines") or []:
+        mark = str(item.get("m") or "").strip()
+        if mark in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
+            mark += "."
+        if not _valid_mark(mark):
+            raise ValueError(f"알 수 없는 말머리 '{mark}'")
+        try:
+            src = [int(i) for i in item.get("src") or []]
+        except (TypeError, ValueError) as exc:
+            raise ValueError("src가 숫자 목록이 아님") from exc
+        bad = [i for i in src if not 1 <= i <= count]
+        if bad:
+            raise ValueError(f"없는 문장 번호 {bad}")
+        if mark == "표":
+            rows = item.get("rows")
+            if not isinstance(rows, list) or len(rows) < 2 or not all(isinstance(r, list) for r in rows):
+                raise ValueError("표(rows)가 두 행 이상의 목록이 아님")
+            lines.append(Line(mark, "", src, [[str(c).strip() for c in r] for r in rows]))
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            raise ValueError(f"글이 빈 줄({mark})")
+        lines.append(Line(mark, text, src))
+    if not lines:
+        raise ValueError("줄이 하나도 없음")
+    dropped = [int(i) for i in data.get("dropped") or [] if str(i).isdigit()]
+    return Rewrite(str(data.get("title") or "").strip(), lines, dropped)
+
+
+def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
+           rules=None) -> tuple[dict[int, list[str]], list[str]]:
+    """(줄 번호 → 사실 문제, 형식 문제 목록). 사실 문제가 남은 줄은 원문으로 바꾼다. 형식 문제는 다시 써 달라고만 한다."""
+    from .transform.factcheck import check, load_rules
+
+    rules = rules or load_rules()
+    everything = " ".join(sentences)
+    facts: dict[int, list[str]] = {}
+    style: list[str] = []
+    for index, line in enumerate(rewrite.lines):
+        if not line.src:
+            facts[index] = ["근거 문장 번호(src)가 없음"]
+            continue
+        source = " ".join(sentences[i - 1] for i in line.src)
+        problems = check(line.content(), source, rules, year)
+        if problems:
+            facts[index] = problems
+        if not line.is_table and _POLITE_END.search(line.text):
+            style.append(f"{index + 1}번째 줄이 '~습니다'로 끝남: {line.text[:30]}")
+    if rewrite.title:
+        problems = check(rewrite.title, f"{title} {everything}", rules, year)
+        if problems:
+            facts[-1] = problems
+    used = {i for line in rewrite.lines for i in line.src} | set(rewrite.dropped)
+    missing = [i for i in range(1, len(sentences) + 1) if i not in used]
+    if missing:
+        style.append(f"문장 {missing}이(가) 어느 줄의 src에도, dropped에도 없음")
+    return facts, style
+
+
+def _problem_message(rewrite: Rewrite, facts: dict[int, list[str]], style: list[str]) -> str:
+    out = []
+    for index, problems in sorted(facts.items()):
+        where = "제목" if index < 0 else f"{index + 1}번째 줄({rewrite.lines[index].m} {rewrite.lines[index].content()[:30]})"
+        out.append(f"- {where}: {', '.join(problems)}")
+    out += [f"- {s}" for s in style]
+    return "\n".join(out)
+
+
+def _restore_originals(rewrite: Rewrite, facts: dict[int, list[str]], sentences: list[str],
+                       original_title: str) -> list[str]:
+    """사실 검증에 끝까지 걸린 줄을 원문 문장 그대로 바꾼다. 판단 내용을 돌려준다."""
+    notes: list[str] = []
+    replaced: list[Line] = []
+    for index, line in enumerate(rewrite.lines):
+        if index not in facts:
+            replaced.append(line)
+            continue
+        source = [sentences[i - 1] for i in line.src]
+        shown = line.content()[:40]
+        notes.append(f"사실 검증 실패 → 원문 문장으로 대체({', '.join(facts[index])}): {shown}")
+        if not source:
+            continue  # 근거 없는 줄은 뺀다
+        if line.is_table:
+            replaced += [Line("-", s, [i], original=True) for s, i in zip(source, line.src)]
+        else:
+            replaced.append(Line(line.m, " ".join(source), line.src, original=True))
+    rewrite.lines = replaced
+    if -1 in facts:
+        notes.append(f"제목 검증 실패({', '.join(facts[-1])}) → 원문 제목 사용: {rewrite.title}")
+        rewrite.title = original_title
+    return notes
+
+
+def _display_width(text: str) -> int:
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+
+def _spaced_label(label: str) -> str:
+    """두 글자 항목명은 가운데를 띄운다(기간 → 기 간, 정답 5건)."""
+    return f"{label[0]} {label[1]}" if re.fullmatch(r"[가-힣]{2}", label) else label
+
+
+def tidy_labels(lines: list[Line]) -> None:
+    """"항목명 : 값" 정리 — 두 글자 항목명 띄우기, 같은 말머리로 이어지는 항목끼리 쌍점 세로 맞춤(정답 4·5)."""
+    run: list[tuple[Line, str, str]] = []
+
+    def flush() -> None:
+        if len(run) >= 2:
+            width = max(_display_width(label) for _, label, _ in run)
+            for line, label, value in run:
+                line.text = f"{label}{' ' * (width - _display_width(label))} : {value}"
+        elif run:
+            line, label, value = run[0]
+            line.text = f"{label} : {value}"
+        run.clear()
+
+    def kind(mark: str) -> str:
+        return "①" if _ORDINAL.match(mark) else mark
+
+    previous_kind = None
+    for line in lines:
+        match = None if line.is_table or line.original else _LABEL.match(line.text)
+        if _SECTION_MARK.match(line.m) and not line.original:
+            line.text = _spaced_label(line.text.strip())
+        if match is None or kind(line.m) != previous_kind:
+            flush()
+        if match is not None:
+            run.append((line, _spaced_label(match.group("label").strip()), match.group("value").strip()))
+        previous_kind = kind(line.m)
+    flush()
+
+
+def rewrite_text(rewrite: Rewrite) -> str:
+    """정식보고서 변환기가 읽는 글. 번호 절은 차례로 다시 매기고, 표는 탭 표(칸 안 줄바꿈은 <br>)로 쓴다."""
+    out: list[str] = []
+    section = 0
+    for line in rewrite.lines:
+        if line.is_table:
+            if out and out[-1]:
+                out.append("")
+            for row in line.rows or []:
+                out.append("\t".join(cell.replace("\t", " ").replace("\n", "<br>") or " " for cell in row))
+            out.append("")
+            continue
+        if _SECTION_MARK.match(line.m):
+            section += 1
+            out.append(f"{section}. {line.text}")
+        else:
+            out.append(f"{line.m} {line.text}")
+    return "\n".join(out).strip() + "\n"
+
+
+def rewrite(text: str, ask: Ask | None = None, year: int | None = None) -> DraftResult:
+    """다듬기 모드: 줄글 → 보고서 말투의 개조식 글(사실은 원문 그대로). 형식이 끝내 안 맞으면 배치 모드로."""
+    import datetime
+
+    title, sentences = split_sentences(text)
+    if not sentences:
+        raise ValueError("문장을 찾지 못했습니다")
+    if ask is None:
+        from .transform.llm_polish import ask_chat
+        ask = ask_chat
+    year = year or datetime.date.today().year
+    numbered = "\n".join(f"[{i}] {s}" for i, s in enumerate(sentences, 1))
+    user = (f"원문 제목: {title}\n" if title else "") + f"원문 문장 {len(sentences)}개:\n{numbered}"
+    notes: list[str] = []
+    result: Rewrite | None = None
+    facts: dict[int, list[str]] = {}
+    message = user
+    unavailable = False
+    for attempt in range(2):
+        try:
+            raw = ask(REWRITE_SYSTEM, message)
+            candidate = parse_rewrite(raw, len(sentences))
+        except ValueError as exc:
+            notes.append(f"LLM 다듬기 응답 {attempt + 1}차 형식 오류: {exc}")
+            message = f"{user}\n\n[이전 응답의 문제] {exc}\n규칙을 지켜 JSON을 다시 출력하세요."
+            continue
+        except Exception as exc:  # noqa: BLE001 — 설정 없음·네트워크
+            notes.append(f"LLM 호출 실패: {exc}")
+            unavailable = True
+            break
+        facts, style = review(candidate, sentences, title, year)
+        result = candidate
+        if not facts and not style:
+            break
+        notes.append(f"LLM 다듬기 {attempt + 1}차 검증: 사실 문제 {len(facts)}줄, 형식 문제 {len(style)}건")
+        if attempt == 0:
+            previous = raw[raw.find("{"):raw.rfind("}") + 1]
+            message = (f"{user}\n\n[이전 응답]\n{previous}\n\n[검증에서 걸린 것 — 원문 사실과 다르거나 규칙 위반]\n"
+                       f"{_problem_message(candidate, facts, style)}\n"
+                       "걸린 줄만 원문 사실대로 고치고 나머지는 그대로 두어 JSON 전체를 다시 출력하세요.")
+    if result is None and unavailable:
+        structure = fallback_structure(title, sentences)
+        notes.append("규칙 기본 구조 사용(한 절, 문장마다 □ — 원문 문장 그대로)")
+        return DraftResult(render(structure, sentences), structure, notes, False, title=title,
+                           mode="fallback", sections=len(structure.sections))
+    if result is None:
+        notes.append("다듬기 실패 → 배치 모드(원문 문장 그대로)")
+        placed = place(text, ask)
+        placed.notes = notes + placed.notes
+        return placed
+
+    notes += _restore_originals(result, facts, sentences, title)
+    tidy_labels(result.lines)
+    body = rewrite_text(result)
+    notes += _coverage_notes(result, sentences, body)
+    sections = sum(1 for line in result.lines if _SECTION_MARK.match(line.m)) or sum(
+        1 for line in result.lines if line.m == "□")
+    return DraftResult(body, None, notes, True, title=result.title or title, mode="rewrite", sections=sections)
+
+
+def _coverage_notes(rewrite: Rewrite, sentences: list[str], body: str) -> list[str]:
+    """사람이 검수할 것: 생략한 원문 문장, 보고서에 안 나온 원문 수치."""
+    from .transform.factcheck import missing_numbers
+
+    notes: list[str] = []
+    used = {i for line in rewrite.lines for i in line.src}
+    for i in sorted(set(rewrite.dropped) | (set(range(1, len(sentences) + 1)) - used)):
+        if i not in used:
+            notes.append(f"생략한 원문 문장 [{i}]: {sentences[i - 1]}")
+    missing = missing_numbers(" ".join(sentences), body)
+    if missing:
+        notes.append(f"보고서에 안 나온 원문 수치(필요하면 넣을 것): {', '.join(missing)}")
+    return notes
+
+
+def draft(text: str, ask: Ask | None = None, mode: str = "rewrite", year: int | None = None) -> DraftResult:
+    """줄글 → 보고서 글. mode="rewrite"(기본: 말투를 다듬고 배열, 사실 검증) | "place"(원문 문장 그대로 배치만)."""
+    if mode == "place":
+        return place(text, ask)
+    return rewrite(text, ask, year)

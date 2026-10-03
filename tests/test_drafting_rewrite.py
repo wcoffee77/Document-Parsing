@@ -1,0 +1,175 @@
+"""줄글 → 정식보고서 다듬기(B안, 2026-10-03 사용자): LLM이 말투를 다듬고 배열, 파이썬이 사실을 지킨다."""
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from doc2report.drafting import draft, parse_rewrite, rewrite_text, tidy_labels
+from doc2report.transform.factcheck import check, missing_numbers
+
+SAMPLES = Path(__file__).resolve().parents[1] / "samples" / "drafting"
+TEXT1 = (SAMPLES / "줄글_1_충원현황.txt").read_text(encoding="utf-8")
+TEXT2 = (SAMPLES / "줄글_2_유연근무검토.txt").read_text(encoding="utf-8")
+
+# 정답 1(사용자가 직접 고친 보고서)을 LLM 응답 모양으로 옮긴 것 — 줄마다 근거 문장 번호를 붙였다.
+ANSWER1 = {"title": "R&D 인력 충원 현황", "lines": [
+    {"m": "□", "text": "채용 목표 : 총 40명", "src": [1]},
+    {"m": "□", "text": "채용 현황 : 입사 확정 27명(67.5%), 처우 협의 中 6명", "src": [1, 2]},
+    {"m": "※", "text": "전년도 동기 달성률 72%", "src": [2]},
+    {"m": "-", "text": "직군별 세부 현황", "src": [3, 4]},
+    {"m": "∙", "text": "공정 : 15명 中 12명 확보", "src": [3]},
+    {"m": "∙", "text": "설계 : 14명 中 8명 확보", "src": [4]},
+    {"m": "※", "text": "설계 직군 경우, 아날로그 설계 경력인력 부족 및 경쟁사(2개) 대규모 채용으로 충원 난이도 高",
+     "src": [5, 6]},
+    {"m": "□", "text": "추진 방향", "src": [7, 8]},
+    {"m": "-", "text": "헤드헌팅 수수료 상향 추진 (기존 25% → 30%)", "src": [7]},
+    {"m": "*", "text": "금주 의뢰 완료", "src": [7]},
+    {"m": "-", "text": "사내 추천 보상금 한시적 인상 검토 (기존 300만원 → 500만원)", "src": [7]},
+    {"m": "→", "text": "설계 인력 4명 추가 채용 목표(~10.15일)", "src": [8]},
+    {"m": "※", "text": "차주 경영진 보고時 구체적 대응 방안 및 지원책 논의 예정", "src": [8]}],
+    "dropped": []}
+
+
+def _answer(data):
+    calls = []
+
+    def ask(_system, user):
+        calls.append(user)
+        return json.dumps(data, ensure_ascii=False)
+    return ask, calls
+
+
+# ── 사실 검증기 ───────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("number", [1, 2, 3, 4, 5])
+def test_factcheck_accepts_the_human_answers_except_invented_deadline(number):
+    source = next(SAMPLES.glob(f"줄글_{number}_*.txt")).read_text(encoding="utf-8")
+    answer = next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8").splitlines()
+    flagged = [line for line in answer[2:] if line.strip() and not re.match(r"\d+\.", line.strip())
+               and check(line, source, year=2026)]
+    if number == 3:   # 정답 3의 "(~12월말)"은 원문에 없는 기한 — 사람은 넣을 수 있지만 도구는 막아야 한다
+        assert len(flagged) == 1 and "12월말" in flagged[0]
+    else:
+        assert flagged == []
+
+
+def test_factcheck_notation_changes_are_allowed():
+    src = "10월 15일까지 4명, 300만 원에서 500만 원으로, 약 1억 2천만 원, 경쟁사 두 곳, 9월 둘째 주, 8월 22일부터 이틀간"
+    assert check("기한 ~10.15일, 300만원 → 500만원, 1억 2천만원, 경쟁사(2개), 9월 2주차, 8.22(토) ~23(일)",
+                 src, year=2026) == []
+
+
+def test_factcheck_catches_changed_facts():
+    src = "설계는 14명을 계획했는데 8명밖에 확보하지 못했습니다. 비용은 4억 원입니다. 9월 5일 확정 예정."
+    assert any("숫자" in p for p in check("설계 14명 中 7명 확보", src))
+    assert any("금액" in p for p in check("비용 5억원", src))
+    assert any("요일" in p for p in check("9.5(금) 확정", src, year=2026))            # 2026-09-05는 토요일
+    assert any("방향" in p for p in check("주거비 하락", "현지 주거비가 22% 올랐습니다")) # 올랐다 → 하락
+    assert any("확정" in p for p in check("보상 인상 확정", "보상 인상안을 검토하고 있습니다"))
+    assert any("한자" in p for p in check("인원 多", "인원이 많습니다"))
+    assert any("영문" in p for p in check("KPI 반영", "평가에 반영"))
+
+
+def test_missing_numbers_lists_what_the_report_left_out():
+    assert missing_numbers("40명 중 27명, 7명은 탐색 중", "입사 확정 27명 / 총 40명") == ["7"]
+
+
+# ── 다듬기 흐름 ───────────────────────────────────────────────────────────
+
+def test_rewrite_uses_llm_lines_and_keeps_them_when_facts_check_out():
+    ask, calls = _answer(ANSWER1)
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert result.mode == "rewrite" and len(calls) == 1
+    assert not [n for n in result.notes if "실패" in n]
+    lines = result.text.splitlines()
+    assert "□ 채용 목표 : 총 40명" in lines
+    assert "→ 설계 인력 4명 추가 채용 목표(~10.15일)" in lines
+    assert "* 금주 의뢰 완료" in lines
+    assert result.title == "R&D 인력 충원 현황"
+    assert any("보고서에 안 나온 원문 수치" in n and "7" in n for n in result.notes)   # 사람이 고를 수 있게
+
+
+def test_invented_fact_is_retried_then_replaced_by_the_original_sentence():
+    bad = json.loads(json.dumps(ANSWER1, ensure_ascii=False))
+    bad["lines"][5]["text"] = "설계 : 14명 中 9명 확보"            # 원문은 8명
+    ask, calls = _answer(bad)
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert len(calls) == 2 and "[검증에서 걸린 것" in calls[1] and "9" in calls[1]
+    assert "9명" not in result.text
+    assert "∙ 설계는 14명을 계획했는데 8명밖에 확보하지 못했습니다." in result.text.splitlines()
+    assert any("원문 문장으로 대체" in n for n in result.notes)
+
+
+def test_polite_endings_and_missing_sentences_ask_for_one_more_try():
+    data = json.loads(json.dumps(ANSWER1, ensure_ascii=False))
+    data["lines"][0]["text"] = "채용 목표는 총 40명입니다"
+    data["lines"] = [line for line in data["lines"] if line["src"] != [8]]
+    for line in data["lines"]:
+        line["src"] = [i for i in line["src"] if i != 8]
+    ask, calls = _answer(data)
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert len(calls) == 2 and "습니다" in calls[1] and "[8]" in calls[1]
+    assert any("생략한 원문 문장 [8]" in n for n in result.notes)
+
+
+def test_bad_json_twice_falls_back_to_placement():
+    ask, calls = _answer({"lines": [{"m": "?", "text": "x", "src": [1]}]})
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert result.mode in ("place", "fallback")
+    assert "9월 말 기준으로 올해 R&D 경력 채용 계획 40명 중 27명이" in result.text   # 원문 문장 그대로
+
+
+def test_two_options_become_a_table_with_multiline_cells(tmp_path):
+    data = {"title": "R&D 조직 유연근무제 확대 관련", "lines": [
+        {"m": "1.", "text": "배경", "src": [1]},
+        {"m": "□", "text": "R&D 조직 구성원(312명) 대상 설문결과, 근무시간 경직성 관련 불만 高", "src": [1, 2]},
+        {"m": "-", "text": "출퇴근 시간 자율화(58%), 재택근무 확대(24%) 등 희망", "src": [2]},
+        {"m": "※", "text": "現 시차출퇴근제는 시간 선택 폭이 1시간으로 체감 효과 작다는 의견", "src": [3]},
+        {"m": "2.", "text": "검토 방안", "src": [4]},
+        {"m": "표", "rows": [["구분", "(1안) 시차출퇴근제 시간 선택폭 확대\n(1시간 → 2시간)", "(2안) 선택적 근로시간제 도입"],
+                             ["장점", "- 취업규칙 변경을 통해 즉시 시행 가능", "- 정산기간 기준 근로시간 관리 가능"],
+                             ["단점", "- 유연성 확보 효과 제한적",
+                              "- 근로기준법상 서면 합의 필요\n- 급여 시스템 개편 비용 발생(약 1억 2천만원)\n- 노조 협의 필요(내년 2분기 시행 可)"]],
+         "src": [3, 5, 6, 7, 8]},
+        {"m": "3.", "text": "추진 방향", "src": [9]},
+        {"m": "□", "text": "1안 우선 추진, 2안은 법무 검토 및 노조 협의 거쳐 내년 상반기 도입 추진", "src": [9]},
+        {"m": "※", "text": "법적 해석은 법무팀 확인 필요", "src": [10]}], "dropped": []}
+    ask, _ = _answer(data)
+    result = draft(TEXT2, ask=ask, year=2026)
+    assert not [n for n in result.notes if "대체" in n], result.notes
+    lines = result.text.splitlines()
+    assert "1. 배 경" in lines and "2. 검토 방안" in lines and "3. 추진 방향" in lines   # 두 글자 절 제목은 띄운다
+    assert any(line.startswith("장점\t") for line in lines)
+    assert "<br>" in result.text
+
+    from docx import Document as OpenDocx
+
+    from doc2report.pipeline import convert_many
+
+    src = tmp_path / "x_구조.txt"
+    src.write_text(result.text, encoding="utf-8")
+    out = tmp_path / "x.docx"
+    convert_many([str(src)], out, "formal", title=result.title, section_titles=False)
+    table = OpenDocx(str(out)).tables[0]
+    cell = table.rows[2].cells[2]
+    assert [p.text for p in cell.paragraphs if p.text.strip()][:2] == [
+        "- 근로기준법상 서면 합의 필요", "- 급여 시스템 개편 비용 발생(약 1억 2천만원)"]
+
+
+def test_label_tidy_spaces_two_letter_labels_and_aligns_colons():
+    rewrite = parse_rewrite(json.dumps({"lines": [
+        {"m": "-", "text": "리더십 진단/코칭 : 일대일 코칭", "src": [1]},
+        {"m": "-", "text": "사업부장 멘토링 : 총 3개월간", "src": [1]},
+        {"m": "-", "text": "기간 : 8.22", "src": [1]},
+        {"m": "①", "text": "보조금 기준 상향 : 비용 발생", "src": [1]},
+        {"m": "②", "text": "주거비 실비 지원 : 관리 부담", "src": [1]}]}, ensure_ascii=False), 1)
+    tidy_labels(rewrite.lines)
+    text = rewrite_text(rewrite).splitlines()
+    assert text[0] == "- 리더십 진단/코칭 : 일대일 코칭"
+    assert text[1] == "- 사업부장 멘토링  : 총 3개월간"          # 폭(전각 2칸) 맞춰 쌍점 세로 정렬
+    assert text[2].startswith("- 기 간 ")                         # 두 글자 항목명은 띄운다
+    from doc2report.drafting import _display_width
+    assert len({_display_width(line.split(" : ")[0]) for line in text[:3]}) == 1
+    assert text[3] == "① 보조금 기준 상향 : 비용 발생" and text[4] == "② 주거비 실비 지원 : 관리 부담"

@@ -54,12 +54,15 @@ def _marker_rules():
     from ..transform.structure import _find_marker, _marker_pattern
 
     rules = load_profile("default").text
+    markers = list(rules.leading_markers)
     notes: tuple[str, ...] = ()
     try:
-        notes = tuple(load_profile("formal").text.annotation_markers)  # "*" "＊" "(주석)" — 글쓴이가 친 주석 표시
+        formal = load_profile("formal").text
+        notes = tuple(formal.annotation_markers)  # "*" "＊" "(주석)" — 글쓴이가 친 주석 표시
+        markers += [m for m in formal.leading_markers if m not in markers]  # "→" 같은 정식보고서 말머리
     except FileNotFoundError:
         pass
-    return (_marker_pattern(rules.leading_markers), _find_marker,
+    return (_marker_pattern(markers), _find_marker,
             tuple(rules.no_marker_openers) + ("(", "（"), notes)
 
 

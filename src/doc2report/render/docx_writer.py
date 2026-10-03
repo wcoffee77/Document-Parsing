@@ -94,7 +94,13 @@ class DocxRenderer:
             self._paragraph([Run(doc.title)], self.profile.font("title"))
 
         blocks = self._dateline(doc.blocks)
+        end_mark = self.profile.text.end_mark
+        if end_mark and blocks and _is_end_mark(blocks[-1], end_mark):
+            blocks = blocks[:-1]  # 원문 끝의 "- 이 상 -"은 맺음말 서식으로 다시 쓴다(두 번 나오지 않게)
         self._blocks(blocks)
+        if end_mark:
+            self._paragraph([Run(end_mark)], self.profile.font("end_mark" if self.profile.has_font("end_mark")
+                                                               else "date"))
         if self._boxes:
             self.notes.append(f"주석 {self._boxes}개를 텍스트 상자로 넣음 (윗줄 아래에 띄움 — Word에서 위치 확인)")
         if self._fit_wrapped or self._fit_condensed:
@@ -979,3 +985,17 @@ def _with_text(cell: Cell, text: str) -> Cell:
     template = next((run for block in cell.blocks if isinstance(block, Paragraph)
                      for run in block.runs), Run(""))
     return replace(cell, blocks=[Paragraph(runs=[template.copy_with(text)])])
+
+
+def _is_end_mark(block: Block, mark: str) -> bool:
+    """맺음말 줄인지 — 공백·대시를 빼고 글자가 같으면("- 이 상 -", "-이상-", "이상")."""
+    if isinstance(block, ListItem):
+        text = (block.marker or "") + plain(block.runs)
+    elif isinstance(block, Paragraph):
+        text = plain(block.runs)
+    else:
+        return False
+
+    def core(value: str) -> str:
+        return "".join(c for c in value if not c.isspace() and c not in "-–—")
+    return bool(core(mark)) and core(text) == core(mark)
