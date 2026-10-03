@@ -67,7 +67,7 @@ def test_gaps_use_space_after_not_space_before(tmp_path, fake_fonts):
 def test_note_line_is_smaller_than_body(tmp_path, fake_fonts):
     doc, _ = _convert(tmp_path, _MEMO)
     note = next(p for p in doc.paragraphs if "참고 사항" in p.text)
-    assert all(r.font.size == Pt(12) for r in note.runs if r.text.strip())
+    assert all(r.font.size == Pt(14) for r in note.runs if r.text.strip())   # 본문 ※ 14pt (2026-10-03 사용자)
 
 
 _TABLES = """1. 현황
@@ -259,7 +259,7 @@ def test_gaps_same_level_6pt_up_12_or_18pt(tmp_path, fake_fonts):
     after = {p.text.strip(): p.paragraph_format.space_after for p in doc.paragraphs}
     assert after["- 다"] == Pt(6)                          # - → - 같은 단계
     assert after["- 라"] in (Pt(12), Pt(18))               # - → □ 올라감
-    assert after["□ 나"] == Pt(6)                          # □ → - 내려감은 6pt 그대로
+    assert after["□ 나"] == Pt(12)                         # 제목 같은 □("□ 나") 아래는 12pt (2026-10-03 사용자)
 
 
 def test_balance_sbcs_dbcs_flag_only_in_formal():
@@ -419,3 +419,11 @@ def test_note_gap_follows_level_it_belongs_to(tmp_path):
         assert _spacing_after(tmp_path, to_section, relaxed)["※ 참고1"] == 18
     assert _spacing_after(tmp_path, to_dash, False)["※ 참고2"] == 6
     assert _spacing_after(tmp_path, to_dash, True)["※ 참고2"] == 12
+
+
+def test_heading_like_square_gets_12pt_but_sentence_square_6pt(tmp_path, fake_fonts):
+    """2026-10-03 사용자: "□ 추진 방향"(제목 같은 □) 아래 -는 12pt, "□ 요지 문장, …" 아래는 6pt."""
+    doc, _ = _convert(tmp_path, "□ 추진 방향\n- 가\n□ 채용 현황 : 입사 확정 27명, 처우 협의 6명\n- 나\n")
+    after = {p.text.strip(): p.paragraph_format.space_after for p in doc.paragraphs}
+    assert after["□ 추진 방향"] == Pt(12)
+    assert after["□ 채용 현황 : 입사 확정 27명, 처우 협의 6명"] == Pt(6)

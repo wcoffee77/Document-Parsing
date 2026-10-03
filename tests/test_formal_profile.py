@@ -82,7 +82,7 @@ def test_annotation_keeps_level_gaps_of_the_line_above(rendered):
 def test_note_mark_uses_spaces_and_body_size(rendered):
     note = next(p for p in rendered if "참고 사항" in p.text)
     assert note.text == "    ※ 참고 사항"
-    assert all(r.font.size == Pt(12) for r in note.runs if r.text.strip())   # ※는 주 문장이 아니라 본문(14pt)보다 2pt 작게
+    assert all(r.font.size == Pt(14) for r in note.runs if r.text.strip())   # 본문 ※는 본문과 같은 14pt (2026-10-03 사용자)
 
 
 def test_web_preset_keeps_format_text_values():

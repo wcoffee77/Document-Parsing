@@ -153,7 +153,8 @@ class NumberingLevel(_Base):
     space_after: int | None = None
     space_after_level_change: int | None = None
     space_after_level_change_max: int | None = None  # 지면에 여유가 있을 때까지 늘릴 값
-    space_after_level_down_tight: int | None = None  # 더 깊은 단계로 내려갈 때, 지면에 여유가 없으면 쓸 값(정식보고서: - 다음 · 는 0)
+    space_after_level_down_tight: int | None = None
+    space_after_heading_down: int | None = None  # 제목 같은 짧은 항목(□ 추진 방향) 바로 아래 하위 항목 앞 간격(정답 5건: 12pt, 2026-10-03 사용자)  # 더 깊은 단계로 내려갈 때, 지면에 여유가 없으면 쓸 값(정식보고서: - 다음 · 는 0)
     space_after_level_up: int | None = None
     space_after_level_up_max: int | None = None
     # 더 얕은 단계로 올라가는 자리(- 다음의 □)의 간격 — 없으면 space_after_level_change를 쓴다
@@ -173,13 +174,16 @@ class NumberingLevel(_Base):
 
     @field_validator("space_before", "space_after", "space_after_level_change",
                      "space_after_level_change_max", "space_after_level_up",
-                     "space_after_level_up_max", "space_after_level_down_tight", "size", mode="before")
+                     "space_after_level_up_max", "space_after_level_down_tight", "space_after_heading_down", "size", mode="before")
     @classmethod
     def _pt(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
 
-    def level_down_space(self, relaxed: bool) -> int | None:
-        """더 깊은 단계(- 다음의 ·)로 내려가는 자리의 간격 — 지면이 빡빡하면 tight 값(없으면 level_change)."""
+    def level_down_space(self, relaxed: bool, heading: bool = False) -> int | None:
+        """더 깊은 단계(- 다음의 ·)로 내려가는 자리의 간격 — 지면이 빡빡하면 tight 값(없으면 level_change).
+        윗줄이 제목 같은 짧은 항목("□ 추진 방향")이면 space_after_heading_down(정답 보고서 12pt)."""
+        if heading and self.space_after_heading_down is not None:
+            return self.space_after_heading_down
         if not relaxed and self.space_after_level_down_tight is not None:
             return self.space_after_level_down_tight
         return self.level_change_space(relaxed)
@@ -306,6 +310,12 @@ class TextRules(_Base):
     # 문구 다듬기 기본값(rules | llm | none). CLI --polish를 주면 그쪽이 이긴다.
     note_marks: list[str] = Field(default_factory=list)
     note_size_delta: int | None = None
+    note_size_delta_after_table: int | None = None
+    # 표 바로 아래 ※(표를 부연하는 줄)만 따로 줄이는 값. 비우면 note_size_delta(2026-10-03 사용자: 본문 ※는 14pt,
+    # 표 아래 ※는 예전대로 12pt).
+    heading_item_max_chars: int | None = None
+    # 이 글자 수 이하이고 "항목명 : 값"도 쉼표도 없는 항목은 제목 같은 항목("□ 추진 방향")으로 본다 —
+    # 바로 아래 하위 항목 앞 간격을 numbering[].space_after_heading_down으로(2026-10-03 사용자).
     # 참고사항 표시(※ 등)로 시작하는 문단·항목은 본문보다 이만큼 작게 쓴다(2026-09-29 사용자:
     # "당구장 표시는 참고사항이니 항상 본문보다 2pt 작게"). 표 바로 아래 주석은 별개(fonts.table_note).
     level_bold: bool = True
@@ -415,7 +425,13 @@ class TextRules(_Base):
     def _margin(cls, v: Any) -> Any:
         return parse_ratio(v) if v is not None else 0.0
 
-    @field_validator("note_size_delta", mode="before")
+    def heading_like(self, text: str) -> bool:
+        text = text.strip()
+        limit = self.heading_item_max_chars
+        return bool(limit and text and len(text) <= limit and " : " not in text and ":" not in text
+                    and "," not in text and "，" not in text)
+
+    @field_validator("note_size_delta", "note_size_delta_after_table", mode="before")
     @classmethod
     def _delta(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
@@ -426,7 +442,7 @@ class TextRules(_Base):
         return None if v is None else parse_length(v, default_unit="mm")
 
 
-FORMAT_TEXT_FIELDS = ("note_size_delta", "note_indent", "note_lead_spaces",
+FORMAT_TEXT_FIELDS = ("note_size_delta", "note_size_delta_after_table", "heading_item_max_chars", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
@@ -675,7 +691,8 @@ def dump_profile(profile: Profile) -> str:
     text = profile.text.model_dump()
     if text["note_indent"] is not None:
         text["note_indent"] = _mm(text["note_indent"])
-    text["note_size_delta"] = _pt(text["note_size_delta"])  # EMU 그대로 쓰면 다시 읽을 때 또 변환된다
+    text["note_size_delta"] = _pt(text["note_size_delta"])
+    text["note_size_delta_after_table"] = _pt(text["note_size_delta_after_table"])  # EMU 그대로 쓰면 다시 읽을 때 또 변환된다
     text["condense_max"] = _pt(text["condense_max"])
     text["condense_step"] = _pt(text["condense_step"])
     for key in ("condense_pad", "gap_after_annotation", "gap_after_note", "gap_after_section",
@@ -725,7 +742,7 @@ def _dump_level(level: NumberingLevel) -> dict:
         data[key] = _mm(data[key])
     for key in ("space_before", "space_after", "space_after_level_change",
                 "space_after_level_change_max", "space_after_level_up",
-                "space_after_level_up_max", "space_after_level_down_tight", "size"):
+                "space_after_level_up_max", "space_after_level_down_tight", "space_after_heading_down", "size"):
         data[key] = _pt(data[key])
     return data
 

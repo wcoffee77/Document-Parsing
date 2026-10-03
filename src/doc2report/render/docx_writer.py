@@ -169,6 +169,8 @@ class DocxRenderer:
             self._block(block, container, following)
             if container is None:
                 self._previous = block
+                if not self._is_side_line(block):
+                    self._main_previous = block  # 표 아래 ※인지 가릴 때 주석·※ 줄은 건너뛴다
 
     def _block(self, block: Block, container=None, next_block: Block | None = None) -> None:
         if container is None and not isinstance(block, (ListItem, Paragraph)):
@@ -564,7 +566,7 @@ class DocxRenderer:
             return None
         return self._transition_gap(last.depth, next_block)
 
-    def _transition_gap(self, depth: int, next_block: Block | None) -> int | None:
+    def _transition_gap(self, depth: int, next_block: Block | None, block: Block | None = None) -> int | None:
         """윗줄(단계 depth) 뒤 간격 — 같은 단계가 이어지면 space_after(6pt), 더 얕은 단계로 올라가면 level_up(12pt,
         지면에 여유가 있으면 18pt), 내려가거나 그 밖이면 level_change(2026-10-01 사용자). ※·주석에도 똑같이 적용한다."""
         level = self.profile.numbering_level(depth)
@@ -574,7 +576,8 @@ class DocxRenderer:
                 return level.space_after
             if next_block.depth < depth:
                 return level.level_up_space(relaxed, next_block.depth, self.profile.text.level_up_relaxed_until)
-            return level.level_down_space(relaxed)
+            heading = isinstance(block, ListItem) and self.profile.text.heading_like(plain(block.runs))
+            return level.level_down_space(relaxed, heading)
         return level.level_change_space(relaxed)
 
     def _is_note(self, text: str) -> bool:
@@ -608,6 +611,12 @@ class DocxRenderer:
             return same  # 같은 계통(단계)으로 이어진다 — 좁게
         return gap
 
+    def _is_side_line(self, block: Block) -> bool:
+        """윗줄에 딸린 줄(주석·※) — 표 아래 ※ 판단에서 건너뛴다."""
+        if isinstance(block, Paragraph) and self._is_annotation(plain(block.runs).lstrip()):
+            return True
+        return self._is_note_block(block)
+
     def _is_note_block(self, block: Block | None) -> bool:
         if isinstance(block, ListItem):
             return self._is_note(block.marker or plain(block.runs).lstrip())
@@ -620,8 +629,12 @@ class DocxRenderer:
     def _noted(self, spec: FontSpec, text: str) -> FontSpec:
         """※ 같은 참고사항 표시로 시작하면 본문보다 text.note_size_delta만큼 작게."""
         rules = self.profile.text
-        if rules.note_size_delta and any(text.startswith(m) for m in rules.note_marks):
-            return spec.resized(max(spec.size - rules.note_size_delta, 1))
+        delta = rules.note_size_delta
+        if (rules.note_size_delta_after_table is not None
+                and isinstance(getattr(self, "_main_previous", None), Table)):
+            delta = rules.note_size_delta_after_table  # 표를 부연하는 ※
+        if delta and any(text.startswith(m) for m in rules.note_marks):
+            return spec.resized(max(spec.size - delta, 1))
         return spec
 
     def _marker(self, block: ListItem, level) -> str:
@@ -656,7 +669,7 @@ class DocxRenderer:
         if (rules.gap_after_section is not None and isinstance(next_block, ListItem)
                 and next_block.depth == 0 and block.depth > 0):
             return rules.gap_after_section  # 새 절(3.) 앞 간격은 단락 앞이 아니라 윗줄 뒤로
-        return self._transition_gap(block.depth, next_block)
+        return self._transition_gap(block.depth, next_block, block)
 
     def _space_before(self, block: ListItem, level, is_note: bool = False) -> int:
         """새 절이 시작되는 자리(… - 다음의 2.)와 표 바로 뒤를 넉넉히 띄운다."""
