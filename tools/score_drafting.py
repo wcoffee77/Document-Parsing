@@ -21,6 +21,7 @@ SAMPLES = ROOT / "samples" / "drafting"
 sys.path.insert(0, str(ROOT / "src"))
 
 from doc2report.transform.factcheck import _NUM, _clean, _norm  # noqa: E402
+from doc2report.transform.report_style import lint  # noqa: E402
 
 _MARK = re.compile(r"^\s*(\d+\.|□|-|∙|·|→|※|\*|[①-⑳])")
 
@@ -55,6 +56,31 @@ def _heads(lines: list[str]) -> list[str]:
     return out
 
 
+def _items(lines: list[str]) -> list[str]:
+    """항목(논리 줄) 목록 — 엔터로 나눈 둘째 줄은 윗줄에 합친다. 표 행은 뺀다."""
+    items: list[str] = []
+    for line in lines:
+        if "\t" in line:
+            continue
+        if _MARK.match(line) or not items:
+            items.append(_MARK.sub("", line, 1).strip())
+        else:
+            items[-1] += " " + line.strip()
+    return items
+
+
+def _style(items: list[str]) -> str:
+    import statistics
+
+    if not items:
+        return "항목 없음"
+    hard = sum(1 for t in items if any(i.hard for i in lint(t)))
+    soft = sum(1 for t in items if lint(t) and not any(i.hard for i in lint(t)))
+    widths = [_chars(t) for t in items]
+    return (f"항목 {len(items)}개: 서술체·구어체(필수) {hard}, 길이·연결어미(약함) {soft}, "
+            f"글자 수 중앙값 {statistics.median(widths):.0f} / 최대 {max(widths)}")
+
+
 def score(result: Path, number: int) -> None:
     source = next(SAMPLES.glob(f"줄글_{number}_*.txt")).read_text(encoding="utf-8")
     answer = [l for l in next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8").splitlines()[2:]
@@ -71,6 +97,8 @@ def score(result: Path, number: int) -> None:
     kept = (a_n & src_n)
     print(f"  수치: 정답이 쓴 원문 수치 {len(kept)}개 중 결과에도 {len(kept & m_n)}개"
           f" / 결과에만 있고 원문에 없는 숫자 {sorted(m_n - src_n - a_n) or '없음'}")
+    print(f"  문체(결과): {_style(_items(mine))}")
+    print(f"  문체(정답): {_style(_items(answer))}")
     ah, mh = _heads(answer), _heads(mine)
     hit = sum(1 for h in ah if any(h in x or x in h for x in mh))
     print(f"  절·□ 제목: 정답 {len(ah)}개 중 같은 말 {hit}개")

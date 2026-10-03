@@ -245,7 +245,9 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 - 한자 약어는 高 中 現 可 必 時 順 內 人 月 만 씁니다(처우 협의 中, 확인 必, 보고時, 3회/人, 1회/月).
 - 숫자: 만원·억원은 붙여 씁니다. 날짜 M.D, 기한 (~10.15일), 변화 (기존 25% → 30%), 비율 (67.5%), 분모 15명 中 12명.
 - 특정 회사명(A사·B사)은 '경쟁사'로 묶습니다.
-- 한 줄은 40자 안팎, 길어도 두 줄 분량. 전체 분량은 원문의 60~75%.
+- 한 항목은 공백 빼고 대개 20~30자(정답 보고서 항목의 중앙값 23자), 길어도 40자 안팎(최대 50자). 한 문장에 사실이 여럿이면 사실마다 항목을 나눕니다.
+  긴 문장을 연결어미(~는데, ~고, ~지만, ~때문에)로 이어 붙이지 말고, 줄을 나누거나 '항목 : 값', '(기존 A → B)', '(사유)'로 압축합니다.
+- 전체 분량은 원문의 60~75%.
 - 날짜 줄과 맺음말("- 이 상 -")은 쓰지 않습니다(변환기가 붙입니다).
 
 출력은 JSON 하나뿐입니다(설명·코드 블록 금지):
@@ -272,6 +274,16 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
  {"m": "※", "text": "추가 예산 약 1,500만원 소요 예상, 재무팀 협의 필요", "src": [6]}],
  "dropped": [7]}
 """
+
+def system_prompt(exclude_docs: set[int] | None = None) -> str:
+    """지시문 + 문장 → 보고서 줄 변환 예시(rules/report_style.yaml). exclude_docs는 채점용(그 정답에서 뽑은 예시를 뺀다)."""
+    from .transform.report_style import examples_text
+
+    shown = examples_text(exclude_docs=exclude_docs)
+    if not shown:
+        return REWRITE_SYSTEM
+    return (REWRITE_SYSTEM + "\n[문장 변환 예시 — 같은 방식으로 압축하되, 원문에 없는 사실은 절대 넣지 않습니다]\n" + shown + "\n")
+
 
 _ORDINAL = re.compile(r"^[①-⑳]$")
 _SECTION_MARK = re.compile(r"^\d{1,2}\.$")
@@ -352,6 +364,7 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
            rules=None) -> tuple[dict[int, list[str]], list[str]]:
     """(줄 번호 → 사실 문제, 형식 문제 목록). 사실 문제가 남은 줄은 원문으로 바꾼다. 형식 문제는 다시 써 달라고만 한다."""
     from .transform.factcheck import check, load_rules
+    from .transform.report_style import lint
 
     rules = rules or load_rules()
     everything = " ".join(sentences)
@@ -365,8 +378,12 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
         problems = check(line.content(), source, rules, year)
         if problems:
             facts[index] = problems
-        if not line.is_table and _POLITE_END.search(line.text):
-            style.append(f"{index + 1}번째 줄이 '~습니다'로 끝남: {line.text[:30]}")
+        for piece in _text_pieces(line):
+            issues = lint(piece)
+            if any(i.hard for i in issues):
+                style.append(f"{index + 1}번째 줄이 서술체·구어체(필수 수정 — {', '.join(str(i) for i in issues if i.hard)}): {piece[:30]}")
+            elif issues:
+                style.append(f"{index + 1}번째 줄이 길거나 늘어짐({', '.join(str(i) for i in issues)}): {piece[:30]}")
     if rewrite.title:
         problems = check(rewrite.title, f"{title} {everything}", rules, year)
         if problems:
@@ -378,6 +395,13 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     return facts, style
 
 
+def _text_pieces(line: "Line") -> list[str]:
+    """줄의 점검 단위 — 표는 칸 안 줄마다."""
+    if line.rows is None:
+        return [line.text]
+    return [part for row in line.rows[1:] for cell in row[1:] for part in cell.split("\n") if part.strip()]
+
+
 def _problem_message(rewrite: Rewrite, facts: dict[int, list[str]], style: list[str]) -> str:
     out = []
     for index, problems in sorted(facts.items()):
@@ -387,9 +411,18 @@ def _problem_message(rewrite: Rewrite, facts: dict[int, list[str]], style: list[
     return "\n".join(out)
 
 
+def _rule_sentence(sentence: str, year: int | None) -> str:
+    """원문 문장을 규칙만으로 개조식으로(문장 끝 명사화·군말 삭제·표기 정리). 사실 검증을 통과해야 쓰고 아니면 원문 그대로."""
+    from .transform.factcheck import check
+    from .transform.report_style import fix
+
+    fixed = fix(sentence)
+    return fixed if fixed and not check(fixed, sentence, year=year) else sentence
+
+
 def _restore_originals(rewrite: Rewrite, facts: dict[int, list[str]], sentences: list[str],
-                       original_title: str) -> list[str]:
-    """사실 검증에 끝까지 걸린 줄을 원문 문장 그대로 바꾼다. 판단 내용을 돌려준다."""
+                       original_title: str, year: int | None = None) -> list[str]:
+    """사실 검증에 끝까지 걸린 줄을 원문 문장으로 바꾼다(문장 끝만 규칙으로 개조식). 판단 내용을 돌려준다."""
     notes: list[str] = []
     replaced: list[Line] = []
     for index, line in enumerate(rewrite.lines):
@@ -398,18 +431,61 @@ def _restore_originals(rewrite: Rewrite, facts: dict[int, list[str]], sentences:
             continue
         source = [sentences[i - 1] for i in line.src]
         shown = line.content()[:40]
-        notes.append(f"사실 검증 실패 → 원문 문장으로 대체({', '.join(facts[index])}): {shown}")
+        notes.append(f"사실 검증 실패 → 원문 문장으로 대체(문장 끝만 규칙으로 개조식, {', '.join(facts[index])}): {shown}")
         if not source:
             continue  # 근거 없는 줄은 뺀다
         if line.is_table:
-            replaced += [Line("-", s, [i], original=True) for s, i in zip(source, line.src)]
+            replaced += [Line("-", _rule_sentence(s, year), [i], original=True) for s, i in zip(source, line.src)]
         else:
-            replaced.append(Line(line.m, " ".join(source), line.src, original=True))
+            replaced.append(Line(line.m, " ".join(_rule_sentence(s, year) for s in source), line.src, original=True))
     rewrite.lines = replaced
     if -1 in facts:
         notes.append(f"제목 검증 실패({', '.join(facts[-1])}) → 원문 제목 사용: {rewrite.title}")
         rewrite.title = original_title
     return notes
+
+
+def _apply_style_fix(rewrite: Rewrite, sentences: list[str], year: int | None) -> list[str]:
+    """LLM이 끝내 서술체·구어체로 남긴 줄을 규칙으로 고친다. 사실 검증을 다시 통과할 때만 바꾼다. 판단 내용을 돌려준다."""
+    from .transform.factcheck import check
+    from .transform.report_style import fix, hard_issues
+
+    notes: list[str] = []
+
+    def mend(piece: str, source: str) -> str:
+        if not hard_issues(piece):
+            return piece
+        fixed = fix(piece)
+        if fixed == piece or check(fixed, source, year=year) or hard_issues(fixed):
+            return piece
+        notes.append(f"규칙 교정(서술체 → 개조식): '{piece[:30]}' → '{fixed[:30]}'")
+        return fixed
+
+    for line in rewrite.lines:
+        if line.original:
+            continue
+        source = " ".join(sentences[i - 1] for i in line.src)
+        if line.rows is None:
+            line.text = mend(line.text, source)
+        else:
+            line.rows = [row[:1] + [cell and "\n".join(mend(part, source) for part in cell.split("\n")) for cell in row[1:]]
+                         for row in line.rows]
+    return notes
+
+
+def _style_residue(rewrite: Rewrite) -> list[str]:
+    """고친 뒤에도 남은 약한 문제(길이·연결어미 과다·구어 부사) — 사람이 볼 수 있게 --report에."""
+    from .transform.report_style import lint
+
+    out: list[str] = []
+    for index, line in enumerate(rewrite.lines):
+        if line.original:
+            continue
+        for piece in _text_pieces(line):
+            issues = [i for i in lint(piece) if not i.hard]
+            if issues:
+                out.append(f"{index + 1}번째 줄 문체 점검({', '.join(str(i) for i in issues)}): {piece[:34]}")
+    return out
 
 
 def _display_width(text: str) -> int:
@@ -420,7 +496,9 @@ def _display_width(text: str) -> int:
 
 def _spaced_label(label: str) -> str:
     """두 글자 항목명은 가운데를 띄운다(기간 → 기 간, 정답 5건)."""
-    return f"{label[0]} {label[1]}" if re.fullmatch(r"[가-힣]{2}", label) else label
+    from .transform.report_style import load_rules
+
+    return f"{label[0]} {label[1]}" if label in load_rules().spaced_labels else label
 
 
 def tidy_labels(lines: list[Line]) -> None:
@@ -473,7 +551,8 @@ def rewrite_text(rewrite: Rewrite) -> str:
     return "\n".join(out).strip() + "\n"
 
 
-def rewrite(text: str, ask: Ask | None = None, year: int | None = None) -> DraftResult:
+def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
+            holdout: set[int] | None = None) -> DraftResult:
     """다듬기 모드: 줄글 → 보고서 말투의 개조식 글(사실은 원문 그대로). 형식이 끝내 안 맞으면 배치 모드로."""
     import datetime
 
@@ -491,9 +570,10 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None) -> Draft
     facts: dict[int, list[str]] = {}
     message = user
     unavailable = False
+    system = system_prompt(holdout)
     for attempt in range(2):
         try:
-            raw = ask(REWRITE_SYSTEM, message)
+            raw = ask(system, message)
             candidate = parse_rewrite(raw, len(sentences))
         except ValueError as exc:
             notes.append(f"LLM 다듬기 응답 {attempt + 1}차 형식 오류: {exc}")
@@ -515,8 +595,10 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None) -> Draft
                        "걸린 줄만 원문 사실대로 고치고 나머지는 그대로 두어 JSON 전체를 다시 출력하세요.")
     if result is None and unavailable:
         structure = fallback_structure(title, sentences)
-        notes.append("규칙 기본 구조 사용(한 절, 문장마다 □ — 원문 문장 그대로)")
-        return DraftResult(render(structure, sentences), structure, notes, False, title=title,
+        ruled = [_rule_sentence(sentence, year) for sentence in sentences]
+        notes.append("규칙 기본 구조 사용(한 절, 문장마다 □ — 원문 문장, 끝만 규칙으로 개조식). "
+                     "문장을 압축하려면 LLM 설정이 필요합니다")
+        return DraftResult(render(structure, ruled), structure, notes, False, title=title,
                            mode="fallback", sections=len(structure.sections))
     if result is None:
         notes.append("다듬기 실패 → 배치 모드(원문 문장 그대로)")
@@ -524,7 +606,9 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None) -> Draft
         placed.notes = notes + placed.notes
         return placed
 
-    notes += _restore_originals(result, facts, sentences, title)
+    notes += _restore_originals(result, facts, sentences, title, year)
+    notes += _apply_style_fix(result, sentences, year)
+    notes += _style_residue(result)
     tidy_labels(result.lines)
     body = rewrite_text(result)
     notes += _coverage_notes(result, sentences, body)
@@ -548,8 +632,9 @@ def _coverage_notes(rewrite: Rewrite, sentences: list[str], body: str) -> list[s
     return notes
 
 
-def draft(text: str, ask: Ask | None = None, mode: str = "rewrite", year: int | None = None) -> DraftResult:
+def draft(text: str, ask: Ask | None = None, mode: str = "rewrite", year: int | None = None,
+          holdout: set[int] | None = None) -> DraftResult:
     """줄글 → 보고서 글. mode="rewrite"(기본: 말투를 다듬고 배열, 사실 검증) | "place"(원문 문장 그대로 배치만)."""
     if mode == "place":
         return place(text, ask)
-    return rewrite(text, ask, year)
+    return rewrite(text, ask, year, holdout)

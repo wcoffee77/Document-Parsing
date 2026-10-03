@@ -98,7 +98,7 @@ def test_invented_fact_is_retried_then_replaced_by_the_original_sentence():
     result = draft(TEXT1, ask=ask, year=2026)
     assert len(calls) == 2 and "[검증에서 걸린 것" in calls[1] and "9" in calls[1]
     assert "9명" not in result.text
-    assert "∙ 설계는 14명을 계획했는데 8명밖에 확보하지 못했습니다." in result.text.splitlines()
+    assert "∙ 설계는 14명을 계획했는데 8명밖에 확보하지 못하였음" in result.text.splitlines()   # 원문 문장, 끝만 규칙으로 개조식
     assert any("원문 문장으로 대체" in n for n in result.notes)
 
 

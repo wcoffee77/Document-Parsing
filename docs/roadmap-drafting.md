@@ -68,3 +68,5 @@ B는 A의 문체·검증 장치를 그대로 재사용한다. A가 안정되기 
 - `stylize_ko`(개조식·명사 종결), `llm_polish`(교열·문장 줄임), 줄 맞춤(`layout/lines.py`), 구조 접기(`structure.py`),
   probe(`guide_mining/`), formal 서식.
 - 부족한 것: 문장 역할 라벨, 구조 배치 규칙, 검증기(수치 보존 등), 정답 쌍 평가기, 코퍼스 색인.
+
+**3차 (2026-10-03, 구어체 → 보고서 문체 고도화)**: 점검기·교정기(`transform/report_style.py`, `rules/report_style.yaml`), 변환 예시 27쌍을 지시문에 투입, lint 걸린 줄 재요청, 규칙 교정·규칙 대체 문장, `tools/eval_drafting.py --holdout` 채점. 다음은 실측 결과로 지시문·규칙 조정 → 그 뒤 다문서 요약(여러 보고서 → 핵심 추출 → 새 보고서).
