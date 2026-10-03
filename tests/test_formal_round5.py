@@ -355,3 +355,23 @@ def test_width_model_matches_word_measurements_for_ascii_space_and_mixed():
     assert (count(spaced, 0) + 1) // 2 == 23 and (count(spaced, 1.0) + 1) // 2 == 28
     mixed = "".join("가나다라마" + "ab12" for _ in range(14))
     assert count(mixed, 0) == 40 and count(mixed, 1.0) == 47
+
+
+def test_autospace_applies_to_latin_and_digits_not_symbols():
+    """한글 5자 + 기호 1자 되풀이는 간격 0에 첫 줄 37자(2026-10-03 실측) — 기호 경계에는 1/4em이 안 붙는다."""
+    from doc2report.layout.lines import apply_autospace
+    from doc2report.layout.measure import is_wide
+
+    prof = load_profile("formal")
+    room, size = prof.page.usable_width / 12700, 14.0
+    for mark in "%,.(":
+        text = ("가나다라마" + mark) * 14
+        widths = [size if is_wide(c) else size / 2 for c in text]
+        widths = apply_autospace(text, widths, prof.text.autospace * size, is_wide, lambda c: c.isascii() and c.isalnum())
+        total, n = 0.0, 0
+        for w in widths:
+            total += w
+            if total > room:
+                break
+            n += 1
+        assert n == 37
