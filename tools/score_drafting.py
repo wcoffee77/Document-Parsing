@@ -81,6 +81,18 @@ def _style(items: list[str]) -> str:
             f"글자 수 중앙값 {statistics.median(widths):.0f} / 최대 {max(widths)}")
 
 
+def summary(result: Path, number: int) -> dict:
+    """채점 요약(출력 없이 값만) — eval_drafting의 핵심 요약용."""
+    source = next(SAMPLES.glob(f"줄글_{number}_*.txt")).read_text(encoding="utf-8")
+    body_src = source.split("\n", 1)[1]
+    mine = [l for l in result.read_text(encoding="utf-8").splitlines() if l.strip()]
+    items = _items(mine)
+    hard = sum(1 for t in items if any(i.hard for i in lint(t)))
+    invented = {p for line in mine for p in check(line, body_src, year=2026)
+                if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))}
+    return {"ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented)}
+
+
 def score(result: Path, number: int) -> None:
     source = next(SAMPLES.glob(f"줄글_{number}_*.txt")).read_text(encoding="utf-8")
     answer = [l for l in next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8").splitlines()[2:]
