@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "samples" / "drafting"
 sys.path.insert(0, str(ROOT / "src"))
 
-from doc2report.transform.factcheck import _NUM, _clean, _norm  # noqa: E402
+from doc2report.transform.factcheck import _NUM, _clean, _norm, check  # noqa: E402
 from doc2report.transform.report_style import lint  # noqa: E402
 
 _MARK = re.compile(r"^\s*(\d+\.|□|-|∙|·|→|※|\*|[①-⑳])")
@@ -95,8 +95,11 @@ def score(result: Path, number: int) -> None:
     print("  줄 수(결과/정답): " + ", ".join(f"{k} {mm.get(k, 0)}/{am.get(k, 0)}" for k in keys))
     src_n, a_n, m_n = _numbers(body_src), _numbers(a_text), _numbers(m_text)
     kept = (a_n & src_n)
+    # 결과에만 있는 숫자: 표기 차이(1억 2천만 원 ↔ 1.2억원, 3천만 원 ↔ 3,000만원)는 사실 검증기와 같은 기준으로 같다고 본다
+    invented = sorted({p for line in mine for p in check(line, body_src, year=2026)
+                       if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))})
     print(f"  수치: 정답이 쓴 원문 수치 {len(kept)}개 중 결과에도 {len(kept & m_n)}개"
-          f" / 결과에만 있고 원문에 없는 숫자 {sorted(m_n - src_n - a_n) or '없음'}")
+          f" / 원문과 다른 수치 {invented or '없음'}")
     print(f"  문체(결과): {_style(_items(mine))}")
     print(f"  문체(정답): {_style(_items(answer))}")
     ah, mh = _heads(answer), _heads(mine)

@@ -94,9 +94,17 @@ def test_rewrite_uses_llm_lines_and_keeps_them_when_facts_check_out():
 def test_invented_fact_is_retried_then_replaced_by_the_original_sentence():
     bad = json.loads(json.dumps(ANSWER1, ensure_ascii=False))
     bad["lines"][5]["text"] = "설계 : 14명 中 9명 확보"            # 원문은 8명
-    ask, calls = _answer(bad)
+    calls = []
+
+    def ask(system, user):
+        calls.append((system, user))
+        if "고칠 줄:" in user:
+            return "설계 : 14명 中 9명 확보"          # 줄 단위 다시 쓰기에서도 끝내 틀리게 답함
+        return json.dumps(bad, ensure_ascii=False)
+
     result = draft(TEXT1, ask=ask, year=2026)
-    assert len(calls) == 2 and "[검증에서 걸린 것" in calls[1] and "9" in calls[1]
+    assert "[검증에서 걸린 것" in calls[1][1] and "9" in calls[1][1]            # 수정본 요청
+    assert sum("고칠 줄:" in u for _, u in calls) == 2                            # 줄 단위 다시 쓰기 2회
     assert "9명" not in result.text
     assert "∙ 설계는 14명을 계획했는데 8명밖에 확보하지 못하였음" in result.text.splitlines()   # 원문 문장, 끝만 규칙으로 개조식
     assert any("원문 문장으로 대체" in n for n in result.notes)
@@ -173,3 +181,63 @@ def test_label_tidy_spaces_two_letter_labels_and_aligns_colons():
     from doc2report.drafting import _display_width
     assert len({_display_width(line.split(" : ")[0]) for line in text[:3]}) == 1
     assert text[3] == "① 보조금 기준 상향 : 비용 발생" and text[4] == "② 주거비 실비 지원 : 관리 부담"
+
+
+def test_format_error_does_not_use_up_the_revision_chance():
+    """2026-10-05 실측: 첫 응답이 JSON이 아니면 그 복구에 기회를 써서 사실 문제를 다시 고쳐 쓰게 못 했다."""
+    bad = json.loads(json.dumps(ANSWER1, ensure_ascii=False))
+    bad["lines"][5]["text"] = "설계 : 14명 中 9명 확보"
+    replies = iter(["(설명만 있고 JSON 없음)", json.dumps(bad, ensure_ascii=False),
+                    json.dumps(ANSWER1, ensure_ascii=False)])
+    calls = []
+
+    def ask(system, user):
+        calls.append(user)
+        return next(replies)
+
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert len(calls) == 3 and "[검증에서 걸린 것" in calls[2]      # 형식 오류 뒤에도 수정본을 요청했다
+    assert "∙ 설계 : 14명 中 8명 확보" in result.text.splitlines()
+    assert not any("원문 문장으로 대체" in n for n in result.notes)
+    assert any("형식 오류 1회" in n and "응답" in n for n in result.notes)      # 진단: 응답 길이·앞부분
+
+
+def test_line_repair_fixes_a_line_the_revision_missed():
+    bad = json.loads(json.dumps(ANSWER1, ensure_ascii=False))
+    bad["lines"][5]["text"] = "설계 : 14명 中 9명 확보"
+
+    def ask(system, user):
+        if "고칠 줄:" in user:
+            return "설계 : 14명 中 8명 확보"
+        return json.dumps(bad, ensure_ascii=False)
+
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert "∙ 설계 : 14명 中 8명 확보" in result.text.splitlines()
+    assert any("줄 단위 다시 쓰기로 해결" in n for n in result.notes)
+
+
+def test_factcheck_catches_the_distortions_found_in_the_first_onprem_run():
+    """2026-10-05 온프렘 실측(eval_1·5)에서 사람이 읽어 찾은 왜곡 4건 — 검증기가 모두 잡아야 하고, 바르게 고친 줄은 통과."""
+    s8 = TEXT1.split("\n", 2)[2].split(". ")[-1]
+    cases = [
+        ("목표 미달 시 연말 목표 달성 어려움, 차주 경영진 보고 필요", s8, "가능성"),
+        ("개인 부담액 : 연 3,000만원 이상 발생 사례 다수", "일부는 연 3천만 원 이상을 개인 부담하고 있습니다.", "일부↔다수"),
+        ("A사 : 연차 물가 연동 조정", "A사는 매년 물가 연동으로 조정합니다.", "연차"),
+        ("최종 비용은 환율 변동에 따라 상이", "최종 비용은 환율에 따라 달라질 수 있습니다.", "가능성"),
+        ("아날로그 설계 경력자 부족으로 3개월 공석 2개", "경력자가 없어서 3개월 넘게 공석인 포지션이 두 개 있습니다.", "범위"),
+    ]
+    for line, source, kind in cases:
+        assert any(kind in p for p in check(line, source)), (line, check(line, source))
+    fixed = [
+        ("목표 미달 시 연말 목표 달성 차질 우려", s8),
+        ("개인 부담액 : 연 3,000만원 이상 발생 사례 일부", "일부는 연 3천만 원 이상을 개인 부담하고 있습니다."),
+        ("최종 비용은 환율에 따라 변동 가능", "최종 비용은 환율에 따라 달라질 수 있습니다."),
+        ("아날로그 설계 경력자 부족으로 3개월 이상 공석 2개", "경력자가 없어서 3개월 넘게 공석인 포지션이 두 개 있습니다."),
+        ("연차 물가 연동 : 장기적 형평성 확보 가능하나 지표 선정 난이도 高",
+         "매년 물가 연동으로 바꾸는 방법은 장기적으로 형평은 맞지만 연동 지표 선정이 어렵습니다."
+         .replace("매년", "연차")),                                              # 양쪽을 다 옮긴 대비는 통과
+        ("본업 부담 완화를 위해 팀장별 주 4시간 업무 조정 요청",
+         "걱정되는 것은 과제 수행 기간에 본업 부담이 커질 수 있다는 점이라 팀장들에게 주당 4시간 정도 업무 조정을 요청할 계획입니다."),
+    ]
+    for line, source in fixed:
+        assert check(line, source) == [], (line, check(line, source))

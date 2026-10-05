@@ -217,8 +217,13 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 [절대 규칙 — 사실]
 1. 원문에 없는 사실·숫자·날짜·기한·요일·이름·평가를 만들지 않습니다. 숫자는 값 그대로, 표기만 바꿀 수 있습니다
    (10월 15일 → 10.15, 300만 원 → 300만원, 연 4억 원 → 4억원/년, 두 곳 → 2개, 둘째 주 → 2주차).
-2. 방향·정도·확정 여부를 바꾸지 않습니다(늘었다↔줄었다 금지, '검토 중'을 '확정'으로, '~할 수 있다'를 '~한다'로 바꾸기 금지).
-   원문의 단서(약, 정도, 예정, 검토, 가능성)는 남깁니다.
+2. 방향·정도·확정 여부를 바꾸지 않습니다(늘었다↔줄었다 금지, '검토 중'을 '확정'으로 바꾸기 금지).
+   - 가능성은 가능성으로: '어려워질 수 있다' → '달성 차질 우려' / '어려울 수 있음' (X '어려움'),
+     '환율에 따라 달라질 수 있다' → '환율에 따라 변동 가능' (X '상이').
+   - 수량 표현 그대로: '일부' → '일부'(X '다수'), '대부분' → '대부분'.
+   - 숫자 뒤 범위 표현 그대로: '3개월 넘게' → '3개월 이상'(X '3개월'), '3천만 원 이상' → '3,000만원 이상'.
+   - 원문의 단서(약, 정도, 예정, 검토, 가능성)는 남깁니다.
+   - 다른 뜻으로 읽히는 말을 새로 쓰지 않습니다: '매년' → '매년'·'연 단위'(X '연차' — 연차휴가로 읽힘).
 3. 줄마다 src에 그 줄의 근거 원문 문장 번호를 모두 적습니다. 근거 없는 줄은 쓰지 않습니다.
 4. 보고에 필요 없는 문장(말투, 개인 소감, 중복, 자잘한 부연)은 쓰지 않고 dropped에 번호를 적습니다.
    모든 문장 번호는 어느 줄의 src나 dropped에 한 번 이상 나와야 합니다.
@@ -571,13 +576,21 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     message = user
     unavailable = False
     system = system_prompt(holdout)
-    for attempt in range(2):
+    format_errors = 0
+    revised = False
+    while True:
+        raw = ""
         try:
             raw = ask(system, message)
             candidate = parse_rewrite(raw, len(sentences))
         except ValueError as exc:
-            notes.append(f"LLM 다듬기 응답 {attempt + 1}차 형식 오류: {exc}")
-            message = f"{user}\n\n[이전 응답의 문제] {exc}\n규칙을 지켜 JSON을 다시 출력하세요."
+            # 형식 오류는 내용 수정 기회와 따로 센다(2026-10-05 실측: 첫 응답 형식 오류가 수정 기회를 먹어 사실 문제를
+            # 다시 고쳐 쓰게 못 하고 원문으로 대체됐다)
+            format_errors += 1
+            notes.append(f"LLM 다듬기 응답 형식 오류 {format_errors}회: {exc} ({_raw_hint(raw)})")
+            if format_errors >= MAX_FORMAT_RETRIES:
+                break
+            message = f"{user}\n\n[이전 응답의 문제] {exc}\n설명 없이 JSON 하나만 출력하세요."
             continue
         except Exception as exc:  # noqa: BLE001 — 설정 없음·네트워크
             notes.append(f"LLM 호출 실패: {exc}")
@@ -587,12 +600,14 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         result = candidate
         if not facts and not style:
             break
-        notes.append(f"LLM 다듬기 {attempt + 1}차 검증: 사실 문제 {len(facts)}줄, 형식 문제 {len(style)}건")
-        if attempt == 0:
-            previous = raw[raw.find("{"):raw.rfind("}") + 1]
-            message = (f"{user}\n\n[이전 응답]\n{previous}\n\n[검증에서 걸린 것 — 원문 사실과 다르거나 규칙 위반]\n"
-                       f"{_problem_message(candidate, facts, style)}\n"
-                       "걸린 줄만 원문 사실대로 고치고 나머지는 그대로 두어 JSON 전체를 다시 출력하세요.")
+        notes.append(f"LLM 다듬기 {'수정본' if revised else '1차'} 검증: 사실 문제 {len(facts)}줄, 형식 문제 {len(style)}건")
+        if revised:
+            break
+        revised = True
+        previous = raw[raw.find("{"):raw.rfind("}") + 1]
+        message = (f"{user}\n\n[이전 응답]\n{previous}\n\n[검증에서 걸린 것 — 원문 사실과 다르거나 규칙 위반]\n"
+                   f"{_problem_message(candidate, facts, style)}\n"
+                   "걸린 줄만 원문 사실대로 고치고 나머지는 그대로 두어 JSON 전체를 다시 출력하세요.")
     if result is None and unavailable:
         structure = fallback_structure(title, sentences)
         ruled = [_rule_sentence(sentence, year) for sentence in sentences]
@@ -606,6 +621,8 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         placed.notes = notes + placed.notes
         return placed
 
+    if facts:
+        notes += _repair_lines(result, facts, sentences, ask, year)
     notes += _restore_originals(result, facts, sentences, title, year)
     notes += _apply_style_fix(result, sentences, year)
     notes += _style_residue(result)
@@ -615,6 +632,59 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     sections = sum(1 for line in result.lines if _SECTION_MARK.match(line.m)) or sum(
         1 for line in result.lines if line.m == "□")
     return DraftResult(body, None, notes, True, title=result.title or title, mode="rewrite", sections=sections)
+
+
+MAX_FORMAT_RETRIES = 3     # 형식 오류(JSON 아님)로 다시 묻는 최대 횟수 — 내용 수정 1회와 별도
+LINE_REPAIR_TRIES = 2      # 사실 검증에 걸린 줄을 줄 단위로 다시 쓰게 하는 횟수
+
+REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서 한 줄이 근거 원문과 사실이 다르다고 검증에서 걸렸습니다.
+근거 원문의 사실(숫자·날짜·방향·확정 여부)과 정확히 같게, 보고서 말투(명사나 한자 약어로 끝, 마침표 없음, 20~40자)로
+그 줄만 다시 쓰세요. 원문에 없는 숫자·날짜·요일·한자·평가는 넣지 않습니다. 근거 원문에 없는 내용이면 빼고 씁니다.
+출력은 고친 줄 한 줄뿐입니다(말머리·설명·따옴표 없이)."""
+
+
+def _raw_hint(raw: str) -> str:
+    """형식 오류 진단: 응답 길이·앞부분·끝난 이유(원문이 아니라 LLM 응답만, 짧게)."""
+    try:
+        from .transform.llm_polish import LAST_CALL
+    except ImportError:  # pragma: no cover
+        LAST_CALL = {}
+    head = re.sub(r"\s+", " ", raw or "")[:60]
+    extra = ", ".join(f"{k}={v}" for k, v in LAST_CALL.items())
+    return f"응답 {len(raw or '')}자, 앞부분 '{head}'" + (f", {extra}" if extra else "")
+
+
+def _repair_lines(rewrite: Rewrite, facts: dict[int, list[str]], sentences: list[str], ask: Ask,
+                  year: int | None) -> list[str]:
+    """수정본에서도 사실 검증에 걸린 줄을 줄 단위로 다시 쓰게 한다(짧은 지시문 — 한 번에 한 가지). 통과하면 facts에서 뺀다."""
+    from .transform.factcheck import check
+    from .transform.report_style import hard_issues
+
+    notes: list[str] = []
+    for index in sorted(i for i in facts if i >= 0):
+        line = rewrite.lines[index]
+        if line.is_table or not line.src:
+            continue
+        source = " ".join(sentences[i - 1] for i in line.src)
+        problems = facts[index]
+        for _ in range(LINE_REPAIR_TRIES):
+            user = (f"근거 원문:\n{source}\n\n고칠 줄: {line.text}\n검증에서 걸린 것: {', '.join(problems)}")
+            try:
+                answer = ask(REPAIR_SYSTEM, user)
+            except Exception:  # noqa: BLE001
+                return notes
+            fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", (answer or "").strip().splitlines()[0]
+                           if (answer or "").strip() else "").strip().strip('"\'')
+            if not fixed:
+                continue
+            problems = check(fixed, source, year=year)
+            if not problems and not hard_issues(fixed):
+                notes.append(f"줄 단위 다시 쓰기로 해결: '{line.text[:30]}' → '{fixed[:30]}'")
+                line.text = fixed
+                del facts[index]
+                break
+            problems = problems or ["서술체·구어체"]
+    return notes
 
 
 def _coverage_notes(rewrite: Rewrite, sentences: list[str], body: str) -> list[str]:

@@ -48,6 +48,14 @@ class Rules:
     done_words: list[str] = field(default_factory=list)
     done_source: list[str] = field(default_factory=list)
     done_pending: list[str] = field(default_factory=list)
+    hedge_source: list[str] = field(default_factory=list)
+    hedge_line: list[str] = field(default_factory=list)
+    hedge_overlap: int = 2
+    hedge_stopwords: list[str] = field(default_factory=list)
+    hedge_predicates: dict[str, list[str]] = field(default_factory=dict)
+    blocked_terms: list[str] = field(default_factory=list)
+    bound_source: list[str] = field(default_factory=list)
+    bound_line: list[str] = field(default_factory=list)
 
 
 @lru_cache(maxsize=4)
@@ -118,6 +126,9 @@ def check(line: str, source: str, rules: Rules | None = None, year: int | None =
         problems += _check_weekdays(text, year)
     problems += _check_words(text, src.text, rules)
     problems += _check_polarity(text, src.text, rules)
+    problems += _check_hedges(text, src.text, rules)
+    problems += _check_bounds(text, src.text, rules)
+    problems += [f"원문에 없는 말 '{t}'(다른 뜻으로 읽힘)" for t in rules.blocked_terms if t in text and t not in src.text]
     return problems
 
 
@@ -205,13 +216,66 @@ def _check_polarity(text: str, source: str, rules: Rules) -> list[str]:
     problems: list[str] = []
     for pair in rules.polarity:
         up, down = pair.get("up", []), pair.get("down", [])
-        for mine, other, label in ((up, down, "늘다·가능"), (down, up, "줄다·불가")):
-            if _has_any(text, mine) and _has_any(source, other) and not _has_any(source, mine):
+        name = pair.get("name") or "방향"
+        for mine, other in ((up, down), (down, up)):
+            label = f"{name}: 원문 '{next(w for w in other if w in source) if _has_any(source, other) else ''}'"
+            # 줄 안에 양쪽이 다 있으면("확보 가능하나 선정 난이도 高") 대비를 그대로 옮긴 것이라 막지 않는다
+            # (2026-10-05 실측 정답 5의 오탐)
+            if (_has_any(text, mine) and not _has_any(text, other)
+                    and _has_any(source, other) and not _has_any(source, mine)):
                 problems.append(f"원문과 방향이 반대인 표현({label})")
     pending = "|".join(re.escape(w) for w in rules.done_pending) or "(?!)"
     settled = [w for w in rules.done_words if re.search(rf"{re.escape(w)}(?!\s*(?:{pending}))", text)]
     if settled and not _has_any(source, rules.done_source):
         problems.append("원문에 없는 확정·완료 표현")
+    return problems
+
+
+_CLAUSE_SPLIT = re.compile(r"[,，.]|(?<=[고며서만])\s")
+
+
+def _stems(text: str, stop: list[str]) -> set[str]:
+    return {w[:2] for w in re.findall(r"[가-힣]{2,}", text) if w[:2] not in stop}
+
+
+def _check_hedges(text: str, source: str, rules: Rules) -> list[str]:
+    """원문 절은 가능성("어려워질 수 있음")인데, 그 절을 옮긴 줄이 단정("어려움")이면 문제."""
+    if not rules.hedge_source or _has_any(text, rules.hedge_line):
+        return []
+    mine = _stems(text, rules.hedge_stopwords)
+    hedge = "|".join(re.escape(h) for h in rules.hedge_source)
+    for clause in _CLAUSE_SPLIT.split(source):
+        found = re.search(hedge, clause)
+        if not found:
+            continue
+        # 가능성이 걸린 서술어("어려워질 수 있"의 어려워질)를 줄이 옮겼을 때만 본다. 같은 절의 다른 말("본업 부담")만
+        # 옮긴 줄은 상관없다(2026-10-05 실측 정답 4 결과의 오탐).
+        words = clause[:found.start()].split()
+        if not words:
+            continue
+        predicate = re.sub(r"[ㄹ을를]$", "", words[-1])
+        forms = next((v for k, v in rules.hedge_predicates.items() if predicate.startswith(k)), [predicate[:2]])
+        shared = mine & _stems(clause, rules.hedge_stopwords)
+        if any(f in text for f in forms) and len(shared) >= rules.hedge_overlap:
+            return [f"원문은 가능성(~수 있음 등)인데 단정으로 씀 — '{clause.strip()[:24]}'"]
+    return []
+
+
+def _check_bounds(text: str, source: str, rules: Rules) -> list[str]:
+    """원문에서 숫자 바로 뒤에 '이상·미만·넘게'가 있었는데 줄에서는 그 숫자에 범위 표현이 없으면 문제."""
+    if not rules.bound_source:
+        return []
+    problems: list[str] = []
+    bound_src = "|".join(re.escape(b) for b in rules.bound_source)
+    bound_out = "|".join(re.escape(b) for b in rules.bound_line)
+    for m in re.finditer(rf"({_NUM})\s*([가-힣]{{0,3}})\s*(?:{bound_src})", _clean(source)):
+        number, unit = m.group(1), m.group(2)
+        # 같은 단위가 붙은 숫자만 본다("10년차 이상"의 10과 "10명"의 10은 다른 사실)
+        for hit in re.finditer(rf"(?<![\d.]){re.escape(number)}\s*{re.escape(unit)}", text):
+            after = text[hit.end():hit.end() + 8]
+            if not re.match(rf"\s*[가-힣]{{0,3}}\s*(?:{bound_out})", after):
+                problems.append(f"원문의 범위 표현이 빠짐({m.group(0).strip()})")
+                break
     return problems
 
 

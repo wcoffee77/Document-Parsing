@@ -194,6 +194,11 @@ def _ask_anthropic(texts: list[str], system: str = _SYSTEM) -> list[str]:
     return out
 
 
+LAST_CALL: dict = {}
+# 마지막 ask_chat 호출의 진단 정보(끝난 이유·글자 수) — 형식 오류가 날 때 --report에 남긴다(2026-10-05 실측: 첫 응답이
+# "JSON을 찾지 못함"으로 5건 중 4건 실패, 원인 미확정).
+
+
 def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool = False) -> str:
     """한 번의 질문 → 한 덩어리 답(여러 줄 JSON 등). 줄 수를 맞추는 `_ask_llm`과 달리 형식은 호출자가 검증한다.
 
@@ -212,7 +217,18 @@ def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool =
         with httpx.Client(timeout=600.0) as client:
             response = client.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=body)
             response.raise_for_status()
-            return _THINK_BLOCK.sub("", response.json()["choices"][0]["message"].get("content") or "").strip()
+            choice = response.json()["choices"][0]
+            message = choice.get("message") or {}
+            content = _THINK_BLOCK.sub("", message.get("content") or "").strip()
+            reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+            LAST_CALL.clear()
+            LAST_CALL.update(finish_reason=choice.get("finish_reason"), content_chars=len(content),
+                             reasoning_chars=len(reasoning))
+            if "{" not in content and "{" in reasoning:
+                # 추론을 껐는데도 서버가 답을 추론 칸에 넣는 경우 — 거기 든 JSON을 쓴다(검증은 호출자가 한다)
+                LAST_CALL["used_reasoning"] = True
+                return reasoning.strip()
+            return content
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("LLM 설정이 없습니다 (DOC2REPORT_LLM_BASE_URL 또는 ANTHROPIC_API_KEY)")
     try:
