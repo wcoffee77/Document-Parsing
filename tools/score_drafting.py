@@ -90,7 +90,11 @@ def summary(result: Path, number: int) -> dict:
     hard = sum(1 for t in items if any(i.hard for i in lint(t)))
     invented = {p for line in mine for p in check(line, body_src, year=2026)
                 if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))}
-    return {"ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented)}
+    answer = [l for l in next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8").splitlines()[2:] if l.strip()]
+    kept = _numbers("\n".join(answer)) & _numbers(body_src)
+    got = len(kept & _numbers("\n".join(mine)))
+    return {"ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented),
+            "numbers": f"{got}/{len(kept)}"}
 
 
 def score(result: Path, number: int) -> None:

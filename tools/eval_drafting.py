@@ -43,7 +43,7 @@ def _brief(number: int, result, scored: dict) -> str:
     kinds = sorted({_kind(m.group(1)) for n in replaced for m in [re.search(r"개조식, (.*?)\): ", n)] if m})
     ruled = sum(1 for n in notes if n.startswith("규칙 교정"))
     diag = next((re.sub(r"^.*?\(", "(", n)[:70] for n in notes if "형식 오류" in n), "")
-    return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | "
+    return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | 핵심수치보존 {scored['numbers']} | "
             f"형식오류 {fmt}회 | 줄단위해결 {fixed} | 원문대체 {len(replaced)}({'·'.join(kinds) or '-'}) | 규칙교정 {ruled}"
             + (f"\n     형식오류 진단 {diag}" if diag else ""))
 
@@ -74,7 +74,7 @@ def main() -> None:
         else:
             print(f"[{number}] 완료")
     text = "\n".join(["==== 핵심 요약 (이 부분만 보내 주세요) ====", *summary,
-                      "기준: 분량 정답 62~77% / 서술체 0 / 수치왜곡 0 / 원문대체 줄 전체의 20% 이하 / 형식오류 0~1회"])
+                      "기준: 분량 정답 62~77% / 서술체 0 / 수치왜곡 0 / 핵심수치보존 전부(예 14/14) / 원문대체 줄 전체의 20% 이하 / 형식오류 0~1회"])
     (out / "eval_summary.txt").write_text(text, encoding="utf-8")
     print()
     print(text)
