@@ -243,7 +243,9 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
   추진 계획 → □ 대상 → □ 일정 → □ 세부 내용 → □ 소요 예산
   이슈·건의 → □ 배경 → □ 검토안(①②③) → □ 건의 사항
 - 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
-  표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 모두 씁니다. 표라고 더 줄이지 않습니다.
+  표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 씁니다. 절은 빼지 않되, 한 줄은 조건 하나를
+  공백 빼고 32자 이내의 짧은 명사형으로 씁니다(X '- 식당 좌석을 늘리려면 바닥 배관을 옮겨야 하므로 공사 기간이 길어지고 비용도 약 2억원 정도 들 것으로 예상됨'
+  O '- 배관 이설로 공사비 약 2억원 발생').
 - 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 쓰고 그 아래 "□".
 - 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
   "→"(목표·결과), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
@@ -431,9 +433,21 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
             made = coined_words(line.content(), " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences)))
             if made:
                 style.append(f"{index + 1}번째 줄에 원문 어구를 잘라 붙인 사전에 없는 말 {made} — 뜻이 통하는 낱말로 풀어 쓰세요")
-    if has_alternatives(sentences, rules) and not any(l.is_table or _ORDINAL.match(l.m) for l in rewrite.lines):
-        style.append("원문이 대안을 비교하는데(첫째·둘째 등) 표도 ①② 줄도 없음 — 대안 2개면 표(구분/장점/단점·비용·조건 칸, "
-                     "원문 절마다 한 줄), 3개 이상이면 ①②③ 줄로 쓰세요")
+    if has_alternatives(sentences, rules):
+        if not any(l.is_table or _ORDINAL.match(l.m) for l in rewrite.lines):
+            style.append("원문이 대안을 비교하는데(첫째·둘째 등) 표도 ①② 줄도 없음 — 대안 2개면 표(구분/장점/단점·비용·조건 칸, "
+                         "원문 절마다 한 줄), 3개 이상이면 ①②③ 줄로 쓰세요")
+        if sum(1 for l in rewrite.lines if _SECTION_MARK.match(l.m)) < 2:
+            # 2026-10-07 사용자: 정답은 1. 배경 / 2. 검토 방안 / 3. 추진 방향으로 체계적인데 결과는 □ 두 개로 뭉뚱그려졌다
+            style.append("대안을 검토하는 보고서인데 번호 절이 없음 — 1. 배경 / 2. 검토 방안(표) / 3. 추진 방향처럼 "
+                         "\"1.\" 절로 나누고 그 아래에 □·- 를 쓰세요")
+    cell_limit = _table_cell_limit()
+    for index, line in enumerate(rewrite.lines):
+        if line.is_table:
+            long = [p for p in _text_pieces(line) if len(re.sub(r"\s|^-", "", p)) > cell_limit]
+            if long:
+                style.append(f"{index + 1}번째 줄(표)의 칸 안 줄이 김({len(long)}개, 예: {long[0][:30]}) — 칸 안 한 줄에는 조건 하나만, "
+                             f"공백 빼고 {cell_limit}자 이내의 명사형으로(예: '- 관련 법령상 노사 서면 합의 필요'). 내용은 빼지 말고 줄을 나누세요")
     ratio = _report_ratio(rewrite, sentences)
     if ratio is not None and ratio < _min_ratio():
         style.append(f"보고서가 원문의 {ratio:.0%}로 과도하게 축약됨(기준 {_min_ratio():.0%} 이상) — 조건·이유·주체를 되살려 맥락을 알 수 있게 쓰고, 표 칸도 원문 절마다 한 줄로 모두 쓰세요")
@@ -452,6 +466,12 @@ def has_alternatives(sentences: list[str], rules=None) -> bool:
     cues = (rules or load_rules()).alternative_cues
     text = " ".join(sentences)
     return sum(1 for cue in cues if re.search(cue, text)) >= 2
+
+
+def _table_cell_limit() -> int:
+    from .transform.report_style import load_rules
+
+    return int(load_rules().limits.get("table_cell_chars", 32))
 
 
 def _min_ratio() -> float:
@@ -651,7 +671,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     unavailable = False
     system = system_prompt(holdout)
     format_errors = 0
-    revised = False
+    revised = 0
     while True:
         raw = ""
         try:
@@ -683,10 +703,12 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         result = candidate
         if not facts and not style:
             break
-        notes.append(f"LLM 다듬기 {'수정본' if revised else '1차'} 검증: 사실 문제 {len(facts)}줄, 형식 문제 {len(style)}건")
-        if revised:
+        notes.append(f"LLM 다듬기 {f'수정본 {revised}' if revised else '1차'} 검증: 사실 문제 {len(facts)}줄, 형식 문제 {len(style)}건")
+        structural = [s for s in style if any(k in s for k in _STRUCTURAL_KEYS)]
+        # 수정은 한 번이 기본, 구조 문제(표·번호 절·줄임말·긴 표 칸)가 남으면 한 번 더(2026-10-07: 검사가 늘어 한 번에 다 못 고침)
+        if revised >= (2 if structural else 1):
             break
-        revised = True
+        revised += 1
         previous = raw[raw.find("{"):raw.rfind("}") + 1]
         message = (f"{user}\n\n[이전 응답]\n{previous}\n\n[검증에서 걸린 것 — 원문 사실과 다르거나 규칙 위반]\n"
                    f"{_problem_message(candidate, facts, style)}\n"
@@ -737,6 +759,7 @@ def _rescue_plain_text(raw: str, numbered: str, count: int, ask_json: Ask) -> "R
         return None
 
 
+_STRUCTURAL_KEYS = ("표도 ①② 줄도 없음", "번호 절이 없음", "사전에 없는 말", "칸 안 줄이 김")
 MAX_FORMAT_RETRIES = 3     # 형식 오류(JSON 아님)로 다시 묻는 최대 횟수 — 내용 수정 1회와 별도
 LINE_REPAIR_TRIES = 2      # 사실 검증에 걸린 줄을 줄 단위로 다시 쓰게 하는 횟수
 

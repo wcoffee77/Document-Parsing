@@ -83,9 +83,10 @@ class JobRunner:
 
     def _convert(self, job: Job, payload: dict) -> dict:
         options = payload.get("options") or {}
-        sources, kinds = self._sources(payload.get("inputs") or [])
+        inputs, notes, drafted = self._draft_inputs(job, payload.get("inputs") or [], options)
+        sources, kinds = self._sources(inputs)
 
-        docs, notes = [], []
+        docs = []
         for index, source in enumerate(sources, 1):
             name = source.name if isinstance(source, LoadedSource) else source
             job.say(f"입력 읽는 중 ({index}/{len(sources)}): {name}")
@@ -106,6 +107,10 @@ class JobRunner:
 
         profile, polish, llm, decision = opts.build_profile(options, docs, kinds,
                                                             llm_ready=llm_status()["configured"])
+        if drafted and drafted == len(inputs):
+            # 이미 줄글 다듬기(draft)로 보고서 글이 됐다 — 한 줄씩 교열하는 LLM·규칙을 다시 돌리면 검증을 거친 문장을 또 바꾼다
+            # (2026-10-07 실측: 화면 경로는 draft를 안 거치고 교열만 해서 '몰아일' 같은 줄임말이 그대로 나왔다)
+            polish, llm = "none", False
         if decision:
             notes = [f"자동 판단: {reason}" for reason in decision.reasons] + notes
 
@@ -156,6 +161,27 @@ class JobRunner:
             "preset": options.get("preset") or "default",
             "decision": ({"reasons": decision.reasons, **decision.summary} if decision else None),
         }
+
+    def _draft_inputs(self, job: Job, inputs: list[dict], options: dict) -> tuple[list[dict], list[str], int]:
+        """'줄글을 정식보고서로 새로 쓰기'가 켜져 있으면 붙여넣은 글을 doc2report draft와 같은 처리(drafting.draft)로
+        다시 쓴 글로 바꾼다. Confluence·Word 입력은 그대로 둔다."""
+        if not options.get("draft"):
+            return inputs, [], 0
+        from ..drafting import draft as make_draft
+
+        out, notes, drafted = [], [], 0
+        year = datetime.now().year
+        for index, item in enumerate(inputs, 1):
+            if item.get("type") != "text" or not (item.get("text") or "").strip():
+                out.append(item)
+                continue
+            job.say(f"줄글을 보고서로 다시 쓰는 중 ({index}/{len(inputs)}) — LLM 응답·검증에 1~2분 걸릴 수 있음")
+            result = make_draft(item["text"], year=year)
+            notes += [f"[줄글 다듬기 {index}] {n}" for n in result.notes]
+            notes.append(f"[줄글 다듬기 {index}] 방식: {result.mode}")
+            out.append({**item, "text": result.text, "title": (item.get("title") or "").strip() or result.title})
+            drafted += 1
+        return out, notes, drafted
 
     def _sources(self, inputs: list[dict]) -> tuple[list, list[str]]:
         if not inputs:

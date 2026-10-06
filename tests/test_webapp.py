@@ -346,3 +346,27 @@ def test_confluence_and_word_inputs_keep_original_bold_even_with_report_rules():
     for kinds, expected in ((["confluence"], False), (["docx"], False), (["text"], True)):
         prof, *_ = build_profile(opts, [Document(blocks=[])], kinds, llm_ready=False)
         assert prof.text.level_bold is expected
+
+
+def test_web_draft_option_runs_the_same_pipeline_as_cli_draft(tmp_path, monkeypatch):
+    """2026-10-07 실측: 화면으로 만든 문서는 draft를 안 거치고 한 줄씩 교열만 해서 표·절 구성이 없고 '몰아일'이 남았다.
+    '줄글을 정식보고서로 새로 쓰기'를 켜면 doc2report draft와 같은 drafting.draft를 거치고, 교열 LLM은 다시 돌리지 않는다."""
+    import doc2report.drafting as drafting
+
+    calls = []
+
+    def fake_draft(text, ask=None, mode="rewrite", year=None, holdout=None):
+        calls.append(text)
+        return drafting.DraftResult("1. 검토 방안\n□ 대안 비교 결과", None, ["검증 통과"], True,
+                                    title="유연근무 검토", mode="rewrite", sections=1)
+
+    monkeypatch.setattr(drafting, "draft", fake_draft)
+    runner = JobRunner(tmp_path / "out", tmp_path / "up")
+    job = runner.run_sync({"inputs": [{"type": "text", "text": "저는 두 가지 방안을 생각해 봤습니다."}],
+                           "options": {"mode": "manual", "preset": "formal", "draft": True, "llm": True,
+                                       "formats": ["docx"]}})
+    assert job.state == "done", job.error
+    assert calls == ["저는 두 가지 방안을 생각해 봤습니다."]
+    assert job.result["llm"] is False and job.result["polish"] == "none"
+    assert any("[줄글 다듬기 1] 방식: rewrite" in n for n in job.result["notes"])
+    assert job.result["title"] == "유연근무 검토"

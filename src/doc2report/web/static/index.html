@@ -108,6 +108,9 @@
 
     <fieldset>
       <legend>LLM 다듬기</legend>
+      <label class="check strong"><input type="checkbox" id="use-draft"> 줄글을 정식보고서로 새로 쓰기 (붙여넣은 글)
+        <span class="hint">구어체·장문을 1.·□·-·표 체계의 개조식으로 다시 쓰고, 숫자·날짜·방향을 원문과 대조합니다
+          (명령어 <code>doc2report draft</code>와 같은 처리). Confluence·Word 입력에는 적용하지 않습니다.</span></label>
       <label class="check strong"><input type="checkbox" id="use-llm"> LLM으로 맞춤법·표현·어조 다듬기
         <span class="hint">맞춤법·띄어쓰기를 고치고, 정식 보고서 어조로 바꾸고, 모호한 표현을 분명하게 합니다.
           사실·수치와 문장 끝 형태는 그대로 두고, 제목과 표 안은 건드리지 않습니다.</span></label>

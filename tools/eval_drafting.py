@@ -52,13 +52,15 @@ def _brief(number: int, result, scored: dict) -> str:
     unclear_left = sum(1 for n in notes if n.startswith("이해 불가 의심"))
     lines = result.text.splitlines()
     table = "표" if any("\t" in l for l in lines) else ("①②" if any(l.lstrip().startswith("①") for l in lines) else "없음")
+    numbered = sum(1 for l in lines if re.match(r"\s*\d+\.\s", l))
+    revisions = sum(1 for n in notes if "검증: 사실 문제" in n)
     audit_ok = sum(1 for n in notes if n.startswith("내용 누락 보강"))
     audit_bad = sum(1 for n in notes if n.startswith("내용 누락 의심"))
-    diag = next((re.sub(r"^.*?\(", "(", n)[:70] for n in notes if "형식 오류" in n), "")
+    diag = next((re.sub(r"^.*?형식 오류 \d+회: ", "", n)[:110] for n in notes if "형식 오류" in n), "")
     return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | 핵심수치보존 {scored['numbers']}" + ("" if scored["missing"] == "-" else f" 빠진 {scored['missing']}") + " | "
             f"형식오류 {fmt}회 | 줄단위해결 {fixed} | 원문대체 {len(replaced)}({'·'.join(kinds) or '-'}) | 규칙교정 {ruled}"
             f"\n     생략문장 {','.join(dropped) or '없음'} | 수치누락 {'; '.join(gaps) or '없음'} | 내용보강 {audit_ok}(실패 {audit_bad})"
-            f"\n     방식 {result.mode} | 대안표 {table} | 글→JSON {rescued} | 줄임말 고침 {coined_fixed}(남음 {coined_left})"
+            f"\n     방식 {result.mode} | 대안표 {table} | 번호절 {numbered} | 검증회차 {revisions} | 글→JSON {rescued} | 줄임말 고침 {coined_fixed}(남음 {coined_left})"
             f" | 이해불가 고침 {clarified}(남음 {unclear_left})"
             + (f"\n     형식오류 진단 {diag}" if diag else ""))
 

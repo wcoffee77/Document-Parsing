@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 7;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 8;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -77,6 +77,7 @@ async function loadStatus() {
   $("#out-dir").textContent = st.output_dir;
   if (!st.llm.configured) {
     $("#use-llm").closest("label").classList.add("disabled");
+    $("#use-draft").closest("label").classList.add("disabled");
   }
 }
 
@@ -310,6 +311,7 @@ function collectOptions() {
     mode,
     llm: $("#use-llm").checked,
     allow_llm: $("#use-llm").checked,
+    draft: $("#use-draft").checked,
     preset: radio("preset") || state.schema.presets[0],
     custom,
     rules_base: $("#rules-base").value,
@@ -347,6 +349,7 @@ function restoreOptions() {
   if (o.custom) for (const k of CUSTOM_KEYS) setCustom(k, o.custom[k]);
   setRadio("mode", o.mode || "auto");
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
+  $("#use-draft").checked = !!o.draft;
   if (o.polish) setRadio("polish", o.polish === "llm" ? "rules" : o.polish);  // 예전 "규칙 + LLM"
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
