@@ -545,3 +545,36 @@ def test_case2_replay_retry_names_missing_table_and_coined_word():
     draft(TEXT2, ask=ask, year=2026)
     retry = requests[1]
     assert "몰아일" in retry and "표도 ①② 줄도 없음" in retry
+
+
+def test_coined_word_inside_a_table_cell_is_repaired_and_unrepairable_ones_are_reported():
+    """2026-10-07 사용자 PC(커밋 12df22e) 재현: 표 칸 안 '몰아일'이 수리되지 않고 --report에도 안 나왔다."""
+    from doc2report.drafting import CLARIFY_SYSTEM, Line, Rewrite, _repair_coined
+
+    sents = ["프로젝트 마감 전후로 몰아서 일하는 R&D 특성에 더 잘 맞습니다"]
+
+    def make():
+        return Rewrite("t", [Line("표", "", [1], [["구분", "(1안)", "(2안)"],
+                                                 ["장점", "- 즉시 시행 可", "- 취업규칙 변경\\n- 프로젝트 몰아일 특성에 적합".replace("\\n", "\n")]])], [])
+
+    rw = make()
+    notes = _repair_coined(rw, sents, lambda s, u: "프로젝트 마감 전후 집중 근무 특성에 적합" if s == CLARIFY_SYSTEM else "", 2026)
+    assert rw.lines[0].rows[1][2] == "- 취업규칙 변경\n- 프로젝트 마감 전후 집중 근무 특성에 적합"
+    assert any("줄임말 풀어 씀(표 칸)" in n for n in notes)
+    rw = make()
+    notes = _repair_coined(rw, sents, lambda s, u: "프로젝트 몰아일 특성에 적합", 2026)
+    assert any("줄임말 남음(표 칸" in n for n in notes) and "몰아일" in rw.lines[0].rows[1][2]
+
+
+def test_final_leftover_problems_are_listed_in_the_report():
+    import json as _json
+
+    from doc2report.drafting import draft
+
+    bad = {"title": "t", "lines": [{"m": "-", "text": "채용 목표 : 총 40명", "src": [1]}], "dropped": [2, 3, 4, 5, 6, 7, 8]}
+
+    def ask(system, user):
+        return '{"missing":[]}' if system == AUDIT_SYSTEM else _json.dumps(bad, ensure_ascii=False)
+
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert any(n.startswith("최종 점검에서 남음:") for n in result.notes)

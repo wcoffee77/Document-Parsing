@@ -732,6 +732,12 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     notes += _repair_coined(result, sentences, ask, year)
     notes += _audit_content(result, sentences, ask, year, ask_json)
     notes += _style_residue(result)
+    # 마지막 상태를 한 번 더 점검해 남은 문제를 그대로 알린다(예전엔 "형식 문제 2건"이라는 개수만 남아 무엇이 남았는지 report로 알 수 없었다)
+    try:
+        _, leftover = review(result, sentences, title, year)
+        notes += [f"최종 점검에서 남음: {item}" for item in leftover]
+    except Exception:  # noqa: BLE001
+        pass
     tidy_labels(result.lines)
     body = rewrite_text(result)
     notes += _coverage_notes(result, sentences, body)
@@ -938,25 +944,46 @@ def _repair_coined(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int |
     from .transform.report_style import hard_issues
 
     notes: list[str] = []
-    for line in rewrite.lines:
-        if line.is_table or not line.src:
-            continue
-        source = " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences))
-        made = coined_words(line.text, source)
-        if not made:
-            continue
-        fixed = ""
+
+    def fix_piece(piece: str, source: str, made: list[str]) -> str:
         for _ in range(LINE_REPAIR_TRIES):
             try:
-                reply = ask(CLARIFY_SYSTEM, f"근거 원문:\n{source}\n\n고칠 줄: {line.text}\n"
+                reply = ask(CLARIFY_SYSTEM, f"근거 원문:\n{source}\n\n고칠 줄: {piece}\n"
                                             f"문제: 사전에 없는 줄임말 {made} — 원문의 뜻이 통하는 낱말로 풀어 쓸 것")
             except Exception:  # noqa: BLE001
-                return notes
+                return ""
             first = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
             fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", first).strip().strip('"\'')
             if fixed and not coined_words(fixed, source) and not check(fixed, source, year=year) and not hard_issues(fixed):
-                break
-            fixed = ""
+                return fixed
+        return ""
+
+    for line in rewrite.lines:
+        if not line.src:
+            continue
+        source = " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences))
+        if line.is_table:
+            # 2026-10-07 사용자 PC 재현: 표 칸 안의 '몰아일'은 수리 대상이 아니라 재작성 두 번 뒤에도 남고 --report에도 안 나왔다.
+            for row in line.rows or []:
+                for col, cell in enumerate(row):
+                    parts = cell.split("\n")
+                    for k, part in enumerate(parts):
+                        made = coined_words(part, source)
+                        if not made:
+                            continue
+                        mark = "- " if part.lstrip().startswith("-") else ""
+                        fixed = fix_piece(re.sub(r"^\s*-\s*", "", part), source, made)
+                        if fixed:
+                            notes.append(f"줄임말 풀어 씀(표 칸) {made}: '{part[:25]}' → '{fixed[:40]}'")
+                            parts[k] = mark + fixed
+                        else:
+                            notes.append(f"줄임말 남음(표 칸, 고치지 못함) {made}: {part[:40]}")
+                    row[col] = "\n".join(parts)
+            continue
+        made = coined_words(line.text, source)
+        if not made:
+            continue
+        fixed = fix_piece(line.text, source, made)
         if fixed:
             notes.append(f"줄임말 풀어 씀 {made}: '{line.text[:25]}' → '{fixed[:40]}'")
             line.text = fixed

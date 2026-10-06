@@ -61,3 +61,12 @@ git pull origin ccr-283e50d5-83grju
 .\uv.exe run --offline --no-sync python tools\eval_drafting.py --out out --holdout      # 핵심 요약만 보내 달라고 안내
 .\uv.exe run --offline --no-sync doc2report draft samples\drafting\줄글_2_유연근무검토.txt -o out\d2.docx --report out\d2_report.md
 ```
+
+
+## 6. 업데이트 (2026-10-07 늦게) — 사용자 답변 반영
+- 사용자 PC 커밋은 `12df22e`(표 칸 32자·번호 절·구조 수정 2회가 들어간 `7eeebbc` **이전**). 명령은 `doc2report draft samples\drafting\줄글_2_유연근무검토.txt -o out\d2_1.docx --report out\d2_report_1.md` — 즉 **draft가 맞다**(위 3절의 "웹/convert 가설"은 이 사용자에겐 해당 없음, 4절 B-5 불필요).
+- report에는 '형식오류·줄임말·내용 보강·이해 불가' 줄이 하나도 없고 'LLM 다듬기 1차/수정본 검증, 1·3번째 줄 문체 점검, 레이아웃 조정'만 있었는데도 d2에 '몰아일'이 있었다.
+  **샌드박스에서 `12df22e`로 재현**: 표 칸 안의 줄임말은 `_repair_coined`가 표를 건너뛰어 수리하지 않았고, 재작성 두 번 뒤에도 남았는데 report에는 "형식 문제 2건"이라는 **개수만** 남았다 → 사용자가 원인을 알 수 없었다.
+  수정: 표 칸 줄임말 수리(`_repair_coined`), 마지막 상태를 다시 점검해 `최종 점검에서 남음: …`을 report에 그대로 기록. 테스트 2개 추가(434개 통과).
+- 확정된 사실 아님(추정): d2의 '□ 두 개'는 구버전에서 번호 절 점검이 없었기 때문. 최신 커밋으로 pull해 재실측해야 확인된다.
+- 다음: 사용자가 pull 후 같은 명령으로 d2를 다시 만들고 `out\d2_1_구조.txt`(가상 샘플이라 반출 가능)와 report의 '최종 점검에서 남음' 줄을 보내 주면 그것으로 B·C 우선순위를 정한다.
