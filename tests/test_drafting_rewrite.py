@@ -262,3 +262,37 @@ def test_factcheck_catches_the_distortions_found_in_the_first_onprem_run():
     ]
     for line, source in fixed:
         assert check(line, source) == [], (line, check(line, source))
+
+
+def test_repair_numbers_rewrites_the_line_until_missing_numbers_are_in():
+    from doc2report.drafting import Line, Rewrite, _repair_numbers
+
+    sents = ["예산은 코칭 4,500만 원과 워크숍 1,200만 원을 합쳐 5,700만 원입니다"]
+    rw = Rewrite("t", [Line("-", "예산 : 5,700만원", [1])], [])
+    seen = []
+
+    def ask(_system, user):
+        seen.append(user)
+        return "- 예산 : 5,700만원 (코칭 4,500 + 워크숍 1,200)" if len(seen) == 2 else "예산 : 5,700만원"
+
+    notes = _repair_numbers(rw, sents, ask, 2026)
+    assert rw.lines[0].text == "예산 : 5,700만원 (코칭 4,500 + 워크숍 1,200)" and len(seen) == 2
+    assert any("보강" in n for n in notes)
+
+
+def test_repair_numbers_rejects_invented_numbers_and_keeps_line():
+    from doc2report.drafting import Line, Rewrite, _repair_numbers
+
+    sents = ["작년 5,200만 원보다 500만 원 늘었습니다"]
+    rw = Rewrite("t", [Line("-", "500만원 증가", [1])], [])
+    _repair_numbers(rw, sents, lambda *_: "작년 5,300만원 대비 500만원 증가", 2026)
+    assert rw.lines[0].text == "500만원 증가"
+
+
+def test_review_flags_numeric_sentence_sent_to_dropped():
+    from doc2report.drafting import Line, Rewrite, review
+
+    sents = ["응답자 312명 중 58%가 선호", "소감 없음"]
+    rw = Rewrite("t", [Line("-", "기타", [2])], [1])
+    _, style = review(rw, sents, "t", 2026)
+    assert any("dropped로 보냄" in s for s in style)

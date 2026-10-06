@@ -225,7 +225,8 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
    - 원문의 단서(약, 정도, 예정, 검토, 가능성)는 남깁니다.
    - 다른 뜻으로 읽히는 말을 새로 쓰지 않습니다: '매년' → '매년'·'연 단위'(X '연차' — 연차휴가로 읽힘).
    - 문장을 src로 쓰면 그 문장의 숫자(비교 기준값·작년 수치·기준표 비율 포함)를 줄에 모두 남깁니다.
-     숫자를 뺄 거면 그 문장 전체를 dropped로 보냅니다('24%였다'만 빼고 문장은 쓰기 금지).
+     합계·내역이 함께 있으면 둘 다 씁니다(예: 합계 5,700만원 (코칭 4,500 + 워크숍 1,200), 작년 대비 +500).
+     숫자가 든 문장을 dropped로 보내 숫자를 피하지 않습니다. dropped는 말투·소감·중복·부연 문장에만 씁니다.
 3. 줄마다 src에 그 줄의 근거 원문 문장 번호를 모두 적습니다. 근거 없는 줄은 쓰지 않습니다.
 4. 보고에 필요 없는 문장(말투, 개인 소감, 중복, 자잘한 부연)은 쓰지 않고 dropped에 번호를 적습니다.
    모든 문장 번호는 어느 줄의 src나 dropped에 한 번 이상 나와야 합니다.
@@ -399,6 +400,9 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     missing = [i for i in range(1, len(sentences) + 1) if i not in used]
     if missing:
         style.append(f"문장 {missing}이(가) 어느 줄의 src에도, dropped에도 없음")
+    for i in sorted(set(rewrite.dropped)):
+        if 1 <= i <= len(sentences) and re.search(r"\d", sentences[i - 1]) and i not in {j for l in rewrite.lines for j in l.src}:
+            style.append(f"문장 [{i}]에 숫자가 있는데 dropped로 보냄 — 줄로 쓰고 숫자를 남기세요")
     for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
         style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 줄에 넣거나, 숫자를 뺄 거면 그 문장을 dropped로")
     return facts, style
@@ -633,6 +637,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         notes += _repair_lines(result, facts, sentences, ask, year)
     notes += _restore_originals(result, facts, sentences, title, year)
     notes += _apply_style_fix(result, sentences, year)
+    notes += _repair_numbers(result, sentences, ask, year)
     notes += _style_residue(result)
     tidy_labels(result.lines)
     body = rewrite_text(result)
@@ -692,6 +697,45 @@ def _repair_lines(rewrite: Rewrite, facts: dict[int, list[str]], sentences: list
                 del facts[index]
                 break
             problems = problems or ["서술체·구어체"]
+    return notes
+
+
+NUMBER_REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서 한 줄에서 근거 원문의 숫자가 빠졌습니다.
+근거 원문의 사실과 같게, 빠진 숫자를 모두 넣어 그 줄만 다시 쓰세요(합계와 내역이 있으면 둘 다: 합계 5,700만원 (코칭 4,500 + 워크숍 1,200)).
+보고서 말투(명사나 한자 약어로 끝, 마침표 없음), 원문에 없는 숫자·평가는 넣지 않습니다. 출력은 고친 줄 한 줄뿐입니다(말머리·설명·따옴표 없이)."""
+
+
+def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int | None) -> list[str]:
+    """수정본에도 숫자가 빠진 문장은 그 문장을 쓴 줄(표 아님) 하나를 줄 단위로 다시 쓰게 한다. 사실·문체 검증과 숫자 채움을 모두
+    통과할 때만 채택하고, 아니면 그대로 둔다(--report의 '수치 누락'으로 사람이 본다)."""
+    from .transform.factcheck import check, missing_numbers, uncovered_by_source
+    from .transform.report_style import hard_issues
+
+    notes: list[str] = []
+    for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite)).items():
+        holders = [l for l in rewrite.lines if i in l.src and not l.is_table]
+        if not holders:
+            continue
+        line = holders[0]
+        source = " ".join(sentences[j - 1] for j in line.src)
+        for _ in range(LINE_REPAIR_TRIES):
+            user = f"근거 원문:\n{source}\n\n고칠 줄: {line.text}\n빠진 숫자: {', '.join(numbers)}"
+            try:
+                answer = ask(NUMBER_REPAIR_SYSTEM, user)
+            except Exception:  # noqa: BLE001
+                return notes
+            first = (answer or "").strip().splitlines()[0] if (answer or "").strip() else ""
+            fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", first).strip().strip('"\'')
+            if not fixed:
+                continue
+            if check(fixed, source, year=year) or hard_issues(fixed):
+                continue
+            others = " ".join(l.content() for l in rewrite.lines if l is not line and i in l.src)
+            if missing_numbers(sentences[i - 1], f"{fixed} {others}"):
+                continue
+            notes.append(f"수치 누락 줄 단위 보강: '{line.text[:25]}' → '{fixed[:40]}'")
+            line.text = fixed
+            break
     return notes
 
 
