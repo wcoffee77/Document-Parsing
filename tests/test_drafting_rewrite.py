@@ -16,12 +16,12 @@ TEXT2 = (SAMPLES / "줄글_2_유연근무검토.txt").read_text(encoding="utf-8"
 # 정답 1(사용자가 직접 고친 보고서)을 LLM 응답 모양으로 옮긴 것 — 줄마다 근거 문장 번호를 붙였다.
 ANSWER1 = {"title": "R&D 인력 충원 현황", "lines": [
     {"m": "□", "text": "채용 목표 : 총 40명", "src": [1]},
-    {"m": "□", "text": "채용 현황 : 입사 확정 27명(67.5%), 처우 협의 中 6명", "src": [1, 2]},
+    {"m": "□", "text": "채용 현황(9월 말) : 입사 확정 27명(67.5%), 처우 협의 中 6명, 후보 탐색 中 7명", "src": [1, 2]},
     {"m": "※", "text": "전년도 동기 달성률 72%", "src": [2]},
     {"m": "-", "text": "직군별 세부 현황", "src": [3, 4]},
     {"m": "∙", "text": "공정 : 15명 中 12명 확보", "src": [3]},
     {"m": "∙", "text": "설계 : 14명 中 8명 확보", "src": [4]},
-    {"m": "※", "text": "설계 직군 경우, 아날로그 설계 경력인력 부족 및 경쟁사(2개) 대규모 채용으로 충원 난이도 高",
+    {"m": "※", "text": "설계 직군 경우, 경력자 부족(공석 3개월 이상), 경쟁사(2개) 채용으로 난이도 高",
      "src": [5, 6]},
     {"m": "□", "text": "추진 방향", "src": [7, 8]},
     {"m": "-", "text": "헤드헌팅 수수료 상향 추진 (기존 25% → 30%)", "src": [7]},
@@ -76,6 +76,27 @@ def test_missing_numbers_lists_what_the_report_left_out():
     assert missing_numbers("40명 중 27명, 7명은 탐색 중", "입사 확정 27명 / 총 40명") == ["7"]
 
 
+def test_uncovered_numbers_flags_dropped_baselines_per_cited_sentence():
+    from doc2report.transform.factcheck import uncovered_by_source
+
+    sents = ["작년 재택근무 확대는 24%였고 올해는 31%입니다",
+             "등급 비율은 S 10%, A 30%, B 50%, C 10%입니다",
+             "작년 5,200만 원보다 500만 원 늘었습니다",
+             "3천만 원 이상 지급"]
+    lines = [([1], "재택근무 확대 31%"), ([2], "S 10% / A 30% / C 10%"),
+             ([3], "500만원 증가"), ([4], "3,000만원 이상 지급")]
+    got = uncovered_by_source(sents, lines)
+    assert got == {1: ["24"], 2: ["50"], 3: ["5200"]}   # 4번은 3천만↔3,000만 같은 값이라 통과
+
+
+def test_uncovered_numbers_ignores_dropped_sentences_and_accepts_other_lines():
+    from doc2report.transform.factcheck import uncovered_by_source
+
+    sents = ["작년 24%, 올해 31%", "비고 7명"]
+    assert uncovered_by_source(sents, [([1], "작년 24%"), ([1], "올해 31%")]) == {}
+    assert uncovered_by_source(sents, [([1], "작년 24%, 올해 31%")]) == {}   # 2번은 생략
+
+
 # ── 다듬기 흐름 ───────────────────────────────────────────────────────────
 
 def test_rewrite_uses_llm_lines_and_keeps_them_when_facts_check_out():
@@ -84,11 +105,11 @@ def test_rewrite_uses_llm_lines_and_keeps_them_when_facts_check_out():
     assert result.mode == "rewrite" and len(calls) == 1
     assert not [n for n in result.notes if "실패" in n]
     lines = result.text.splitlines()
-    assert "□ 채용 목표 : 총 40명" in lines
+    assert any(l.startswith("□ 채용 목표") and l.endswith(": 총 40명") for l in lines)
     assert "→ 설계 인력 4명 추가 채용 목표(~10.15일)" in lines
     assert "* 금주 의뢰 완료" in lines
     assert result.title == "R&D 인력 충원 현황"
-    assert any("보고서에 안 나온 원문 수치" in n and "7" in n for n in result.notes)   # 사람이 고를 수 있게
+    assert not any("수치 누락" in n for n in result.notes)   # 인용한 문장의 숫자는 모두 남음
 
 
 def test_invented_fact_is_retried_then_replaced_by_the_original_sentence():

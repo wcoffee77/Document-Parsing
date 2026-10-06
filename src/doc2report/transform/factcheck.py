@@ -282,6 +282,41 @@ def _check_bounds(text: str, source: str, rules: Rules) -> list[str]:
 def missing_numbers(source: str, output: str, rules: Rules | None = None) -> list[str]:
     """원문 숫자 중 보고서에 안 나온 것(빠진 수치 — 사람이 고를 수 있게 --report에 남긴다)."""
     rules = rules or load_rules()
-    src, out = facts(source, rules), facts(output, rules)
-    shown = sorted({_norm(m) for m in re.findall(_NUM, _clean(source))} - out.raw, key=float)
-    return shown
+    out = facts(output, rules)
+    text = _clean(source)
+    covered: list[tuple[int, int]] = []        # 값이 같게 옮겨진 금액·퍼센트 구간(3천만 ↔ 3,000만)
+    for m in _MONEY.finditer(text):
+        value = _money_value(m.group(1))
+        if value is not None and value in out.money:
+            covered.append(m.span())
+    for m in _PERCENT.finditer(text):
+        if float(m.group(1)) in out.percents:
+            covered.append(m.span())
+    for m in _KO_DATE.finditer(text):
+        if (int(m.group(1)), int(m.group(2))) in out.dates:
+            covered.append(m.span())
+    missing: set[str] = set()
+    for m in re.finditer(_NUM, text):
+        if _norm(m.group(0)) in out.raw or any(a <= m.start() and m.end() <= b for a, b in covered):
+            continue
+        missing.add(_norm(m.group(0)))
+    return sorted(missing, key=float)
+
+
+def uncovered_by_source(sentences: list[str], lines: list[tuple[list[int], str]],
+                        rules: Rules | None = None) -> dict[int, list[str]]:
+    """인용한 원문 문장(번호 1부터) → 그 문장을 인용한 줄들 어디에도 없는 숫자.
+    lines는 (src 번호 목록, 줄 글) 쌍. 어느 줄도 인용하지 않은 문장은 생략(dropped)이라 대상 아님."""
+    rules = rules or load_rules()
+    cited: dict[int, list[str]] = {}
+    for src, text in lines:
+        for i in src:
+            cited.setdefault(i, []).append(text)
+    result: dict[int, list[str]] = {}
+    for i, texts in sorted(cited.items()):
+        if not 1 <= i <= len(sentences):
+            continue
+        gone = missing_numbers(sentences[i - 1], " ".join(texts), rules)
+        if gone:
+            result[i] = gone
+    return result

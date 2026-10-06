@@ -224,6 +224,8 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
    - 숫자 뒤 범위 표현 그대로: '3개월 넘게' → '3개월 이상'(X '3개월'), '3천만 원 이상' → '3,000만원 이상'.
    - 원문의 단서(약, 정도, 예정, 검토, 가능성)는 남깁니다.
    - 다른 뜻으로 읽히는 말을 새로 쓰지 않습니다: '매년' → '매년'·'연 단위'(X '연차' — 연차휴가로 읽힘).
+   - 문장을 src로 쓰면 그 문장의 숫자(비교 기준값·작년 수치·기준표 비율 포함)를 줄에 모두 남깁니다.
+     숫자를 뺄 거면 그 문장 전체를 dropped로 보냅니다('24%였다'만 빼고 문장은 쓰기 금지).
 3. 줄마다 src에 그 줄의 근거 원문 문장 번호를 모두 적습니다. 근거 없는 줄은 쓰지 않습니다.
 4. 보고에 필요 없는 문장(말투, 개인 소감, 중복, 자잘한 부연)은 쓰지 않고 dropped에 번호를 적습니다.
    모든 문장 번호는 어느 줄의 src나 dropped에 한 번 이상 나와야 합니다.
@@ -368,7 +370,7 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
 def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
            rules=None) -> tuple[dict[int, list[str]], list[str]]:
     """(줄 번호 → 사실 문제, 형식 문제 목록). 사실 문제가 남은 줄은 원문으로 바꾼다. 형식 문제는 다시 써 달라고만 한다."""
-    from .transform.factcheck import check, load_rules
+    from .transform.factcheck import check, load_rules, uncovered_by_source
     from .transform.report_style import lint
 
     rules = rules or load_rules()
@@ -397,7 +399,13 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     missing = [i for i in range(1, len(sentences) + 1) if i not in used]
     if missing:
         style.append(f"문장 {missing}이(가) 어느 줄의 src에도, dropped에도 없음")
+    for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
+        style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 줄에 넣거나, 숫자를 뺄 거면 그 문장을 dropped로")
     return facts, style
+
+
+def _cited_lines(rewrite: Rewrite) -> list[tuple[list[int], str]]:
+    return [(line.src, line.content()) for line in rewrite.lines]
 
 
 def _text_pieces(line: "Line") -> list[str]:
@@ -689,9 +697,11 @@ def _repair_lines(rewrite: Rewrite, facts: dict[int, list[str]], sentences: list
 
 def _coverage_notes(rewrite: Rewrite, sentences: list[str], body: str) -> list[str]:
     """사람이 검수할 것: 생략한 원문 문장, 보고서에 안 나온 원문 수치."""
-    from .transform.factcheck import missing_numbers
+    from .transform.factcheck import missing_numbers, uncovered_by_source
 
     notes: list[str] = []
+    for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite)).items():
+        notes.append(f"수치 누락(인용한 문장 [{i}] 기준): {', '.join(numbers)} — {sentences[i - 1][:40]}")
     used = {i for line in rewrite.lines for i in line.src}
     for i in sorted(set(rewrite.dropped) | (set(range(1, len(sentences) + 1)) - used)):
         if i not in used:
