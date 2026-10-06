@@ -102,7 +102,7 @@ def summary(result: Path, number: int) -> dict:
         index = next((i for i, t in enumerate(sentences, 1)
                       if number in _numbers(t)), 0)
         where.append(f"{number}(원문 문장 {index})")
-    return {"missing": ", ".join(where) or "-", "ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented),
+    return {"missing": ", ".join(where) or "-", "ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented), "invented_list": sorted(invented),
             "numbers": f"{got}/{len(kept)}"}
 
 
