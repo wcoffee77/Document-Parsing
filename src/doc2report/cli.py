@@ -44,6 +44,8 @@ def draft(
                              help="rewrite: 말투를 보고서 형식으로 다듬고 배열(사실은 원문 그대로 검증) / "
                                   "place: 원문 문장 그대로 배치만"),
     shorten: bool = typer.Option(False, "--shorten", help="줄 맞춤에서 두세 글자 넘치는 문장만 LLM으로 줄임"),
+    runs: int = typer.Option(1, "--runs", min=1, max=5,
+                             help="같은 입력을 N번 돌려 남은 문제가 가장 적은 결과를 씀(LLM은 실행마다 결과가 다름)"),
     report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
 ) -> None:
     """줄글을 정식보고서로 만든다. 기본은 LLM이 문장을 다듬고 배열하며(표 포함), 파이썬이 숫자·날짜·방향을 원문과 대조한다(drafting.py)."""
@@ -51,7 +53,7 @@ def draft(
     import re
 
     from .account import load_and_apply
-    from .drafting import draft as make_draft
+    from .drafting import brief, draft_best
     from .pipeline import convert_many
 
     load_and_apply()
@@ -62,7 +64,8 @@ def draft(
         year = int(found.group(1))
     elif date == "today":
         year = datetime.date.today().year
-    result = make_draft(source.read_text(encoding="utf-8-sig"), mode=mode, year=year)
+    text = source.read_text(encoding="utf-8-sig")
+    result = draft_best(text, runs=runs, mode=mode, year=year)
     structure_file = out.with_name(out.stem + "_구조.txt")
     structure_file.write_text(result.text, encoding="utf-8")
     converted = convert_many([str(structure_file)], out, profile, date=None if date == "none" else date,
@@ -71,8 +74,10 @@ def draft(
     typer.echo(f"[완료] {out}  ({label}, 절 {result.sections}개)  구조 글: {structure_file}")
     for note in result.notes + converted.notes:
         typer.echo(f"  · {note}")
+    summary = brief(result, text, year)
+    typer.echo("==== 핵심 요약 ====\n" + summary)
     if report:
-        lines = ["# 줄글 → 보고서 판단", "", f"- 방식: {label}", *[f"- {n}" for n in result.notes], "",
+        lines = ["# 줄글 → 보고서 판단", "", f"- 방식: {label}", f"- 핵심 요약: {summary.replace(chr(10), ' / ')}", *[f"- {n}" for n in result.notes], "",
                  converted.report()]
         report.write_text("\n".join(lines), encoding="utf-8")
         typer.echo(f"  리포트: {report}")

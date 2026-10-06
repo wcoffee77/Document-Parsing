@@ -629,3 +629,39 @@ def test_audit_per_clause_listing_flags_null_clauses_but_skips_filler_clauses():
     texts = [l.text for l in rw.lines]
     assert "정산기간·총 근로시간 결정 필요" in texts and len(texts) == 3     # 군말 절(1-1)은 보강하지 않는다
     assert sum("내용 누락 보강" in n for n in notes) == 1
+
+
+# ── 여러 번 실행·핵심 요약(draft --runs) ─────────────────────────────────────
+
+def test_draft_best_picks_the_run_with_fewest_remaining_problems(monkeypatch):
+    from doc2report import drafting
+    from doc2report.drafting import DraftResult, draft_best
+
+    def fake(notes, mode="rewrite"):
+        return DraftResult(text="제목\n", structure=None, notes=notes, used_llm=True, mode=mode)
+
+    runs = iter([fake(["LLM 다듬기 응답 형식 오류 1회: x", "줄임말 남음(고치지 못함) ['몰아일']: 가"]),
+                 fake(["줄임말 남음(고치지 못함) ['몰아일']: 가"]),
+                 fake(["최종 점검에서 남음: a", "최종 점검에서 남음: b"])])
+    monkeypatch.setattr(drafting, "draft", lambda *a, **k: next(runs))
+    best = draft_best("x", runs=3)
+    assert best.notes[0].startswith("줄임말 남음") and "2번째 결과 채택" in best.notes[-1]
+
+
+def test_draft_best_stops_early_when_clean_and_ignores_runs_for_place_mode():
+    from doc2report.drafting import draft_best, problem_count
+
+    ask, calls = _answer(ANSWER1)
+    best = draft_best(TEXT1, runs=3, ask=ask, year=2026)
+    if problem_count(best) == 0:
+        assert len(calls) == 1
+
+
+def test_brief_has_no_source_text_and_counts_problems():
+    from doc2report.drafting import brief
+
+    ask, _ = _answer(ANSWER1)
+    result = draft(TEXT1, ask, year=2026)
+    text = brief(result, TEXT1, 2026)
+    assert "분량" in text and "수치왜곡 0" in text and "남은 문제" in text
+    assert "채용 목표" not in text

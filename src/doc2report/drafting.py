@@ -1113,3 +1113,68 @@ def draft(text: str, ask: Ask | None = None, mode: str = "rewrite", year: int | 
     if mode == "place":
         return place(text, ask)
     return rewrite(text, ask, year, holdout)
+
+
+# 남은 문제로 세는 판단 노트의 머리말(원문 글자 없이 개수만 셀 수 있게)
+_LEFTOVER_PREFIXES = ("최종 점검에서 남음", "줄임말 남음", "이해 불가 의심", "내용 누락 의심", "수치 누락(")
+
+
+def problem_count(result: DraftResult) -> int:
+    """후보 비교용 점수 — 형식 오류 + 원문 대체 + 끝내 못 고친 문제 수(작을수록 좋다). 배치·규칙 기본 구조는 크게 감점."""
+    notes = result.notes
+    score = sum(1 for n in notes if "형식 오류" in n)
+    score += sum(1 for n in notes if "원문 문장으로 대체" in n)
+    score += sum(1 for n in notes if n.startswith(_LEFTOVER_PREFIXES))
+    if result.mode != "rewrite":
+        score += 1000
+    return score
+
+
+def brief(result: DraftResult, source: str, year: int | None = None) -> str:
+    """한 줄 요약 블록(원문 글자 없이 개수·유형만) — `draft` 명령 끝에 출력해 문서를 읽지 않고도 상태를 판단하게 한다.
+
+    정답 글이 없는 실사용용이라 정답 대비 항목(핵심수치 보존 등)은 없다. 그건 tools/eval_drafting.py."""
+    import datetime
+
+    from .transform.factcheck import check, load_rules
+    from .transform.report_style import lint
+
+    year = year or datetime.date.today().year
+    rules = load_rules()
+    body = source.split("\n", 1)[1] if "\n" in source else source
+    chars = lambda t: len(re.sub(r"\s", "", t))  # noqa: E731
+    lines = [l for l in result.text.splitlines() if l.strip()]
+    contents = [re.sub(r"^\s*(\d{1,2}\.|[□\-∙·→※*①-⑳])\s*", "", l) for l in lines[1:]]
+    hard = sum(1 for t in contents if any(i.hard for i in lint(t)))
+    invented = {p for t in contents for p in check(t, body, rules, year)
+                if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))}
+    notes = result.notes
+    count = lambda *keys: sum(1 for n in notes if n.startswith(keys))  # noqa: E731
+    table = "표" if any("\t" in l for l in lines) else ("①②" if any(l.lstrip().startswith("①") for l in lines) else "없음")
+    numbered = sum(1 for l in lines if re.match(r"\s*\d+\.\s", l))
+    ratio = f"{chars(chr(10).join(lines)) / max(chars(body), 1):.0%}"
+    return (f"분량 {ratio} | 서술체 {hard} | 수치왜곡 {len(invented)}"
+            f" | 형식오류 {sum(1 for n in notes if '형식 오류' in n)}회"
+            f" | 원문대체 {sum(1 for n in notes if '원문 문장으로 대체' in n)}"
+            f" | 수치누락 {count('수치 누락(')} | 줄임말 남음 {count('줄임말 남음')}"
+            f" | 이해불가 남음 {count('이해 불가 의심')} | 내용 누락 의심 {count('내용 누락 의심')}"
+            f"\n방식 {result.mode} | 대안표 {table} | 번호절 {numbered}"
+            f" | 검증회차 {sum(1 for n in notes if '검증: 사실 문제' in n)} | 남은 문제 {problem_count(result)}")
+
+
+def draft_best(text: str, runs: int = 1, ask: Ask | None = None, mode: str = "rewrite", year: int | None = None,
+               holdout: set[int] | None = None) -> DraftResult:
+    """같은 입력을 runs번 돌려 남은 문제(`problem_count`)가 가장 적은 결과를 쓴다(같으면 먼저 나온 것).
+
+    LLM은 온도 0이어도 실행마다 결과가 달라진다(2026-10-07 실측: 같은 입력으로 구조·칸이 갈림). 채택하지 않은 후보의
+    점수는 notes에 남긴다 — 후보를 조용히 버리지 않는다."""
+    results: list[DraftResult] = []
+    for _ in range(max(1, runs) if mode == "rewrite" else 1):
+        results.append(draft(text, ask, mode, year, holdout))
+        if problem_count(results[-1]) == 0:
+            break  # 더 돌려 봐야 나아질 게 없다
+    best = min(results, key=problem_count)  # min은 동점이면 먼저 나온 것
+    if len(results) > 1:
+        scores = ", ".join(f"{i}번째 {problem_count(r) if problem_count(r) < 1000 else '배치·기본 구조'}" for i, r in enumerate(results, 1))
+        best.notes.append(f"여러 번 실행({len(results)}회) 후 {results.index(best) + 1}번째 결과 채택 — 남은 문제 점수: {scores}")
+    return best
