@@ -243,10 +243,14 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
   추진 계획 → □ 대상 → □ 일정 → □ 세부 내용 → □ 소요 예산
   이슈·건의 → □ 배경 → □ 검토안(①②③) → □ 건의 사항
 - 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
+  표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열), 그 아래 행이 장점·단점·비용 등(항목이 행)입니다. 행과 열을 바꾸지 않습니다.
   표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 씁니다. 절은 빼지 않되, 한 줄은 조건 하나를
   공백 빼고 32자 이내의 짧은 명사형으로 씁니다(X '- 식당 좌석을 늘리려면 바닥 배관을 옮겨야 하므로 공사 기간이 길어지고 비용도 약 2억원 정도 들 것으로 예상됨'
   O '- 배관 이설로 공사비 약 2억원 발생').
-- 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 쓰고 그 아래 "□".
+- 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 씁니다.
+- "1." 아래 "□"는 묶음이 둘 이상이거나, "□" 자체가 내용을 담은 핵심 문장일 때만 씁니다
+  (O '□ 구성원 설문 결과(120명), 근무 장소 관련 불만 高'). 내용 없는 항목명 "□" 하나만 두지 않습니다
+  (X '1. 배경' 아래 '□ 현황' 하나 → O '1. 배경 및 현황' 바로 아래 '-' 항목들).
 - 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
   "→"(목표·결과), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
 - 특정 대안에만 해당하는 내용(조건·비용·일정)은 그 대안의 표 칸이나 하위 항목(-, ∙)에 넣습니다.
@@ -746,6 +750,8 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         notes += [f"최종 점검에서 남음: {item}" for item in leftover]
     except Exception:  # noqa: BLE001
         pass
+    notes += orient_tables(result.lines)
+    notes += lift_lone_groups(result.lines)
     tidy_labels(result.lines)
     body = rewrite_text(result)
     notes += _coverage_notes(result, sentences, body)
@@ -840,17 +846,55 @@ def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int 
 
     notes: list[str] = []
     for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite)).items():
-        holders = [l for l in rewrite.lines if i in l.src and not l.is_table]
+        holders = _number_holders(rewrite, i, sentences[i - 1])
         if not holders:
             continue
+        if _repair_number_line(rewrite, holders, i, numbers, sentences, ask, year, notes):
+            continue
+        # 2026-10-08 사용자 실측: '응답자 312명'이 끝내 빠졌다 — 빠져서는 안 되는 수치. LLM 수리가 실패하면 원문의 '낱말 + 수치'를
+        # 그 문장을 쓴 줄 끝 괄호로 붙인다(원문 글자 그대로라 사실이 바뀌지 않는다).
         line = holders[0]
+        phrases = [_number_phrase(sentences[i - 1], n) for n in numbers]
+        appended = f"{line.text} ({', '.join(phrases)})"
+        if not check(appended, " ".join(sentences[j - 1] for j in line.src), year=year):
+            notes.append(f"수치 누락 원문 어구로 보강: '{line.text[:25]}' 끝에 ({', '.join(phrases)})")
+            line.text = appended
+    return notes
+
+
+def _number_holders(rewrite: Rewrite, i: int, sentence: str) -> list[Line]:
+    """문장 i를 쓴 줄(표 아님) — 그 문장의 다른 숫자를 이미 담은 줄, 긴 줄 순. 내용 없는 항목명 줄('□ 현황')은 맨 뒤."""
+    wanted = set(_NUMBER.findall(sentence))
+    holders = [l for l in rewrite.lines if i in l.src and not l.is_table]
+    return sorted(holders, key=lambda l: (_is_bare_label(l.text), -len(wanted & set(_NUMBER.findall(l.text))), -len(l.text)))
+
+
+def _number_phrase(sentence: str, number: str) -> str:
+    """원문에서 수치와 그 앞 낱말('응답자 312명') — 앞 낱말이 조사로 끝나거나 길면 수치만."""
+    digits = ",?".join(re.escape(c) for c in number)       # 원문은 5,200처럼 쉼표가 있을 수 있다
+    match = re.search(r"(?:([가-힣A-Za-z&]{1,8})\s+)?(" + digits + r"(?:[가-힣%]{0,2})(?:\s?원)?)", sentence)
+    if not match:
+        return number
+    word = match.group(1) or ""
+    if word and re.search(r"(?:은|는|이|가|을|를|에|의|로|와|과|도|만)$", word) and len(word) > 2:
+        word = ""
+    value = re.sub(r"\s+원$", "원", match.group(2))
+    return f"{word} {value}".strip()
+
+
+def _repair_number_line(rewrite: Rewrite, holders: list[Line], i: int, numbers: list[str], sentences: list[str],
+                        ask: Ask, year: int | None, notes: list[str]) -> bool:
+    from .transform.factcheck import check, missing_numbers
+    from .transform.report_style import hard_issues
+
+    for line in holders[:2]:
         source = " ".join(sentences[j - 1] for j in line.src)
         for _ in range(LINE_REPAIR_TRIES):
             user = f"근거 원문:\n{source}\n\n고칠 줄: {line.text}\n빠진 숫자: {', '.join(numbers)}"
             try:
                 answer = ask(NUMBER_REPAIR_SYSTEM, user)
             except Exception:  # noqa: BLE001
-                return notes
+                return False
             first = (answer or "").strip().splitlines()[0] if (answer or "").strip() else ""
             fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", first).strip().strip('"\'')
             if not fixed:
@@ -862,8 +906,8 @@ def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int 
                 continue
             notes.append(f"수치 누락 줄 단위 보강: '{line.text[:25]}' → '{fixed[:40]}'")
             line.text = fixed
-            break
-    return notes
+            return True
+    return False
 
 
 AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 원문 문장을 절로 나눈 목록([문장-절] 번호)과, 줄 번호가 붙은 보고서가 주어집니다.
@@ -1178,3 +1222,59 @@ def draft_best(text: str, runs: int = 1, ask: Ask | None = None, mode: str = "re
         scores = ", ".join(f"{i}번째 {problem_count(r) if problem_count(r) < 1000 else '배치·기본 구조'}" for i, r in enumerate(results, 1))
         best.notes.append(f"여러 번 실행({len(results)}회) 후 {results.index(best) + 1}번째 결과 채택 — 남은 문제 점수: {scores}")
     return best
+
+
+# ── 구조 보정 (2026-10-08 사용자) ──────────────────────────────────────────────
+
+_ATTRIBUTE_HEAD = re.compile(r"장점|단점|효과|기대|이점|고려|조건|한계|제약|비용|리스크|위험|난점|내용|요건|일정|개요|방식|시행|기간")
+_OPTION_HEAD = re.compile(r"안\)|안$|^\(?\d안|첫째|둘째|셋째|[①-⑳]|^[A-C]안")
+
+
+def orient_tables(lines: list[Line]) -> list[str]:
+    """대안 비교 표는 대안이 열, 항목(장점·단점·비용)이 행이다. LLM이 뒤집어 쓰면(첫 행이 장점·단점…, 첫 열이 1안·2안) 행과 열을
+    바꾼다 — 단점 칸이 좁은 열에 몰려 표 균형이 깨졌다(2026-10-08 사용자)."""
+    notes: list[str] = []
+    for line in lines:
+        rows = line.rows
+        if not rows or len(rows) < 2 or len({len(r) for r in rows}) != 1 or len(rows[0]) < 3:
+            continue
+        head = rows[0][1:]
+        first_col = [r[0] for r in rows[1:]]
+        if (sum(1 for c in head if _ATTRIBUTE_HEAD.search(c)) >= 2
+                and sum(1 for c in first_col if _OPTION_HEAD.search(c.strip())) >= 2
+                and not any(_ATTRIBUTE_HEAD.search(c) for c in first_col)):
+            line.rows = [list(col) for col in zip(*rows)]
+            notes.append("구조 보정: 대안 비교 표의 행·열을 바꿈(대안이 열, 장점·단점 등이 행)")
+    return notes
+
+
+def _is_bare_label(text: str) -> bool:
+    """내용 없는 항목명('현황', '단계적 추진 계획') — 숫자·쌍점·쉼표 없고 공백 빼고 12자 이하, 문장 끝 서술(高·필요 등) 없음."""
+    body = re.sub(r"\s", "", text)
+    return (0 < len(body) <= 12 and not re.search(r"[\d:：,，()（）]", body)
+            and not re.search(r"(?:高|低|中|可|必|필요|예정|추진|확보|완료|증가|감소|발생|부족)$", body))
+
+
+def lift_lone_groups(lines: list[Line]) -> list[str]:
+    """번호 절(1.) 아래 □가 하나뿐이고 그 □가 내용 없는 항목명이면 □를 빼고 절 제목에 합친다(2026-10-08 사용자 원칙:
+    '1. 배경 / □ 현황 / - …' → '1. 배경 및 현황 / - …'). □가 핵심 문장이거나 둘 이상이면 그대로 둔다."""
+    notes: list[str] = []
+    starts = [k for k, l in enumerate(lines) if _SECTION_MARK.match(l.m)]
+    for at in reversed(starts):
+        end = next((k for k in range(at + 1, len(lines)) if _SECTION_MARK.match(lines[k].m)), len(lines))
+        boxes = [k for k in range(at + 1, end) if lines[k].m == "□"]
+        if len(boxes) != 1:
+            continue
+        box = lines[boxes[0]]
+        has_children = any(lines[k].m not in ("□", "표") for k in range(boxes[0] + 1, end))
+        if not has_children or not _is_bare_label(box.text):
+            continue
+        section = lines[at]
+        label, heading = box.text.strip(), section.text.strip()
+        if label.replace(" ", "") not in heading.replace(" ", ""):
+            joined = f"{heading} 및 {label}" if len(label.replace(" ", "")) <= 4 else f"{heading} ({label})"
+            section.text = joined
+        section.src = sorted(set(section.src) | set(box.src))
+        del lines[boxes[0]]
+        notes.append(f"구조 보정: '{heading}' 절 아래 하나뿐인 항목명 □ '{label}'를 빼고 절 제목을 '{section.text}'로")
+    return notes

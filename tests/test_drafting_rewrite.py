@@ -313,7 +313,8 @@ def test_repair_numbers_rejects_invented_numbers_and_keeps_line():
     sents = ["작년 5,200만 원보다 500만 원 늘었습니다"]
     rw = Rewrite("t", [Line("-", "500만원 증가", [1])], [])
     _repair_numbers(rw, sents, lambda *_: "작년 5,300만원 대비 500만원 증가", 2026)
-    assert rw.lines[0].text == "500만원 증가"
+    # LLM이 만든 5,300은 채택하지 않고, 원문 어구 그대로 괄호로 붙인다(2026-10-08: 빠져서는 안 되는 수치)
+    assert "5,300" not in rw.lines[0].text and rw.lines[0].text == "500만원 증가 (작년 5,200만원)"
 
 
 def test_review_flags_numeric_sentence_sent_to_dropped():
@@ -665,3 +666,49 @@ def test_brief_has_no_source_text_and_counts_problems():
     text = brief(result, TEXT1, 2026)
     assert "분량" in text and "수치왜곡 0" in text and "남은 문제" in text
     assert "채용 목표" not in text
+
+
+# ── 구조 보정 (2026-10-08 사용자: 단독 □ 항목명, 표 행·열, 312명 누락) ─────────────────
+
+def test_lone_bare_box_under_section_is_lifted_into_heading():
+    from doc2report.drafting import Line, lift_lone_groups
+
+    lines = [Line("1.", "배경", [1]), Line("□", "현황", [1, 2]), Line("-", "설문 결과 불만 高", [1]),
+             Line("-", "출퇴근 시간 자율화(58%) 희망", [2]),
+             Line("1.", "추진 방향", [9]), Line("□", "단계적 추진 계획", [9]), Line("-", "1안 우선 시행", [9]),
+             Line("1.", "검토 방안", [4]), Line("표", "", [5], [["구분", "(1안)", "(2안)"], ["장점", "a", "b"]])]
+    notes = lift_lone_groups(lines)
+    marks = [(l.m, l.text) for l in lines if not l.is_table]
+    assert ("1.", "배경 및 현황") in marks and ("1.", "추진 방향 (단계적 추진 계획)") in marks
+    assert not any(m == "□" for m, _ in marks) and len(notes) == 2
+    assert lines[0].src == [1, 2]
+
+
+def test_meaningful_or_plural_boxes_are_kept():
+    from doc2report.drafting import Line, lift_lone_groups
+
+    one = [Line("1.", "배경", [1]), Line("□", "R&D 조직 설문 결과(312명), 근무시간 경직성 관련 불만 高", [1, 2]),
+           Line("-", "출퇴근 시간 자율화(58%) 희망", [2])]
+    two = [Line("1.", "배경", [1]), Line("□", "현황", [1]), Line("-", "가", [1]), Line("□", "문제점", [2]), Line("-", "나", [2])]
+    assert lift_lone_groups(one) == [] and len(one) == 3
+    assert lift_lone_groups(two) == [] and len(two) == 5
+
+
+def test_transposed_alternative_table_is_flipped():
+    from doc2report.drafting import Line, orient_tables
+
+    line = Line("표", "", [5, 6], [["구분", "장점", "단점"], ["(1안) 선택폭 확대", "즉시 시행 可", "효과 제한적"],
+                                   ["(2안) 선택적 근로시간제", "R&D 특성 적합", "서면 합의 필요"]])
+    assert orient_tables([line])
+    assert line.rows[0] == ["구분", "(1안) 선택폭 확대", "(2안) 선택적 근로시간제"]
+    assert line.rows[2][0] == "단점"
+    assert orient_tables([line]) == []          # 이미 맞는 방향이면 그대로
+
+
+def test_missing_respondent_count_is_appended_when_llm_repair_fails():
+    from doc2report.drafting import Line, Rewrite, _repair_numbers, split_sentences
+
+    _, sentences = split_sentences(TEXT2)
+    rw = Rewrite("t", [Line("1.", "배경", [1, 2]), Line("-", "출퇴근 시간 자율화(58%), 재택근무 확대(24%) 희망", [2])], [])
+    notes = _repair_numbers(rw, sentences, lambda s, u: "", 2026)
+    assert "응답자 312명" in rw.lines[1].text and any("원문 어구로 보강" in n for n in notes)
