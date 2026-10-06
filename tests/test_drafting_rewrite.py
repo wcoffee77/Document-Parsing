@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from doc2report.drafting import draft, parse_rewrite, rewrite_text, tidy_labels
+from doc2report.drafting import AUDIT_SYSTEM
 from doc2report.transform.factcheck import check, missing_numbers
 
 SAMPLES = Path(__file__).resolve().parents[1] / "samples" / "drafting"
@@ -36,6 +37,8 @@ def _answer(data):
     calls = []
 
     def ask(_system, user):
+        if _system == AUDIT_SYSTEM:
+            return '{"missing":[]}'
         calls.append(user)
         return json.dumps(data, ensure_ascii=False)
     return ask, calls
@@ -118,6 +121,8 @@ def test_invented_fact_is_retried_then_replaced_by_the_original_sentence():
     calls = []
 
     def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[]}'
         calls.append((system, user))
         if "고칠 줄:" in user:
             return "설계 : 14명 中 9명 확보"          # 줄 단위 다시 쓰기에서도 끝내 틀리게 답함
@@ -213,6 +218,8 @@ def test_format_error_does_not_use_up_the_revision_chance():
     calls = []
 
     def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[]}'
         calls.append(user)
         return next(replies)
 
@@ -296,3 +303,31 @@ def test_review_flags_numeric_sentence_sent_to_dropped():
     rw = Rewrite("t", [Line("-", "기타", [2])], [1])
     _, style = review(rw, sents, "t", 2026)
     assert any("dropped로 보냄" in s for s in style)
+
+
+def test_audit_adds_missing_information_as_a_child_line():
+    from doc2report.drafting import Line, Rewrite, _audit_content
+
+    sents = ["설문에서 근무시간 경직성 불만이 높게 나왔습니다", "서면 합의가 필요하고 정산기간을 정해야 합니다"]
+    rw = Rewrite("t", [Line("□", "근무시간 불만 高", [1]), Line("-", "서면 합의 필요", [2])], [])
+
+    def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[{"sent":2,"info":"정산기간 결정"}]}'
+        return "정산기간 결정 필요"
+
+    notes = _audit_content(rw, sents, ask, 2026)
+    assert [l.text for l in rw.lines] == ["근무시간 불만 高", "서면 합의 필요", "정산기간 결정 필요"]
+    assert rw.lines[2].m == "∙" and rw.lines[2].src == [2]
+    assert any("보강" in n for n in notes)
+
+
+def test_audit_rejects_unfaithful_repair_and_survives_bad_answers():
+    from doc2report.drafting import Line, Rewrite, _audit_content
+
+    sents = ["비용이 약 1억 2천만 원 들 것으로 보입니다"]
+    rw = Rewrite("t", [Line("-", "비용 발생", [1])], [])
+    notes = _audit_content(rw, sents, lambda s, u: '{"missing":[{"sent":1,"info":"금액"}]}' if s == AUDIT_SYSTEM else "비용 2억원", 2026)
+    assert len(rw.lines) == 1 and any("보강 실패" in n for n in notes)
+    rw2 = Rewrite("t", [Line("-", "비용 발생", [1])], [])
+    assert any("건너뜀" in n for n in _audit_content(rw2, sents, lambda s, u: "아님", 2026))

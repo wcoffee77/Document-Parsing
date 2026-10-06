@@ -227,6 +227,9 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
    - 문장을 src로 쓰면 그 문장의 숫자(비교 기준값·작년 수치·기준표 비율 포함)를 줄에 모두 남깁니다.
      합계·내역이 함께 있으면 둘 다 씁니다(예: 합계 5,700만원 (코칭 4,500 + 워크숍 1,200), 작년 대비 +500).
      숫자가 든 문장을 dropped로 보내 숫자를 피하지 않습니다. dropped는 말투·소감·중복·부연 문장에만 씁니다.
+   - 문장의 핵심 정보(주장·이유·조건·대상)는 줄여 쓰되 하나도 빠뜨리지 않습니다(예: 설문에서 '불만이 높다'는 배경, '서면 합의·정산기간 결정이 필요' 같은 조건).
+   - 특정 대안에만 해당하는 내용(조건·비용·일정)은 그 대안 줄의 하위 항목(-, ∙)이나 표 칸에 넣고, 대안과 같은 단계에 따로 늘어놓지 않습니다.
+   - '빨라야 ~가능'(가능한 가장 이른 시점)과 '~에 도입 추진'(저자의 계획)은 다른 사실입니다. 섞지 말고 각각 씁니다.
 3. 줄마다 src에 그 줄의 근거 원문 문장 번호를 모두 적습니다. 근거 없는 줄은 쓰지 않습니다.
 4. 보고에 필요 없는 문장(말투, 개인 소감, 중복, 자잘한 부연)은 쓰지 않고 dropped에 번호를 적습니다.
    모든 문장 번호는 어느 줄의 src나 dropped에 한 번 이상 나와야 합니다.
@@ -638,6 +641,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     notes += _restore_originals(result, facts, sentences, title, year)
     notes += _apply_style_fix(result, sentences, year)
     notes += _repair_numbers(result, sentences, ask, year)
+    notes += _audit_content(result, sentences, ask, year)
     notes += _style_residue(result)
     tidy_labels(result.lines)
     body = rewrite_text(result)
@@ -736,6 +740,64 @@ def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int 
             notes.append(f"수치 누락 줄 단위 보강: '{line.text[:25]}' → '{fixed[:40]}'")
             line.text = fixed
             break
+    return notes
+
+
+AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 번호 붙은 원문 문장과 보고서가 주어집니다.
+각 원문 문장의 핵심 정보(주장·이유·조건·대상·시점)가 보고서에 들어 있는지 확인하세요.
+줄여 쓴 것, 표기가 바뀐 것, 말투가 바뀐 것은 빠진 것이 아닙니다. 의미 있는 정보가 통째로 없을 때만 빠진 것입니다.
+출력은 JSON 하나뿐입니다: {"missing":[{"sent":문장번호,"info":"빠진 내용을 원문 말로 15자 안팎"}]}. 빠진 것이 없으면 {"missing":[]}."""
+
+CONTENT_REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서에서 근거 원문의 일부 정보가 빠졌습니다.
+빠진 정보만 담은 보고서 한 줄을 쓰세요(명사나 한자 약어로 끝, 마침표 없음, 40자 이내).
+원문에 없는 숫자·날짜·평가는 넣지 않고, 가능성은 가능성으로(수 있음), 범위 표현(이상·이하)은 그대로 옮깁니다.
+출력은 그 한 줄뿐입니다(말머리·설명·따옴표 없이)."""
+
+_CHILD_MARK = {"□": "-", "-": "∙", "∙": "∙", "①": "-", "→": "∙"}
+MAX_AUDIT_ITEMS = 6
+
+
+def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int | None) -> list[str]:
+    """LLM 검수: 인용한 문장의 핵심 정보가 보고서에서 통째로 빠졌는지 보고, 빠진 정보는 그 줄 아래 하위 항목으로 보강한다.
+    사실·문체 검증을 통과한 줄만 넣는다. 어떤 실패도 조용히 건너뛴다(--report에 남기고 원래 줄을 유지)."""
+    from .transform.factcheck import check
+    from .transform.report_style import hard_issues
+
+    notes: list[str] = []
+    cited = {i for l in rewrite.lines for i in l.src}
+    if not cited:
+        return notes
+    shown = "\n".join(f"[{i}] {sentences[i - 1]}" for i in sorted(cited) if 1 <= i <= len(sentences))
+    body = "\n".join(f"{l.m} {l.content()}" if not l.is_table else f"{l.m} " + " / ".join(" ".join(r) for r in (l.rows or []))
+                     for l in rewrite.lines)
+    try:
+        answer = ask(AUDIT_SYSTEM, f"원문 문장:\n{shown}\n\n보고서:\n{body}")
+        data = json.loads(answer[answer.find("{"):answer.rfind("}") + 1])
+        items = [(int(m["sent"]), str(m["info"]).strip()) for m in data.get("missing") or []]
+    except Exception as exc:  # noqa: BLE001
+        notes.append(f"내용 검수 건너뜀({type(exc).__name__})")
+        return notes
+    added = 0
+    for sent, info in items[:MAX_AUDIT_ITEMS]:
+        if sent not in cited or not info or not 1 <= sent <= len(sentences):
+            continue
+        holders = [k for k, l in enumerate(rewrite.lines) if sent in l.src]
+        if not holders:
+            continue
+        source = sentences[sent - 1]
+        try:
+            reply = ask(CONTENT_REPAIR_SYSTEM, f"근거 원문:\n{source}\n\n빠진 정보: {info}")
+        except Exception:  # noqa: BLE001
+            return notes
+        first = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
+        fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", first).strip().strip('"\'')
+        if not fixed or check(fixed, source, year=year) or hard_issues(fixed):
+            notes.append(f"내용 누락 의심(보강 실패): 문장 [{sent}] — {info}")
+            continue
+        at = holders[-1]
+        rewrite.lines.insert(at + 1, Line(_CHILD_MARK.get(rewrite.lines[at].m, "-"), fixed, [sent]))
+        added += 1
+        notes.append(f"내용 누락 보강: 문장 [{sent}] — {info} → '{fixed[:30]}'")
     return notes
 
 

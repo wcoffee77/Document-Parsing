@@ -45,10 +45,12 @@ def _brief(number: int, result, scored: dict) -> str:
     dropped = [m.group(1) for n in notes for m in [re.match(r"생략한 원문 문장 \[(\d+)\]", n)] if m]
     gaps = [n.split("—")[0].replace("수치 누락(인용한 문장 ", "").replace(" 기준):", "").strip()
             for n in notes if n.startswith("수치 누락(")]
+    audit_ok = sum(1 for n in notes if n.startswith("내용 누락 보강"))
+    audit_bad = sum(1 for n in notes if n.startswith("내용 누락 의심"))
     diag = next((re.sub(r"^.*?\(", "(", n)[:70] for n in notes if "형식 오류" in n), "")
     return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | 핵심수치보존 {scored['numbers']}" + ("" if scored["missing"] == "-" else f" 빠진 {scored['missing']}") + " | "
             f"형식오류 {fmt}회 | 줄단위해결 {fixed} | 원문대체 {len(replaced)}({'·'.join(kinds) or '-'}) | 규칙교정 {ruled}"
-            f"\n     생략문장 {','.join(dropped) or '없음'} | 수치누락 {'; '.join(gaps) or '없음'}"
+            f"\n     생략문장 {','.join(dropped) or '없음'} | 수치누락 {'; '.join(gaps) or '없음'} | 내용보강 {audit_ok}(실패 {audit_bad})"
             + (f"\n     형식오류 진단 {diag}" if diag else ""))
 
 
