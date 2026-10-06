@@ -93,7 +93,16 @@ def summary(result: Path, number: int) -> dict:
     answer = [l for l in next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8").splitlines()[2:] if l.strip()]
     kept = _numbers("\n".join(answer)) & _numbers(body_src)
     got = len(kept & _numbers("\n".join(mine)))
-    return {"ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented),
+    missing = sorted(kept - _numbers("\n".join(mine)), key=float)
+    from doc2report.drafting import split_sentences
+
+    sentences = split_sentences(source)[1]
+    where = []
+    for number in missing:
+        index = next((i for i, t in enumerate(sentences, 1)
+                      if number in _numbers(t)), 0)
+        where.append(f"{number}(원문 문장 {index})")
+    return {"missing": ", ".join(where) or "-", "ratio": f"{_chars(chr(10).join(mine)) / _chars(body_src):.0%}", "hard": hard, "invented": len(invented),
             "numbers": f"{got}/{len(kept)}"}
 
 
@@ -116,6 +125,8 @@ def score(result: Path, number: int) -> None:
                        if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))})
     print(f"  수치: 정답이 쓴 원문 수치 {len(kept)}개 중 결과에도 {len(kept & m_n)}개"
           f" / 원문과 다른 수치 {invented or '없음'}")
+    info = summary(result, number)
+    print(f"  핵심수치보존: {info['numbers']}" + ("" if info["missing"] == "-" else f" — 빠진 수치: {info['missing']}"))
     print(f"  문체(결과): {_style(_items(mine))}")
     print(f"  문체(정답): {_style(_items(answer))}")
     ah, mh = _heads(answer), _heads(mine)

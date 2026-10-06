@@ -43,7 +43,7 @@ def _brief(number: int, result, scored: dict) -> str:
     kinds = sorted({_kind(m.group(1)) for n in replaced for m in [re.search(r"개조식, (.*?)\): ", n)] if m})
     ruled = sum(1 for n in notes if n.startswith("규칙 교정"))
     diag = next((re.sub(r"^.*?\(", "(", n)[:70] for n in notes if "형식 오류" in n), "")
-    return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | 핵심수치보존 {scored['numbers']} | "
+    return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | 핵심수치보존 {scored['numbers']}" + ("" if scored["missing"] == "-" else f" 빠진 {scored['missing']}") + " | "
             f"형식오류 {fmt}회 | 줄단위해결 {fixed} | 원문대체 {len(replaced)}({'·'.join(kinds) or '-'}) | 규칙교정 {ruled}"
             + (f"\n     형식오류 진단 {diag}" if diag else ""))
 
