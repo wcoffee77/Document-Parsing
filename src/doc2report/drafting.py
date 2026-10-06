@@ -244,6 +244,10 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 - 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 쓰고 그 아래 "□".
 - 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
   "→"(목표·결과), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
+- 비교표라고 더 줄이지 않습니다. 표 칸(장점·단점 등)은 원문 문장의 조건·이유·한정 절을 하나도 빼지 않고 절마다 한 줄("- …", 줄바꿈 \\n)로 씁니다.
+  예) 단점 칸: "- 관련 법령상 노사 서면 합의 필요\\n- 운영 기준 기간·총량 사전 결정 필요\\n- 수당 산정 방식 변경에 따른 시스템 개편 비용 발생(약 2억원)\\n- 노조 협의 필요(빨라야 3분기 시행 可)".
+- 줄만 읽어도 맥락이 이해돼야 합니다. 누가·무엇을·왜가 사라진 조각 어구(근거 없이 "서면합의 필요"만, 뜻이 안 통하는 줄임말)로 줄이지 않습니다.
+  법적 근거·주체·대상·이유는 짧게라도 남기고, 줄이는 것은 군말·화자 표현·반복뿐입니다.
 - 사실 나열은 "항목명 : 값"으로 씁니다(채용 목표 : 총 40명 / 대 상 : 입사 10년차 이상 30명).
 - 대안이 2개면 표로 씁니다: {"m": "표", "rows": [["구분", "(1안) …", "(2안) …"], ["장점", "- …", "- …"], ["단점", "- …\\n- …", "- …"]], "src": [...]}.
   칸 안 여러 줄은 \\n으로 나눕니다. 대안이 3개 이상이면 ①②③ "안 : 비용·난점"으로 씁니다.
@@ -403,12 +407,29 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     missing = [i for i in range(1, len(sentences) + 1) if i not in used]
     if missing:
         style.append(f"문장 {missing}이(가) 어느 줄의 src에도, dropped에도 없음")
+    ratio = _report_ratio(rewrite, sentences)
+    if ratio is not None and ratio < _min_ratio():
+        style.append(f"보고서가 원문의 {ratio:.0%}로 과도하게 축약됨(기준 {_min_ratio():.0%} 이상) — 조건·이유·주체를 되살려 맥락을 알 수 있게 쓰고, 표 칸도 원문 절마다 한 줄로 모두 쓰세요")
     for i in sorted(set(rewrite.dropped)):
         if 1 <= i <= len(sentences) and re.search(r"\d", sentences[i - 1]) and i not in {j for l in rewrite.lines for j in l.src}:
             style.append(f"문장 [{i}]에 숫자가 있는데 dropped로 보냄 — 줄로 쓰고 숫자를 남기세요")
     for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
         style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 줄에 넣거나, 숫자를 뺄 거면 그 문장을 dropped로")
     return facts, style
+
+
+def _min_ratio() -> float:
+    from .transform.report_style import load_rules
+
+    return float(load_rules().limits.get("min_ratio", 0))
+
+
+def _report_ratio(rewrite: Rewrite, sentences: list[str]) -> float | None:
+    source = sum(len(re.sub(r"\s", "", t)) for t in sentences)
+    if not source:
+        return None
+    mine = sum(len(re.sub(r"\s", "", l.content())) for l in rewrite.lines)
+    return mine / source
 
 
 def _cited_lines(rewrite: Rewrite) -> list[tuple[list[int], str]]:
@@ -743,18 +764,22 @@ def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int 
     return notes
 
 
-AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 번호 붙은 원문 문장과 보고서가 주어집니다.
-각 원문 문장의 핵심 정보(주장·이유·조건·대상·시점)가 보고서에 들어 있는지 확인하세요.
-줄여 쓴 것, 표기가 바뀐 것, 말투가 바뀐 것은 빠진 것이 아닙니다. 의미 있는 정보가 통째로 없을 때만 빠진 것입니다.
-출력은 JSON 하나뿐입니다: {"missing":[{"sent":문장번호,"info":"빠진 내용을 원문 말로 15자 안팎"}]}. 빠진 것이 없으면 {"missing":[]}."""
+AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 번호 붙은 원문 문장과 보고서가 주어집니다. 두 가지를 확인하세요.
+1) 빠진 정보: 각 원문 문장의 모든 절(조건·이유·법적 근거·주체·대상·한정어·시점)이 보고서에 들어 있는가. 줄여 쓴 것, 표기·말투가 바뀐 것은 빠진 것이 아니다. 의미 있는 절이 통째로 없으면 빠진 것이다.
+2) 이해 불가: 원문을 보지 않고 보고서만 읽는 상급자가 맥락을 알 수 없는 줄(주체·대상·이유가 사라진 조각 어구, 너무 줄여 뜻이 불분명한 말).
+출력은 JSON 하나뿐: {"missing":[{"sent":문장번호,"info":"빠진 내용을 원문 말로 15자 안팎"}],"unclear":[{"line":보고서 줄 번호(1부터),"sent":근거 문장번호,"why":"왜 모르겠는지 10자 안팎"}]}. 없으면 빈 목록."""
 
 CONTENT_REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서에서 근거 원문의 일부 정보가 빠졌습니다.
 빠진 정보만 담은 보고서 한 줄을 쓰세요(명사나 한자 약어로 끝, 마침표 없음, 40자 이내).
 원문에 없는 숫자·날짜·평가는 넣지 않고, 가능성은 가능성으로(수 있음), 범위 표현(이상·이하)은 그대로 옮깁니다.
 출력은 그 한 줄뿐입니다(말머리·설명·따옴표 없이)."""
 
+CLARIFY_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서 한 줄이 너무 줄어 맥락을 알 수 없다고 검수에서 지적됐습니다.
+근거 원문의 사실만으로, 주체·대상·이유(법적 근거 포함)를 되살려 그 줄만 다시 쓰세요(명사나 한자 약어로 끝, 마침표 없음, 50자 이내).
+원문에 없는 숫자·날짜·평가는 넣지 않고, 가능성은 가능성으로, 범위 표현은 그대로 옮깁니다. 출력은 그 한 줄뿐입니다(말머리·설명·따옴표 없이)."""
+
 _CHILD_MARK = {"□": "-", "-": "∙", "∙": "∙", "①": "-", "→": "∙"}
-MAX_AUDIT_ITEMS = 6
+MAX_AUDIT_ITEMS = 12
 
 
 def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int | None) -> list[str]:
@@ -774,9 +799,29 @@ def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int |
         answer = ask(AUDIT_SYSTEM, f"원문 문장:\n{shown}\n\n보고서:\n{body}")
         data = json.loads(answer[answer.find("{"):answer.rfind("}") + 1])
         items = [(int(m["sent"]), str(m["info"]).strip()) for m in data.get("missing") or []]
+        unclear = [(int(m["line"]), int(m["sent"]), str(m.get("why") or "").strip()) for m in data.get("unclear") or []]
     except Exception as exc:  # noqa: BLE001
         notes.append(f"내용 검수 건너뜀({type(exc).__name__})")
         return notes
+    for number, sent, why in unclear[:MAX_AUDIT_ITEMS]:
+        if not 1 <= number <= len(rewrite.lines) or not 1 <= sent <= len(sentences):
+            continue
+        line = rewrite.lines[number - 1]
+        if line.is_table or sent not in line.src:
+            notes.append(f"이해 불가 의심(고치지 못함): {number}번째 줄 — {why}")
+            continue
+        source = sentences[sent - 1]
+        try:
+            reply = ask(CLARIFY_SYSTEM, f"근거 원문:\n{source}\n\n고칠 줄: {line.text}\n문제: {why}")
+        except Exception:  # noqa: BLE001
+            return notes
+        first = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
+        fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", first).strip().strip('"\'')
+        if not fixed or check(fixed, source, year=year) or hard_issues(fixed):
+            notes.append(f"이해 불가 의심(고치지 못함): {number}번째 줄 — {why}")
+            continue
+        notes.append(f"이해 불가 줄 풀어 씀: '{line.text[:20]}' → '{fixed[:40]}'")
+        line.text = fixed
     added = 0
     for sent, info in items[:MAX_AUDIT_ITEMS]:
         if sent not in cited or not info or not 1 <= sent <= len(sentences):

@@ -331,3 +331,27 @@ def test_audit_rejects_unfaithful_repair_and_survives_bad_answers():
     assert len(rw.lines) == 1 and any("보강 실패" in n for n in notes)
     rw2 = Rewrite("t", [Line("-", "비용 발생", [1])], [])
     assert any("건너뜀" in n for n in _audit_content(rw2, sents, lambda s, u: "아님", 2026))
+
+
+def test_review_flags_over_compressed_report():
+    from doc2report.drafting import Line, Rewrite, review
+
+    sents = ["근로기준법상 서면 합의가 필요하고 정산기간과 총 근로시간을 정해야 하며 급여 시스템 개편 비용이 들 것으로 보입니다"]
+    rw = Rewrite("t", [Line("-", "서면합의 필요", [1])], [])
+    _, style = review(rw, sents, "t", 2026)
+    assert any("과도하게 축약" in s for s in style)
+
+
+def test_audit_rewrites_unclear_line_with_subject_and_reason():
+    from doc2report.drafting import Line, Rewrite, _audit_content
+
+    sents = ["프로젝트 마감 전후로 몰아서 일하는 R&D 특성에 더 잘 맞습니다"]
+    rw = Rewrite("t", [Line("-", "몰아일 특성에 적합", [1])], [])
+
+    def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[],"unclear":[{"line":1,"sent":1,"why":"뜻 불분명"}]}'
+        return "프로젝트 마감 전후 집중 근무하는 R&D 특성에 적합"
+
+    notes = _audit_content(rw, sents, ask, 2026)
+    assert rw.lines[0].text.startswith("프로젝트 마감") and any("풀어 씀" in n for n in notes)
