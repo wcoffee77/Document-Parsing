@@ -88,7 +88,8 @@ def summary(result: Path, number: int) -> dict:
     mine = [l for l in result.read_text(encoding="utf-8").splitlines() if l.strip()]
     items = _items(mine)
     hard = sum(1 for t in items if any(i.hard for i in lint(t)))
-    invented = {p for line in mine for p in check(line, body_src, year=2026)
+    # "3. 추진 방향"의 절 번호 3은 원문의 숫자가 아니다(2026-10-07 실측: 건2 '원문에 없는 숫자 3'은 이 오탐이었다)
+    invented = {p for line in mine for p in check(re.sub(r"^\s*\d{1,2}\.\s+", "", line), body_src, year=2026)
                 if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))}
     answer = [l for l in next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8").splitlines()[2:] if l.strip()]
     kept = _numbers("\n".join(answer)) & _numbers(body_src)
@@ -121,7 +122,7 @@ def score(result: Path, number: int) -> None:
     src_n, a_n, m_n = _numbers(body_src), _numbers(a_text), _numbers(m_text)
     kept = (a_n & src_n)
     # 결과에만 있는 숫자: 표기 차이(1억 2천만 원 ↔ 1.2억원, 3천만 원 ↔ 3,000만원)는 사실 검증기와 같은 기준으로 같다고 본다
-    invented = sorted({p for line in mine for p in check(line, body_src, year=2026)
+    invented = sorted({p for line in mine for p in check(re.sub(r"^\s*\d{1,2}\.\s+", "", line), body_src, year=2026)
                        if any(k in p for k in ("숫자", "금액", "비율", "날짜", "요일"))})
     print(f"  수치: 정답이 쓴 원문 수치 {len(kept)}개 중 결과에도 {len(kept & m_n)}개"
           f" / 원문과 다른 수치 {invented or '없음'}")

@@ -54,6 +54,9 @@ class Rules:
     hedge_stopwords: list[str] = field(default_factory=list)
     hedge_predicates: dict[str, list[str]] = field(default_factory=dict)
     alternative_cues: list[str] = field(default_factory=list)
+    audit_skip_clause: list[str] = field(default_factory=list)
+    progress_line: list[str] = field(default_factory=list)
+    progress_source: list[str] = field(default_factory=list)
     blocked_terms: list[str] = field(default_factory=list)
     bound_source: list[str] = field(default_factory=list)
     bound_line: list[str] = field(default_factory=list)
@@ -129,6 +132,7 @@ def check(line: str, source: str, rules: Rules | None = None, year: int | None =
     problems += _check_polarity(text, src.text, rules)
     problems += _check_hedges(text, src.text, rules)
     problems += _check_bounds(text, src.text, rules)
+    problems += _check_progress(text, src.text, rules)
     problems += [f"원문에 없는 말 '{t}'(다른 뜻으로 읽힘)" for t in rules.blocked_terms if t in text and t not in src.text]
     return problems
 
@@ -348,3 +352,22 @@ def coined_words(line: str, source: str) -> list[str]:
                 if len(made) >= 3 and made not in flat and any(made in t for t in tokens) and made not in found:
                     found.append(made)
     return found
+
+
+def _check_progress(text: str, source: str, rules: Rules) -> list[str]:
+    """"협의 中"처럼 '지금 하고 있다'는 표현이 줄에 있는데, 원문에는 그 일이 진행 중이라는 말이 없으면 막는다(계획·예정을 진행으로 바꾸는 왜곡)."""
+    if not rules.progress_line:
+        return []
+    marks = "|".join(re.escape(m) for m in rules.progress_line)
+    cues = rules.progress_source
+    problems: list[str] = []
+    for match in re.finditer(rf"([가-힣]{{2,}})\s*(?:{marks})(?=\s*(?:[)\]\-,/·]|\d|$))", text):   # '발표과제 중 우수과제'(~ 가운데)는 제외
+        word = match.group(1)
+        stem = word[:2]
+        positions = [m.start() for m in re.finditer(re.escape(stem), source)]
+        if not positions:
+            continue            # 원문에 없는 낱말은 다른 점검의 몫
+        shown = any(any(cue in source[pos:pos + len(word) + 12] for cue in cues) for pos in positions)
+        if not shown:
+            problems.append(f"'{word} 中'은 진행 중이라는 뜻인데 원문에는 진행 중이라는 말이 없음(계획·예정일 수 있음)")
+    return problems

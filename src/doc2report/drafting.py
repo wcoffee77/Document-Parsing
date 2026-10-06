@@ -346,6 +346,7 @@ class Rewrite:
     title: str
     lines: list[Line]
     dropped: list[int]
+    warnings: list[str] = field(default_factory=list)
 
 
 # LLM이 □ 대신 자판으로 치기 쉬운 글자를 쓰는 경우(2026-10-07 실측 응답 'ㅁ 배경 …')
@@ -366,13 +367,19 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
     except json.JSONDecodeError as exc:
         raise ValueError(f"JSON 해석 실패({exc.msg})") from exc
     lines: list[Line] = []
+    warnings: list[str] = []
     for item in data.get("lines") or []:
         mark = str(item.get("m") or "").strip()
         mark = _MARK_ALIASES.get(mark, mark)
         if mark in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
             mark += "."
         if not _valid_mark(mark):
-            raise ValueError(f"알 수 없는 말머리 '{mark}'")
+            # 2026-10-07 실측(건4): m에 '대'처럼 말머리가 아닌 글자가 와 형식 오류가 났다. 줄 내용은 src로 검증되므로 "-"로 받고 알린다.
+            if item.get("text") or item.get("rows"):
+                warnings.append(f"알 수 없는 말머리 '{mark}'를 '-'로 보정")
+                mark = "-"
+            else:
+                raise ValueError(f"알 수 없는 말머리 '{mark}'")
         try:
             src = [int(i) for i in item.get("src") or []]
         except (TypeError, ValueError) as exc:
@@ -393,7 +400,7 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
     if not lines:
         raise ValueError("줄이 하나도 없음")
     dropped = [int(i) for i in data.get("dropped") or [] if str(i).isdigit()]
-    return Rewrite(str(data.get("title") or "").strip(), lines, dropped)
+    return Rewrite(str(data.get("title") or "").strip(), lines, dropped, warnings)
 
 
 def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
@@ -700,6 +707,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
             unavailable = True
             break
         facts, style = review(candidate, sentences, title, year)
+        notes += [f"형식 보정: {w}" for w in candidate.warnings]
         result = candidate
         if not facts and not style:
             break
@@ -859,12 +867,14 @@ def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int 
 
 
 AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 원문 문장을 절로 나눈 목록([문장-절] 번호)과, 줄 번호가 붙은 보고서가 주어집니다.
-1) 절마다 그 정보(이유·조건·법적 근거·주체·대상·시점·수치)가 보고서에 들어 있는지 판정하세요.
-   줄여 쓴 것·표기나 말투가 바뀐 것은 들어 있는 것입니다. 화자 표현·소감·'~라고 봅니다' 같은 군말 절은 빠져도 됩니다.
-   정보가 있는 절이 보고서 어디에도 없을 때만 빠진 것입니다.
+1) **모든 절**에 대해, 그 절의 정보(이유·조건·법적 근거·주체·대상·시점·수치)가 들어 있는 보고서 줄 번호를 답하세요. 어느 줄에도 없으면 null.
+   - 같은 낱말이 보고서에 있어도 그 절이 말하는 내용(필요·결정·발생·변경 등 서술)이 없으면 null입니다
+     (예: 절이 "총량을 정해야 한다"인데 보고서에는 "총량 기준"이라는 말만 있고 정해야 한다는 내용이 없으면 null).
+   - 줄여 쓴 것·표기나 말투가 바뀐 것은 들어 있는 것입니다(표는 칸 안 내용도 그 줄 번호로).
+   - 화자 표현·소감('~라고 봅니다')·"방안은 두 가지입니다" 같은 군말 절만 null이어도 됩니다.
 2) 원문을 보지 않고 보고서만 읽는 상급자가 뜻을 알 수 없는 줄(주체·대상·이유가 사라진 조각 어구, 사전에 없는 줄임말)을 찾으세요.
-출력은 JSON 하나뿐: {"missing":[{"clause":"7-2","info":"빠진 내용을 원문 말로 15자 안팎"}],
-"unclear":[{"line":보고서 줄 번호,"sent":근거 문장번호,"why":"왜 모르겠는지 10자 안팎"}]}. 없으면 빈 목록."""
+출력은 JSON 하나뿐: {"clauses":[{"id":"7-2","line":4},{"id":"7-3","line":null,"info":"빠진 내용을 원문 말로 15자 안팎"}],
+"unclear":[{"line":보고서 줄 번호,"sent":근거 문장번호,"why":"왜 모르겠는지 10자 안팎"}]}. unclear가 없으면 빈 목록."""
 
 CONTENT_REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서에서 근거 원문의 일부 정보가 빠졌습니다.
 빠진 정보만 담은 보고서 한 줄을 쓰세요(명사나 한자 약어로 끝, 마침표 없음, 40자 이내).
@@ -901,6 +911,12 @@ def split_clauses(sentence: str) -> list[str]:
         else:
             merged.append(carry)
     return merged or [sentence]
+
+
+def _load_rules():
+    from .transform.factcheck import load_rules
+
+    return load_rules()
 
 
 def _clause_sentence(item: dict) -> int:
@@ -1013,7 +1029,16 @@ def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int |
     try:
         answer = (ask_json or ask)(AUDIT_SYSTEM, f"원문 절:\n{shown}\n\n보고서:\n{body}")
         data = json.loads(answer[answer.find("{"):answer.rfind("}") + 1])
-        items = [(_clause_sentence(m), str(m["info"]).strip()) for m in data.get("missing") or []]
+        items = [(_clause_sentence(m), str(m.get("info") or "").strip()) for m in data.get("missing") or []]
+        clause_text = {f"{i}-{k}": c for i in sorted(cited) if 1 <= i <= len(sentences)
+                       for k, c in enumerate(split_clauses(sentences[i - 1]), 1)}
+        for m in data.get("clauses") or []:
+            line_no = m.get("line")
+            if not isinstance(line_no, int) or not 1 <= line_no <= len(rewrite.lines):
+                cid = str(m.get("id") or "").strip("[] ")
+                skip = _load_rules().audit_skip_clause
+                if cid in clause_text and not any(re.search(pat, clause_text[cid]) for pat in skip):
+                    items.append((_clause_sentence({"clause": cid}), str(m.get("info") or clause_text[cid])[:40]))
         unclear = [(int(m["line"]), int(m["sent"]), str(m.get("why") or "").strip()) for m in data.get("unclear") or []]
     except Exception as exc:  # noqa: BLE001
         notes.append(f"내용 검수 건너뜀({type(exc).__name__})")

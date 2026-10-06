@@ -149,7 +149,7 @@ def test_polite_endings_and_missing_sentences_ask_for_one_more_try():
 
 
 def test_bad_json_to_the_end_falls_back_to_rule_converted_sentences():
-    ask, calls = _answer({"lines": [{"m": "?", "text": "x", "src": [1]}]})
+    ask, calls = _answer({"lines": [{"m": "?", "src": [1]}]})
     result = draft(TEXT1, ask=ask, year=2026)
     assert result.mode == "fallback"                       # 배치 모드(원문 서술체 그대로)로 가지 않는다
     assert "9월 말 기준으로 올해 R&D 경력 채용 계획 40명" in result.text      # 원문 문장 + 규칙 교정
@@ -578,3 +578,54 @@ def test_final_leftover_problems_are_listed_in_the_report():
 
     result = draft(TEXT1, ask=ask, year=2026)
     assert any(n.startswith("최종 점검에서 남음:") for n in result.notes)
+
+
+def test_odd_mark_with_text_is_coerced_not_a_format_error():
+    from doc2report.drafting import parse_rewrite
+
+    rw = parse_rewrite('{"title":"t","lines":[{"m":"대","text":"대 상 : 30명","src":[1]}],"dropped":[]}', 1)
+    assert rw.lines[0].m == "-" and any("'대'" in w for w in rw.warnings)
+
+
+def test_score_tool_ignores_section_numbers():
+    import importlib.util
+    import sys as _sys
+    from pathlib import Path as _P
+
+    spec = importlib.util.spec_from_file_location("score_drafting", _P(__file__).parent.parent / "tools" / "score_drafting.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out = _P(__file__).parent / "_tmp_eval_2.txt"
+    out.write_text("1. 배경\n□ 응답자 312명 中 58%\n3. 추진 방향\n- 올해 내 시행\n", encoding="utf-8")
+    try:
+        assert mod.summary(out, 2)["invented"] == 0
+    finally:
+        out.unlink()
+
+
+def test_plan_turned_into_in_progress_is_caught_but_among_usage_is_not():
+    source = "둘째 방안은 법무 검토와 노조 협의를 거쳐 내년 상반기에 도입하는 단계적 추진이 좋다고 봅니다. 처우 협의 중이며 6명입니다."
+    assert any("협의 中" in p for p in check("내년 상반기 도입 (법무 검토 및 노조 협의 중)", source.split(". ")[0]))
+    assert not check("처우 협의 中 6명", source.split(". ")[1])
+    assert not [p for p in check("발표과제 중 우수과제는 반영 검토", "발표 과제 중 우수 과제는 반영을 검토하겠습니다") if "中" in p]
+
+
+def test_audit_per_clause_listing_flags_null_clauses_but_skips_filler_clauses():
+    from doc2report.drafting import CONTENT_REPAIR_SYSTEM, Line, Rewrite, _audit_content
+
+    sents = ["방안은 크게 두 가지로 생각해 볼 수 있습니다.",
+             "다만 근로기준법상 서면 합의가 필요하고 정산기간과 총 근로시간을 정해야 하며 급여 시스템 개편 비용이 듭니다"]
+    rw = Rewrite("t", [Line("-", "정산기간 기준 근로시간 정산", [1, 2]), Line("-", "서면 합의 필요", [2])], [])
+
+    def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            assert "[2-2]" in user                    # 모든 절을 번호 붙여 보낸다
+            return ('{"clauses":[{"id":"1-1","line":null},{"id":"2-1","line":2},'
+                    '{"id":"2-2","line":null,"info":"정산기간·총 근로시간 결정"}],"unclear":[]}')
+        assert system == CONTENT_REPAIR_SYSTEM
+        return "정산기간·총 근로시간 결정 필요"
+
+    notes = _audit_content(rw, sents, ask, 2026)
+    texts = [l.text for l in rw.lines]
+    assert "정산기간·총 근로시간 결정 필요" in texts and len(texts) == 3     # 군말 절(1-1)은 보강하지 않는다
+    assert sum("내용 누락 보강" in n for n in notes) == 1
