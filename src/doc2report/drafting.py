@@ -32,7 +32,7 @@ SYSTEM = f"""당신은 사내 정식보고서 편집자입니다. 번호가 붙�
     "groups": [
       {{"summary": "묶음의 요지(명사형 종결, {MAX_SUMMARY}자 이내, 원문에 있는 사실·숫자만. 묶음이 문장 하나면 빈 문자열)",
         "ids": [묶음에 넣을 문장 번호들],
-        "notes": [참고·단서·면책(\\"확인 필요\\", \\"~에 따라 달라질 수 있음\\" 등)로 따로 둘 문장 번호들]}}
+        "notes": [참고·단서·면책(\\"확인 필요\\", \\"~는 바뀔 수 있음\\" 등)로 따로 둘 문장 번호들]}}
     ]}}
  ]}}
 
@@ -212,61 +212,54 @@ def place(text: str, ask: Ask | None = None) -> DraftResult:
 # 문체 규칙은 정답 5건(docs/drafting-answers-analysis.md)에서 뽑았다.
 
 REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호가 붙은 원문 문장(줄글)을 상급자 보고용 개조식 보고서로 다시 씁니다.
-거친 문장을 보고서 말투로 매끄럽게 다듬고, 보고 흐름에 맞게 배열합니다. 내용은 원문 그대로여야 합니다.
+말투는 보고서답게 바꾸되, 정보는 줄이지 않습니다. 원문을 보지 않은 상급자가 보고서만 읽고 내용을 정확히 이해해야 합니다.
 
-[절대 규칙 — 사실]
-1. 원문에 없는 사실·숫자·날짜·기한·요일·이름·평가를 만들지 않습니다. 숫자는 값 그대로, 표기만 바꿀 수 있습니다
-   (10월 15일 → 10.15, 300만 원 → 300만원, 연 4억 원 → 4억원/년, 두 곳 → 2개, 둘째 주 → 2주차).
-2. 방향·정도·확정 여부를 바꾸지 않습니다(늘었다↔줄었다 금지, '검토 중'을 '확정'으로 바꾸기 금지).
-   - 가능성은 가능성으로: '어려워질 수 있다' → '달성 차질 우려' / '어려울 수 있음' (X '어려움'),
-     '환율에 따라 달라질 수 있다' → '환율에 따라 변동 가능' (X '상이').
-   - 수량 표현 그대로: '일부' → '일부'(X '다수'), '대부분' → '대부분'.
-   - 숫자 뒤 범위 표현 그대로: '3개월 넘게' → '3개월 이상'(X '3개월'), '3천만 원 이상' → '3,000만원 이상'.
-   - 원문의 단서(약, 정도, 예정, 검토, 가능성)는 남깁니다.
-   - 다른 뜻으로 읽히는 말을 새로 쓰지 않습니다: '매년' → '매년'·'연 단위'(X '연차' — 연차휴가로 읽힘).
-   - 문장을 src로 쓰면 그 문장의 숫자(비교 기준값·작년 수치·기준표 비율 포함)를 줄에 모두 남깁니다.
-     합계·내역이 함께 있으면 둘 다 씁니다(예: 합계 5,700만원 (코칭 4,500 + 워크숍 1,200), 작년 대비 +500).
-     숫자가 든 문장을 dropped로 보내 숫자를 피하지 않습니다. dropped는 말투·소감·중복·부연 문장에만 씁니다.
-   - 문장의 핵심 정보(주장·이유·조건·대상)는 줄여 쓰되 하나도 빠뜨리지 않습니다(예: 조사 결과가 가리키는 문제 배경, '사전 합의·기준 결정이 필요' 같은 조건).
-   - 특정 대안에만 해당하는 내용(조건·비용·일정)은 그 대안 줄의 하위 항목(-, ∙)이나 표 칸에 넣고, 대안과 같은 단계에 따로 늘어놓지 않습니다.
-   - '빨라야 ~가능'(가능한 가장 이른 시점)과 '~에 도입 추진'(저자의 계획)은 다른 사실입니다. 섞지 말고 각각 씁니다.
-3. 줄마다 src에 그 줄의 근거 원문 문장 번호를 모두 적습니다. 근거 없는 줄은 쓰지 않습니다.
-4. 보고에 필요 없는 문장(말투, 개인 소감, 중복, 자잘한 부연)은 쓰지 않고 dropped에 번호를 적습니다.
-   모든 문장 번호는 어느 줄의 src나 dropped에 한 번 이상 나와야 합니다.
+[절대 규칙 1 — 사실을 바꾸지 않는다]
+- 원문에 없는 사실·숫자·날짜·기한·요일·이름·평가를 만들지 않습니다. 숫자는 값 그대로, 표기만 바꿀 수 있습니다
+  (11월 3일 → 11.3, 800만 원 → 800만원, 연 2억 원 → 2억원/년, 세 곳 → 3개, 셋째 주 → 3주차).
+- 방향·정도·확정 여부를 바꾸지 않습니다(늘었다↔줄었다 금지, '검토 중'을 '확정'으로 바꾸기 금지).
+- 가능성은 가능성으로: '지연될 수 있다' → '지연 우려' / '지연 가능성'(X '지연'), '계절에 따라 바뀔 수 있다' → '계절별 변동 가능'(X '상이').
+- 수량·범위 표현 그대로: '일부' → '일부'(X '다수'), '2주 넘게' → '2주 이상'(X '2주'). 단서(약, 정도, 예정, 검토)는 남깁니다.
+- 다른 뜻으로 읽히는 말을 새로 쓰지 않습니다(예: '매년' → '연차' X — 연차휴가로 읽힘).
+
+[절대 규칙 2 — 정보를 빼지 않는다]
+- 문장을 src로 쓰면 그 문장의 숫자(비교 기준값·작년 수치·기준표 비율·합계와 내역)를 모두 남깁니다
+  (예: 총 900만원 (장비 600만원, 설치 300만원), 전년 750만원 대비 증가).
+- 문장의 모든 절(이유·조건·법적 근거·주체·대상·시점)을 남깁니다. 줄이는 것은 군말·화자 표현·반복뿐입니다.
+  "가능하지만 ~가 필요하고 ~가 든다"면 가능·필요·비용을 각각 씁니다.
+- dropped에는 말투·개인 소감·같은 말 반복인 문장만 넣습니다. 숫자나 조건이 든 문장은 dropped에 넣지 않습니다.
+- '빨라야 ~가능'(가장 이른 시점)과 '~에 추진'(계획)은 다른 사실입니다. 섞지 말고 각각 씁니다.
+
+[절대 규칙 3 — 읽고 이해되는 말만 쓴다]
+- 새 낱말을 만들지 않습니다. 원문 어구를 잘라 붙인 줄임말은 금지입니다
+  (예: '나눠서 내는 방식' → '나눠내 방식' X, '분할 납부 방식' O). 줄일 때는 사전에 있는 낱말을 씁니다.
+- 주체·대상·이유가 사라진 조각 어구를 쓰지 않습니다(X '합의 필요'만 덩그러니 → O '관련 법령상 노사 서면 합의 필요').
 
 [구성]
 - 보고서 유형에 맞게 절을 나눕니다(예):
-  현황 보고 → □ 목표·현황(항목명 : 값) → □ 추진 방향
-  방안 검토 → 1. 배 경 / 2. 검토 방안(대안 비교 표) / 3. 추진 방향
-  결과 보고 → □ 운영 경과 → □ 주요 결과 → □ 향후 계획(①②③)
-  추진 계획 → □ 대 상 → □ 일 정 → □ 세부 프로그램 → □ 소요 예산 → ※ 기타 사항
-  이슈·건의 → □ 배경 및 이슈 → □ 검토 가능(안)(①②③) → □ 건의 사항
+  현황 보고 → □ 현황(항목명 : 값) → □ 추진 방향
+  방안 검토 → 1. 배경 / 2. 검토 방안(대안 비교 표) / 3. 추진 방향
+  결과 보고 → □ 운영 경과 → □ 주요 결과 → □ 향후 계획
+  추진 계획 → □ 대상 → □ 일정 → □ 세부 내용 → □ 소요 예산
+  이슈·건의 → □ 배경 → □ 검토안(①②③) → □ 건의 사항
+- 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
+  표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 모두 씁니다. 표라고 더 줄이지 않습니다.
 - 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 쓰고 그 아래 "□".
 - 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
   "→"(목표·결과), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
-- 비교표라고 더 줄이지 않습니다. 표 칸(장점·단점 등)은 원문 문장의 조건·이유·한정 절을 하나도 빼지 않고 절마다 한 줄("- …", 줄바꿈 \\n)로 씁니다.
-  예) 단점 칸: "- 관련 법령상 노사 서면 합의 필요\\n- 운영 기준 기간·총량 사전 결정 필요\\n- 수당 산정 방식 변경에 따른 시스템 개편 비용 발생(약 2억원)\\n- 노조 협의 필요(빨라야 3분기 시행 可)".
-- 줄만 읽어도 맥락이 이해돼야 합니다. 누가·무엇을·왜가 사라진 조각 어구(근거 없이 "서면합의 필요"만, 뜻이 안 통하는 줄임말)로 줄이지 않습니다.
-  법적 근거·주체·대상·이유는 짧게라도 남기고, 줄이는 것은 군말·화자 표현·반복뿐입니다.
-- 사실 나열은 "항목명 : 값"으로 씁니다(채용 목표 : 총 40명 / 대 상 : 입사 10년차 이상 30명).
-- 대안이 2개면 표로 씁니다: {"m": "표", "rows": [["구분", "(1안) …", "(2안) …"], ["장점", "- …", "- …"], ["단점", "- …\\n- …", "- …"]], "src": [...]}.
-  칸 안 여러 줄은 \\n으로 나눕니다. 대안이 3개 이상이면 ①②③ "안 : 비용·난점"으로 씁니다.
-- 결론·제안은 마지막 절에 두고, 앞의 대안 번호를 다시 부릅니다(우선 ① …, 내년부터는 ② …).
+- 특정 대안에만 해당하는 내용(조건·비용·일정)은 그 대안의 표 칸이나 하위 항목(-, ∙)에 넣습니다.
+- 사실 나열은 "항목명 : 값"으로 씁니다(교육 인원 : 총 120명 / 장 소 : 본사 대강당).
+- 결론·제안은 마지막 절에 두고, 앞의 대안 번호를 다시 부릅니다(우선 ① …, 이후 ② …).
 
 [문장]
 - 화자·말투를 지웁니다(저는, 일단, ~입니다, 보고드립니다, ~로 보입니다, ~것 같습니다).
 - 문장 끝은 명사나 한자 한 글자로 끝냅니다(추진, 검토, 예정, 필요, 확보, 高, 中, 可, 必).
   '~합니다', '~함', '~임', 마침표는 쓰지 않습니다.
-- 한자 약어는 高 中 現 可 必 時 順 內 人 月 만 씁니다(처우 협의 中, 확인 必, 보고時, 3회/人, 1회/月).
-- 숫자: 만원·억원은 붙여 씁니다. 날짜 M.D, 기한 (~10.15일), 변화 (기존 25% → 30%), 비율 (67.5%), 분모 15명 中 12명.
+- 한자 약어는 高 中 現 可 必 時 順 內 人 月 만 씁니다(협의 中, 확인 必, 점검時, 2회/人, 1회/月).
+- 숫자: 만원·억원은 붙여 씁니다. 날짜 M.D, 기한 (~11.3일), 변화 (기존 10% → 15%), 분모 20명 中 16명.
 - 특정 회사명(A사·B사)은 '경쟁사'로 묶습니다.
-- 한 항목은 공백 빼고 대개 20~30자(정답 보고서 항목의 중앙값 23자), 길어도 40자 안팎(최대 50자). 한 문장에 사실이 여럿이면 사실마다 항목을 나눕니다.
-  긴 문장을 연결어미(~는데, ~고, ~지만, ~때문에)로 이어 붙이지 말고, 줄을 나누거나 '항목 : 값', '(기존 A → B)', '(사유)'로 압축합니다.
-- 전체 분량은 원문의 60~75%.
+- 한 항목은 공백 빼고 대개 20~35자, 길어도 50자 안팎. 한 문장에 사실이 여럿이면 사실마다 항목을 나눕니다.
 - 날짜 줄과 맺음말("- 이 상 -")은 쓰지 않습니다(변환기가 붙입니다).
-
-출력은 JSON 하나뿐입니다(설명·코드 블록 금지):
-{"title": "보고서 제목(명사형)", "lines": [{"m": "□", "text": "...", "src": [1]}, ...], "dropped": [번호, ...]}
 
 [예시]
 원문:
@@ -288,6 +281,25 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
  {"m": "→", "text": "차년도 실습 1일 확대 검토", "src": [5]},
  {"m": "※", "text": "추가 예산 약 1,500만원 소요 예상, 재무팀 협의 필요", "src": [6]}],
  "dropped": [7]}
+
+[대안 2개 예시]
+원문:
+[1] 사내 식당 혼잡 해소 방안은 두 가지입니다.
+[2] 첫째는 배식 시간을 30분 늘리는 것인데 추가 인건비가 월 400만 원 정도 들고 노사 협의가 필요합니다.
+[3] 둘째는 2층 휴게실을 식당으로 바꾸는 것인데 공사 기간이 6주 걸리고 공사비가 1억 원 정도이며 소방 점검을 다시 받아야 합니다.
+출력:
+{"title": "사내 식당 혼잡 해소 방안", "lines": [
+ {"m": "1.", "text": "검토 방안", "src": [1]},
+ {"m": "표", "rows": [["구분", "(1안) 배식 시간 30분 연장", "(2안) 2층 휴게실 식당 전환"],
+   ["비용", "- 추가 인건비 약 400만원/月", "- 공사비 약 1억원"],
+   ["고려 사항", "- 노사 협의 필요", "- 공사 기간 6주 소요\\n- 소방 점검 재수검 필요"]], "src": [2, 3]}],
+ "dropped": []}
+"""
+
+FORMAT_TAIL = """
+[출력 형식 — 반드시 지킴]
+보고서를 글로 쓰지 말고, 아래 모양의 JSON 하나만 출력합니다. 첫 글자는 { 이고 마지막 글자는 } 입니다(설명·코드 블록 금지).
+{"title": "보고서 제목(명사형)", "lines": [{"m": "□", "text": "...", "src": [1]}, {"m": "표", "rows": [["구분", "…"], ["…", "…"]], "src": [2, 3]}], "dropped": [번호, ...]}
 """
 
 def system_prompt(exclude_docs: set[int] | None = None) -> str:
@@ -296,8 +308,10 @@ def system_prompt(exclude_docs: set[int] | None = None) -> str:
 
     shown = examples_text(exclude_docs=exclude_docs)
     if not shown:
-        return REWRITE_SYSTEM
-    return (REWRITE_SYSTEM + "\n[문장 변환 예시 — 같은 방식으로 압축하되, 원문에 없는 사실은 절대 넣지 않습니다]\n" + shown + "\n")
+        return REWRITE_SYSTEM + FORMAT_TAIL
+    # 출력 형식은 맨 끝에 둔다 — 글로 된 예시("보고서: …")로 끝나면 LLM이 JSON 대신 보고서 글을 쓴다(2026-10-07 실측: 형식 오류 3회)
+    return (REWRITE_SYSTEM + "\n[문장 변환 예시 — 말투만 이렇게 바꾸고, 정보는 줄이지 않으며 원문에 없는 사실은 넣지 않습니다]\n"
+            + shown + "\n" + FORMAT_TAIL)
 
 
 _ORDINAL = re.compile(r"^[①-⑳]$")
@@ -332,6 +346,10 @@ class Rewrite:
     dropped: list[int]
 
 
+# LLM이 □ 대신 자판으로 치기 쉬운 글자를 쓰는 경우(2026-10-07 실측 응답 'ㅁ 배경 …')
+_MARK_ALIASES = {"ㅁ": "□", "■": "□", "o": "□", "○": "□", "·": "∙", "ㆍ": "∙", "•": "∙", "(1)": "①", "(2)": "②", "(3)": "③"}
+
+
 def _valid_mark(mark: str) -> bool:
     return mark in _PLAIN_MARKS or mark == "표" or bool(_ORDINAL.match(mark) or _SECTION_MARK.match(mark))
 
@@ -348,6 +366,7 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
     lines: list[Line] = []
     for item in data.get("lines") or []:
         mark = str(item.get("m") or "").strip()
+        mark = _MARK_ALIASES.get(mark, mark)
         if mark in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
             mark += "."
         if not _valid_mark(mark):
@@ -378,7 +397,7 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
 def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
            rules=None) -> tuple[dict[int, list[str]], list[str]]:
     """(줄 번호 → 사실 문제, 형식 문제 목록). 사실 문제가 남은 줄은 원문으로 바꾼다. 형식 문제는 다시 써 달라고만 한다."""
-    from .transform.factcheck import check, load_rules, uncovered_by_source
+    from .transform.factcheck import check, coined_words, load_rules, uncovered_by_source
     from .transform.report_style import lint
 
     rules = rules or load_rules()
@@ -407,6 +426,14 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     missing = [i for i in range(1, len(sentences) + 1) if i not in used]
     if missing:
         style.append(f"문장 {missing}이(가) 어느 줄의 src에도, dropped에도 없음")
+    for index, line in enumerate(rewrite.lines):
+        if line.src:
+            made = coined_words(line.content(), " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences)))
+            if made:
+                style.append(f"{index + 1}번째 줄에 원문 어구를 잘라 붙인 사전에 없는 말 {made} — 뜻이 통하는 낱말로 풀어 쓰세요")
+    if has_alternatives(sentences, rules) and not any(l.is_table or _ORDINAL.match(l.m) for l in rewrite.lines):
+        style.append("원문이 대안을 비교하는데(첫째·둘째 등) 표도 ①② 줄도 없음 — 대안 2개면 표(구분/장점/단점·비용·조건 칸, "
+                     "원문 절마다 한 줄), 3개 이상이면 ①②③ 줄로 쓰세요")
     ratio = _report_ratio(rewrite, sentences)
     if ratio is not None and ratio < _min_ratio():
         style.append(f"보고서가 원문의 {ratio:.0%}로 과도하게 축약됨(기준 {_min_ratio():.0%} 이상) — 조건·이유·주체를 되살려 맥락을 알 수 있게 쓰고, 표 칸도 원문 절마다 한 줄로 모두 쓰세요")
@@ -416,6 +443,15 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
         style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 줄에 넣거나, 숫자를 뺄 거면 그 문장을 dropped로")
     return facts, style
+
+
+def has_alternatives(sentences: list[str], rules=None) -> bool:
+    """원문이 대안을 비교하는 글인가(rules/drafting.yaml의 alternative_cues)."""
+    from .transform.factcheck import load_rules
+
+    cues = (rules or load_rules()).alternative_cues
+    text = " ".join(sentences)
+    return sum(1 for cue in cues if re.search(cue, text)) >= 2
 
 
 def _min_ratio() -> float:
@@ -600,12 +636,14 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     title, sentences = split_sentences(text)
     if not sentences:
         raise ValueError("문장을 찾지 못했습니다")
+    ask_json = ask
     if ask is None:
-        from .transform.llm_polish import ask_chat
+        from .transform.llm_polish import ask_chat, ask_json
         ask = ask_chat
     year = year or datetime.date.today().year
     numbered = "\n".join(f"[{i}] {s}" for i, s in enumerate(sentences, 1))
-    user = (f"원문 제목: {title}\n" if title else "") + f"원문 문장 {len(sentences)}개:\n{numbered}"
+    user = ((f"원문 제목: {title}\n" if title else "") + f"원문 문장 {len(sentences)}개:\n{numbered}"
+            + "\n\n위 원문을 지시대로 다시 써서 JSON 하나로만 출력하세요(첫 글자는 {).")
     notes: list[str] = []
     result: Rewrite | None = None
     facts: dict[int, list[str]] = {}
@@ -617,8 +655,17 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     while True:
         raw = ""
         try:
-            raw = ask(system, message)
-            candidate = parse_rewrite(raw, len(sentences))
+            raw = ask_json(system, message)
+            try:
+                candidate = parse_rewrite(raw, len(sentences))
+            except ValueError as exc:
+                # 2026-10-07 실측: JSON 대신 보고서 글('ㅁ 배경 및 이슈 - …')로 답했다. 같은 긴 지시문을 다시 보내면 같은 답이
+                # 되풀이되므로, 그 글을 짧은 지시문으로 JSON(근거 번호 포함)으로 옮기게 한다 — LLM이 쓴 내용을 살린다.
+                rescued = _rescue_plain_text(raw, numbered, len(sentences), ask_json)
+                if rescued is None:
+                    raise
+                notes.append(f"LLM 다듬기 응답이 JSON이 아니라 글이어서 JSON으로 옮김 ({exc}; {_raw_hint(raw)})")
+                candidate = rescued
         except ValueError as exc:
             # 형식 오류는 내용 수정 기회와 따로 센다(2026-10-05 실측: 첫 응답 형식 오류가 수정 기회를 먹어 사실 문제를
             # 다시 고쳐 쓰게 못 하고 원문으로 대체됐다)
@@ -626,7 +673,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
             notes.append(f"LLM 다듬기 응답 형식 오류 {format_errors}회: {exc} ({_raw_hint(raw)})")
             if format_errors >= MAX_FORMAT_RETRIES:
                 break
-            message = f"{user}\n\n[이전 응답의 문제] {exc}\n설명 없이 JSON 하나만 출력하세요."
+            message = f"{user}\n\n[이전 응답의 문제] {exc}\n보고서 글이 아니라 JSON 하나만 출력하세요. 첫 글자는 {{ 입니다."
             continue
         except Exception as exc:  # noqa: BLE001 — 설정 없음·네트워크
             notes.append(f"LLM 호출 실패: {exc}")
@@ -644,25 +691,24 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         message = (f"{user}\n\n[이전 응답]\n{previous}\n\n[검증에서 걸린 것 — 원문 사실과 다르거나 규칙 위반]\n"
                    f"{_problem_message(candidate, facts, style)}\n"
                    "걸린 줄만 원문 사실대로 고치고 나머지는 그대로 두어 JSON 전체를 다시 출력하세요.")
-    if result is None and unavailable:
+    if result is None:
+        # 형식 오류가 끝내 안 풀리면 배치 모드(원문 문장 그대로 — 2026-10-07 실측 d2.docx가 100% 서술체)로 가지 않고
+        # 원문 문장 끝만 규칙으로 개조식으로 바꾼 기본 구조를 쓴다.
         structure = fallback_structure(title, sentences)
         ruled = [_rule_sentence(sentence, year) for sentence in sentences]
-        notes.append("규칙 기본 구조 사용(한 절, 문장마다 □ — 원문 문장, 끝만 규칙으로 개조식). "
-                     "문장을 압축하려면 LLM 설정이 필요합니다")
+        why = "LLM 설정이 없거나 연결 실패" if unavailable else "LLM 응답 형식 오류가 끝내 안 풀림"
+        notes.append(f"규칙 기본 구조 사용({why}; 한 절, 문장마다 □ — 원문 문장, 끝만 규칙으로 개조식). "
+                     "문장 압축·재배열은 하지 못했습니다")
         return DraftResult(render(structure, ruled), structure, notes, False, title=title,
                            mode="fallback", sections=len(structure.sections))
-    if result is None:
-        notes.append("다듬기 실패 → 배치 모드(원문 문장 그대로)")
-        placed = place(text, ask)
-        placed.notes = notes + placed.notes
-        return placed
 
     if facts:
         notes += _repair_lines(result, facts, sentences, ask, year)
     notes += _restore_originals(result, facts, sentences, title, year)
     notes += _apply_style_fix(result, sentences, year)
     notes += _repair_numbers(result, sentences, ask, year)
-    notes += _audit_content(result, sentences, ask, year)
+    notes += _repair_coined(result, sentences, ask, year)
+    notes += _audit_content(result, sentences, ask, year, ask_json)
     notes += _style_residue(result)
     tidy_labels(result.lines)
     body = rewrite_text(result)
@@ -670,6 +716,25 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     sections = sum(1 for line in result.lines if _SECTION_MARK.match(line.m)) or sum(
         1 for line in result.lines if line.m == "□")
     return DraftResult(body, None, notes, True, title=result.title or title, mode="rewrite", sections=sections)
+
+
+RESCUE_SYSTEM = """당신은 보고서 정리 담당입니다. 번호 붙은 원문 문장과, 그 원문으로 이미 써 둔 보고서 글이 주어집니다.
+보고서 글의 내용과 말머리·순서는 그대로 두고, 줄마다 근거 원문 문장 번호(src)를 붙여 JSON으로만 옮기세요.
+"ㅁ"·"o" 같은 말머리는 "□"로, 번호 절 "1." 등은 m에 그대로, 표는 {"m": "표", "rows": [[칸, …], …]} 로 씁니다.
+보고서 글에서 쓰이지 않은 원문 번호는 dropped에 넣습니다. 출력은 JSON 하나뿐입니다(첫 글자 {):
+{"title": "...", "lines": [{"m": "□", "text": "...", "src": [1]}], "dropped": []}"""
+
+
+def _rescue_plain_text(raw: str, numbered: str, count: int, ask_json: Ask) -> "Rewrite | None":
+    """LLM이 JSON 대신 보고서 글을 썼을 때 — 그 글을 JSON(근거 번호 포함)으로 옮겨 받는다. 글이 아니거나 실패하면 None."""
+    text = (raw or "").strip()
+    if len(text) < 20 or not re.search(r"^\s*(?:□|ㅁ|-|∙|·|※|\*|→|[①-⑳]|\d+\.|o\s)", text, re.M):
+        return None
+    try:
+        answer = ask_json(RESCUE_SYSTEM, f"원문 문장:\n{numbered}\n\n보고서 글:\n{text}")
+        return parse_rewrite(answer, count)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 MAX_FORMAT_RETRIES = 3     # 형식 오류(JSON 아님)로 다시 묻는 최대 횟수 — 내용 수정 1회와 별도
@@ -726,7 +791,7 @@ def _repair_lines(rewrite: Rewrite, facts: dict[int, list[str]], sentences: list
 
 
 NUMBER_REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서 한 줄에서 근거 원문의 숫자가 빠졌습니다.
-근거 원문의 사실과 같게, 빠진 숫자를 모두 넣어 그 줄만 다시 쓰세요(합계와 내역이 있으면 둘 다: 합계 5,700만원 (코칭 4,500 + 워크숍 1,200)).
+근거 원문의 사실과 같게, 빠진 숫자를 모두 넣어 그 줄만 다시 쓰세요(합계와 내역이 있으면 둘 다: 총 900만원 (장비 600만원, 설치 300만원)).
 보고서 말투(명사나 한자 약어로 끝, 마침표 없음), 원문에 없는 숫자·평가는 넣지 않습니다. 출력은 고친 줄 한 줄뿐입니다(말머리·설명·따옴표 없이)."""
 
 
@@ -764,10 +829,13 @@ def _repair_numbers(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int 
     return notes
 
 
-AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 번호 붙은 원문 문장과 보고서가 주어집니다. 두 가지를 확인하세요.
-1) 빠진 정보: 각 원문 문장의 모든 절(조건·이유·법적 근거·주체·대상·한정어·시점)이 보고서에 들어 있는가. 줄여 쓴 것, 표기·말투가 바뀐 것은 빠진 것이 아니다. 의미 있는 절이 통째로 없으면 빠진 것이다.
-2) 이해 불가: 원문을 보지 않고 보고서만 읽는 상급자가 맥락을 알 수 없는 줄(주체·대상·이유가 사라진 조각 어구, 너무 줄여 뜻이 불분명한 말).
-출력은 JSON 하나뿐: {"missing":[{"sent":문장번호,"info":"빠진 내용을 원문 말로 15자 안팎"}],"unclear":[{"line":보고서 줄 번호(1부터),"sent":근거 문장번호,"why":"왜 모르겠는지 10자 안팎"}]}. 없으면 빈 목록."""
+AUDIT_SYSTEM = """당신은 보고서 검수자입니다. 원문 문장을 절로 나눈 목록([문장-절] 번호)과, 줄 번호가 붙은 보고서가 주어집니다.
+1) 절마다 그 정보(이유·조건·법적 근거·주체·대상·시점·수치)가 보고서에 들어 있는지 판정하세요.
+   줄여 쓴 것·표기나 말투가 바뀐 것은 들어 있는 것입니다. 화자 표현·소감·'~라고 봅니다' 같은 군말 절은 빠져도 됩니다.
+   정보가 있는 절이 보고서 어디에도 없을 때만 빠진 것입니다.
+2) 원문을 보지 않고 보고서만 읽는 상급자가 뜻을 알 수 없는 줄(주체·대상·이유가 사라진 조각 어구, 사전에 없는 줄임말)을 찾으세요.
+출력은 JSON 하나뿐: {"missing":[{"clause":"7-2","info":"빠진 내용을 원문 말로 15자 안팎"}],
+"unclear":[{"line":보고서 줄 번호,"sent":근거 문장번호,"why":"왜 모르겠는지 10자 안팎"}]}. 없으면 빈 목록."""
 
 CONTENT_REPAIR_SYSTEM = """당신은 사내 정식보고서 편집자입니다. 보고서에서 근거 원문의 일부 정보가 빠졌습니다.
 빠진 정보만 담은 보고서 한 줄을 쓰세요(명사나 한자 약어로 끝, 마침표 없음, 40자 이내).
@@ -782,7 +850,100 @@ _CHILD_MARK = {"□": "-", "-": "∙", "∙": "∙", "①": "-", "→": "∙"}
 MAX_AUDIT_ITEMS = 12
 
 
-def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int | None) -> list[str]:
+# 쉼표, 그리고 낱말 끝 연결어미(~고·~며·~서·~는데·~지만)에서만 나눈다. '~에서'(장소)·'~만'(조사)·숫자 안('2천만 원')은 나누지 않는다.
+_CLAUSE_SPLIT = re.compile(r"(?<=[,，])\s*|(?<=[가-힣][고며])\s+(?=[가-힣])(?!있)|(?<=[^에\s]서)\s+(?=[가-힣])|(?<=는데)\s+|(?<=지만)\s+")
+
+
+def split_clauses(sentence: str) -> list[str]:
+    """원문 문장 → 절(쉼표·~고·~며·~서·~는데·~지만에서 나눔). 검수 LLM이 절마다 닫힌 판정을 하게 한다."""
+    parts = [p.strip(" ,，") for p in _CLAUSE_SPLIT.split(sentence) if p.strip(" ,，")]
+    merged: list[str] = []
+    carry = ""
+    for part in parts:
+        part = f"{carry} {part}".strip() if carry else part
+        carry = ""
+        if len(re.findall(r"[가-힣]{2,}", part)) < 2:     # '다만'처럼 짧은 조각은 다음 절에(끝이면 앞 절에) 붙인다
+            carry = part
+            continue
+        merged.append(part)
+    if carry:
+        if merged:
+            merged[-1] += " " + carry
+        else:
+            merged.append(carry)
+    return merged or [sentence]
+
+
+def _clause_sentence(item: dict) -> int:
+    """검수 응답의 "clause": "7-2"(또는 예전 형식 "sent": 7) → 문장 번호."""
+    if "clause" in item:
+        return int(str(item["clause"]).split("-")[0].strip("[] "))
+    return int(item["sent"])
+
+
+_CONS_ROW = re.compile(r"단점|고려|조건|한계|제약|비용|리스크|위험|난점")
+_PROS_ROW = re.compile(r"장점|효과|기대|이점")
+_CONS_CLAUSE = re.compile(r"필요|비용|소요|어렵|어려|제한|우려|협의|부담|늦|지연|합의")
+
+
+def _add_to_table(line: "Line", text: str, source: str) -> bool:
+    """표로 쓴 대안 비교에서 빠진 절을 맞는 칸에 넣는다: 열 = 근거 문장과 낱말이 가장 많이 겹치는 대안,
+    행 = 조건·비용류 절이면 단점·고려 사항 행, 아니면 장점 행. 알맞은 열·행을 못 고르면 False(표 아래 줄로 쓴다)."""
+    rows = line.rows or []
+    if len(rows) < 2 or len(rows[0]) < 3:
+        return False
+    stems = {w[:2] for w in re.findall(r"[가-힣]{2,}", source)}
+    scores = []
+    for col in range(1, len(rows[0])):
+        cells = " ".join(row[col] for row in rows if col < len(row))
+        scores.append((len(stems & {w[:2] for w in re.findall(r"[가-힣]{2,}", cells)}), col))
+    best, col = max(scores)
+    if best == 0 or sum(1 for score, _ in scores if score == best) > 1:
+        return False
+    wanted = _CONS_ROW if _CONS_CLAUSE.search(text) else _PROS_ROW
+    row = next((r for r in rows[1:] if r and wanted.search(r[0])), None)
+    if row is None or col >= len(row):
+        return False
+    row[col] = (row[col].rstrip() + "\n" if row[col].strip() else "") + f"- {text}"
+    return True
+
+
+def _repair_coined(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int | None) -> list[str]:
+    """수정본에도 남은 줄임말(원문 어구를 잘라 붙인 말)을 줄 단위로 풀어 쓰게 한다. 줄임말이 사라지고 사실·문체 검증을
+    통과할 때만 채택하고, 아니면 그대로 두고 --report에 남긴다."""
+    from .transform.factcheck import check, coined_words
+    from .transform.report_style import hard_issues
+
+    notes: list[str] = []
+    for line in rewrite.lines:
+        if line.is_table or not line.src:
+            continue
+        source = " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences))
+        made = coined_words(line.text, source)
+        if not made:
+            continue
+        fixed = ""
+        for _ in range(LINE_REPAIR_TRIES):
+            try:
+                reply = ask(CLARIFY_SYSTEM, f"근거 원문:\n{source}\n\n고칠 줄: {line.text}\n"
+                                            f"문제: 사전에 없는 줄임말 {made} — 원문의 뜻이 통하는 낱말로 풀어 쓸 것")
+            except Exception:  # noqa: BLE001
+                return notes
+            first = (reply or "").strip().splitlines()[0] if (reply or "").strip() else ""
+            fixed = re.sub(r"^\s*(?:□|-|∙|→|※|\*|[①-⑳]|\d+\.)\s*", "", first).strip().strip('"\'')
+            if fixed and not coined_words(fixed, source) and not check(fixed, source, year=year) and not hard_issues(fixed):
+                break
+            fixed = ""
+        if fixed:
+            notes.append(f"줄임말 풀어 씀 {made}: '{line.text[:25]}' → '{fixed[:40]}'")
+            line.text = fixed
+        else:
+            notes.append(f"줄임말 남음(고치지 못함) {made}: {line.text[:40]}")
+    return notes
+
+
+def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int | None,
+                   ask_json: Ask | None = None) -> list[str]:
     """LLM 검수: 인용한 문장의 핵심 정보가 보고서에서 통째로 빠졌는지 보고, 빠진 정보는 그 줄 아래 하위 항목으로 보강한다.
     사실·문체 검증을 통과한 줄만 넣는다. 어떤 실패도 조용히 건너뛴다(--report에 남기고 원래 줄을 유지)."""
     from .transform.factcheck import check
@@ -792,13 +953,17 @@ def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int |
     cited = {i for l in rewrite.lines for i in l.src}
     if not cited:
         return notes
-    shown = "\n".join(f"[{i}] {sentences[i - 1]}" for i in sorted(cited) if 1 <= i <= len(sentences))
-    body = "\n".join(f"{l.m} {l.content()}" if not l.is_table else f"{l.m} " + " / ".join(" ".join(r) for r in (l.rows or []))
-                     for l in rewrite.lines)
+    # 절 단위로 닫힌 질문을 한다 — "빠진 게 있나"라는 열린 질문에는 실측에서 매번 '없음'만 돌아왔다(2026-10-07)
+    shown = "\n".join(f"[{i}-{k}] {clause}" for i in sorted(cited) if 1 <= i <= len(sentences)
+                      for k, clause in enumerate(split_clauses(sentences[i - 1]), 1))
+    # 줄 번호를 붙여 보낸다 — 예전엔 번호 없이 보내고 '줄 번호'를 물어 LLM이 가리킬 수가 없었다
+    body = "\n".join(f"{n}) {l.m} {l.content()}" if not l.is_table
+                     else f"{n}) 표 " + " / ".join(" | ".join(r) for r in (l.rows or []))
+                     for n, l in enumerate(rewrite.lines, 1))
     try:
-        answer = ask(AUDIT_SYSTEM, f"원문 문장:\n{shown}\n\n보고서:\n{body}")
+        answer = (ask_json or ask)(AUDIT_SYSTEM, f"원문 절:\n{shown}\n\n보고서:\n{body}")
         data = json.loads(answer[answer.find("{"):answer.rfind("}") + 1])
-        items = [(int(m["sent"]), str(m["info"]).strip()) for m in data.get("missing") or []]
+        items = [(_clause_sentence(m), str(m["info"]).strip()) for m in data.get("missing") or []]
         unclear = [(int(m["line"]), int(m["sent"]), str(m.get("why") or "").strip()) for m in data.get("unclear") or []]
     except Exception as exc:  # noqa: BLE001
         notes.append(f"내용 검수 건너뜀({type(exc).__name__})")
@@ -840,6 +1005,10 @@ def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int |
             notes.append(f"내용 누락 의심(보강 실패): 문장 [{sent}] — {info}")
             continue
         at = holders[-1]
+        if rewrite.lines[at].is_table and _add_to_table(rewrite.lines[at], fixed, source):
+            added += 1
+            notes.append(f"내용 누락 보강(표 칸): 문장 [{sent}] — {info} → '{fixed[:30]}'")
+            continue
         rewrite.lines.insert(at + 1, Line(_CHILD_MARK.get(rewrite.lines[at].m, "-"), fixed, [sent]))
         added += 1
         notes.append(f"내용 누락 보강: 문장 [{sent}] — {info} → '{fixed[:30]}'")

@@ -199,7 +199,16 @@ LAST_CALL: dict = {}
 # "JSON을 찾지 못함"으로 5건 중 4건 실패, 원인 미확정).
 
 
-def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool = False) -> str:
+_JSON_MODE_REJECTED = False   # 서버가 response_format을 거부하면 이후 호출은 묻지 않는다
+
+
+def ask_json(system: str, user: str) -> str:
+    """JSON 답을 기대하는 호출 — 온프렘 서버에 JSON 모드를 요청한다(지원 안 하면 일반 호출)."""
+    return ask_chat(system, user, json_mode=True)
+
+
+def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool = False,
+             json_mode: bool = False) -> str:
     """한 번의 질문 → 한 덩어리 답(여러 줄 JSON 등). 줄 수를 맞추는 `_ask_llm`과 달리 형식은 호출자가 검증한다.
 
     온프렘(OpenAI 호환)이면 그쪽, 아니면 Anthropic. thinking=True면 추론 모드를 켠다(기본은 끔 — 같은 답이 약 9배 빠르다)."""
@@ -214,8 +223,17 @@ def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool =
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         if not thinking:
             body["chat_template_kwargs"] = {"enable_thinking": False}
+        global _JSON_MODE_REJECTED
+        if json_mode and not _JSON_MODE_REJECTED:
+            # 2026-10-07 실측: 긴 지시문에서 LLM이 JSON 대신 보고서 글을 써 형식 오류가 3회 연속 났다 — 서버가 JSON만 내게 강제
+            body["response_format"] = {"type": "json_object"}
         with httpx.Client(timeout=600.0) as client:
-            response = client.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=body)
+            url = f"{base_url.rstrip('/')}/chat/completions"
+            response = client.post(url, headers=headers, json=body)
+            if response.status_code in (400, 422) and "response_format" in body:
+                _JSON_MODE_REJECTED = True
+                body.pop("response_format")
+                response = client.post(url, headers=headers, json=body)
             response.raise_for_status()
             choice = response.json()["choices"][0]
             message = choice.get("message") or {}

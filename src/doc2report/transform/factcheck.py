@@ -53,6 +53,7 @@ class Rules:
     hedge_overlap: int = 2
     hedge_stopwords: list[str] = field(default_factory=list)
     hedge_predicates: dict[str, list[str]] = field(default_factory=dict)
+    alternative_cues: list[str] = field(default_factory=list)
     blocked_terms: list[str] = field(default_factory=list)
     bound_source: list[str] = field(default_factory=list)
     bound_line: list[str] = field(default_factory=list)
@@ -320,3 +321,30 @@ def uncovered_by_source(sentences: list[str], lines: list[tuple[list[int], str]]
         if gone:
             result[i] = gone
     return result
+
+
+# 원문 어구를 잘라 붙인 줄임말(2026-10-07 실측: '몰아서 일하는' → '몰아일'). 이웃한 원문 두 낱말이 모두 용언 활용형(몰아-서, 일-하는)인데
+# 각각의 앞부분만 잘라 붙인 말은 사전에 없는 말이다. 명사로 끝나는 낱말(선택 폭 → 선택폭)은 대상이 아니다.
+_VERBAL_TAIL = ("서", "고", "며", "면", "는", "아", "어", "여", "해", "하", "한", "할", "함", "했", "던", "든", "지", "게", "기", "도록", "니", "으며", "으면")
+
+
+def _verbal_cut(word: str):
+    """낱말을 (앞부분, 용언 꼬리)로 자를 수 있는 모든 앞부분 — 꼬리가 용언 활용이 시작되는 글자일 때만."""
+    for cut in range(1, len(word)):
+        if word[cut:].startswith(_VERBAL_TAIL):
+            yield word[:cut]
+
+
+def coined_words(line: str, source: str) -> list[str]:
+    """줄에 든, 원문 이웃 낱말 둘을 잘라 붙여 만든 줄임말(원문에 그대로는 없는 말)."""
+    words = re.findall(r"[가-힣]+", source)
+    flat = re.sub(r"\s", "", source)
+    tokens = re.findall(r"[가-힣]+", line)
+    found: list[str] = []
+    for first, second in zip(words, words[1:]):
+        for head in _verbal_cut(first):
+            for tail in _verbal_cut(second):
+                made = head + tail
+                if len(made) >= 3 and made not in flat and any(made in t for t in tokens) and made not in found:
+                    found.append(made)
+    return found

@@ -148,11 +148,31 @@ def test_polite_endings_and_missing_sentences_ask_for_one_more_try():
     assert any("생략한 원문 문장 [8]" in n for n in result.notes)
 
 
-def test_bad_json_twice_falls_back_to_placement():
+def test_bad_json_to_the_end_falls_back_to_rule_converted_sentences():
     ask, calls = _answer({"lines": [{"m": "?", "text": "x", "src": [1]}]})
     result = draft(TEXT1, ask=ask, year=2026)
-    assert result.mode in ("place", "fallback")
-    assert "9월 말 기준으로 올해 R&D 경력 채용 계획 40명 중 27명이" in result.text   # 원문 문장 그대로
+    assert result.mode == "fallback"                       # 배치 모드(원문 서술체 그대로)로 가지 않는다
+    assert "9월 말 기준으로 올해 R&D 경력 채용 계획 40명" in result.text      # 원문 문장 + 규칙 교정
+    assert "습니다" not in result.text and any("형식 오류가 끝내" in n for n in result.notes)
+
+
+def test_plain_text_answer_is_rescued_into_json():
+    """2026-10-07 실측: LLM이 JSON 대신 'ㅁ 배경 및 이슈 - …' 같은 보고서 글로 답함 → 그 글을 JSON으로 옮겨 받는다."""
+    good = json.dumps(ANSWER1, ensure_ascii=False)
+    systems = []
+
+    def ask(system, user):
+        systems.append(system)
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[]}'
+        if system.startswith("당신은 보고서 정리 담당"):
+            assert "ㅁ 채용 현황" in user                     # LLM이 쓴 글을 그대로 넘긴다
+            return good
+        return "ㅁ 채용 현황\n - 입사 확정 27명"
+
+    result = draft(TEXT1, ask=ask, year=2026)
+    assert result.mode == "rewrite" and any("JSON으로 옮김" in n for n in result.notes)
+    assert not any("형식 오류" in n for n in result.notes)
 
 
 def test_two_options_become_a_table_with_multiline_cells(tmp_path):
@@ -355,3 +375,173 @@ def test_audit_rewrites_unclear_line_with_subject_and_reason():
 
     notes = _audit_content(rw, sents, ask, 2026)
     assert rw.lines[0].text.startswith("프로젝트 마감") and any("풀어 씀" in n for n in notes)
+
+
+# ── 2026-10-07 실측 후속: 형식 오류·줄임말·대안 표·지시문 오염 ─────────────────
+
+def test_coined_words_catch_cut_and_paste_abbreviations_without_flagging_gold_answers():
+    from doc2report.transform.factcheck import coined_words
+
+    source = (SAMPLES / "줄글_2_유연근무검토.txt").read_text(encoding="utf-8")
+    assert coined_words("정산기간 기준으로 프로젝트 몰아일 특성 적합", source) == ["몰아일"]
+    assert coined_words("현행 시차출퇴근제 선택폭 1시간으로 체감 효과 작음", source) == []
+    for number in range(1, 6):                      # 사용자 정답 보고서에서는 하나도 안 걸려야 한다
+        src = next(SAMPLES.glob(f"줄글_{number}_*.txt")).read_text(encoding="utf-8")
+        answer = next(SAMPLES.glob(f"정답_{number}_*.txt")).read_text(encoding="utf-8")
+        assert all(not coined_words(line, src) for line in answer.splitlines()), number
+
+
+def test_review_asks_for_table_when_source_compares_alternatives():
+    from doc2report.drafting import Line, Rewrite, has_alternatives, review, split_sentences
+
+    sents = split_sentences(TEXT2)[1]
+    assert has_alternatives(sents)
+    assert not has_alternatives(split_sentences(TEXT1)[1])
+    loose = Rewrite("t", [Line("-", "(1) 시차출퇴근 선택폭 확대", list(range(1, len(sents) + 1)))], [])
+    _, style = review(loose, sents, "t", 2026)
+    assert any("표도 ①② 줄도 없음" in s for s in style)
+    table = Rewrite("t", [Line("표", "", list(range(1, len(sents) + 1)), [["구분", "(1안)", "(2안)"], ["장점", "a", "b"]])], [])
+    _, style = review(table, sents, "t", 2026)
+    assert not any("표도 ①② 줄도 없음" in s for s in style)
+
+
+def test_surviving_coined_word_is_rewritten_line_by_line():
+    from doc2report.drafting import CLARIFY_SYSTEM, Line, Rewrite, _repair_coined
+
+    sents = ["프로젝트 마감 전후로 몰아서 일하는 R&D 특성에 더 잘 맞습니다"]
+    rw = Rewrite("t", [Line("-", "프로젝트 몰아일 특성 적합", [1])], [])
+    asked = []
+
+    def ask(system, user):
+        asked.append(system)
+        return "프로젝트 마감 전후 집중 근무하는 R&D 특성에 적합"
+
+    notes = _repair_coined(rw, sents, ask, 2026)
+    assert asked == [CLARIFY_SYSTEM] and "몰아일" not in rw.lines[0].text
+    assert any("줄임말 풀어 씀" in n for n in notes)
+
+
+def test_output_format_is_the_last_thing_in_the_prompt():
+    from doc2report.drafting import FORMAT_TAIL, system_prompt
+
+    for holdout in (None, {2}, {5}):
+        assert system_prompt(holdout).rstrip().endswith(FORMAT_TAIL.strip())
+
+
+def test_prompts_do_not_contain_evaluation_answer_text():
+    """지시문(규칙·예시)에 평가 문서의 원문·정답 글이 들어가면 채점이 오염된다(2026-10-07에 실제로 들어가 있었다).
+    정답에서 뽑은 문장 변환 예시(examples)는 doc 꼬리표로 --holdout이 빼므로 여기서는 고정 지시문만 본다."""
+    import re
+
+    import doc2report.drafting as d
+
+    generic = {"습니다", "합니다", "입니다", "겠습니다", "했습니다"}
+    docs = [re.sub(r"\s", "", p.read_text(encoding="utf-8")) for p in SAMPLES.glob("*_*.txt")]
+    for name in [n for n in dir(d) if n.endswith("SYSTEM") or n == "FORMAT_TAIL"]:
+        prompt = re.sub(r"\s", "", getattr(d, name))
+        for j in range(len(prompt) - 7):
+            piece = prompt[j:j + 8]
+            if re.fullmatch(r"[가-힣0-9,.:()]{8}", piece) and not any(g in piece for g in generic):
+                assert not any(piece in doc for doc in docs), (name, piece)
+
+
+def test_json_mode_falls_back_when_server_rejects_it(monkeypatch):
+    import httpx
+
+    from doc2report.transform import llm_polish
+
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "response_format" in body:
+            return httpx.Response(400, json={"error": "unsupported"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": 1}'}, "finish_reason": "stop"}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(llm_polish, "_JSON_MODE_REJECTED", False)
+    monkeypatch.setenv("DOC2REPORT_LLM_BASE_URL", "http://llm.test/v1")
+    monkeypatch.setenv("DOC2REPORT_MODEL", "m")
+    assert llm_polish.ask_json("s", "u") == '{"ok": 1}'
+    assert "response_format" in bodies[0] and "response_format" not in bodies[1]
+    assert llm_polish.ask_json("s", "u") == '{"ok": 1}' and len(bodies) == 3   # 거부된 뒤로는 묻지 않는다
+
+
+def test_split_clauses_keeps_numbers_particles_and_progressive_together():
+    from doc2report.drafting import split_clauses
+
+    assert split_clauses("다만 근로기준법상 서면 합의가 필요하고 정산기간과 총 근로시간을 정해야 하며, "
+                         "연장근로 산정 방식이 바뀌어서 급여 시스템 개편 비용이 약 1억 2천만 원 들 것으로 보입니다.") == [
+        "다만 근로기준법상 서면 합의가 필요하고", "정산기간과 총 근로시간을 정해야 하며",
+        "연장근로 산정 방식이 바뀌어서", "급여 시스템 개편 비용이 약 1억 2천만 원 들 것으로 보입니다."]
+    assert split_clauses("최근 설문에서 불만이 높게 나왔습니다.") == ["최근 설문에서 불만이 높게 나왔습니다."]
+    assert split_clauses("현재는 시차출퇴근제만 운영하고 있는데 효과가 작다는 의견입니다.")[0] == "현재는 시차출퇴근제만 운영하고 있는데"
+
+
+def test_audit_numbers_report_lines_and_accepts_clause_ids():
+    from doc2report.drafting import Line, Rewrite, _audit_content
+
+    sents = ["근로기준법상 서면 합의가 필요하고 정산기간과 총 근로시간을 정해야 합니다"]
+    rw = Rewrite("t", [Line("-", "근로기준법상 서면 합의 필요", [1])], [])
+    seen = {}
+
+    def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            seen["user"] = user
+            return '{"missing":[{"clause":"1-2","info":"정산기간·총 근로시간 결정"}]}'
+        return "정산기간 및 총 근로시간 사전 결정 필요"
+
+    _audit_content(rw, sents, ask, 2026)
+    assert "[1-2] 정산기간과 총 근로시간을 정해야 합니다" in seen["user"] and "1) - 근로기준법상" in seen["user"]
+    assert rw.lines[-1].text == "정산기간 및 총 근로시간 사전 결정 필요"
+
+
+def test_missing_clause_of_a_table_alternative_goes_into_its_cons_cell():
+    from doc2report.drafting import Line, Rewrite, _audit_content
+
+    sents = ["첫째는 배식 시간을 늘리는 것으로 노사 협의가 필요합니다",
+             "둘째는 휴게실을 식당으로 바꾸는 것인데 공사 기간이 6주 걸리고 소방 점검을 다시 받아야 합니다"]
+    table = Line("표", "", [1, 2], [["구분", "(1안) 배식 시간 연장", "(2안) 휴게실 식당 전환"],
+                                   ["장점", "- 즉시 시행 可", "- 수용 인원 확대"],
+                                   ["단점", "- 노사 협의 필요", "- 공사 기간 6주 소요"]])
+    rw = Rewrite("t", [table], [])
+
+    def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[{"clause":"2-2","info":"소방 점검 재수검"}]}'
+        return "휴게실 식당 전환 시 소방 점검 재수검 필요"
+
+    notes = _audit_content(rw, sents, ask, 2026)
+    assert len(rw.lines) == 1                                         # 표 아래 따로 줄을 만들지 않는다
+    assert table.rows[2][2] == "- 공사 기간 6주 소요\n- 휴게실 식당 전환 시 소방 점검 재수검 필요"
+    assert table.rows[2][1] == "- 노사 협의 필요" and any("표 칸" in n for n in notes)
+
+
+def test_case2_replay_retry_names_missing_table_and_coined_word():
+    """사용자가 보낸 2026-10-07 eval_2 결과(표 없음, '몰아일')를 1차 응답으로 재생 → 수정 요청에 두 문제가 다 들어가야 한다."""
+    first = {"title": "유연근무제 확대 검토", "lines": [
+        {"m": "□", "text": "현황 및 문제점", "src": [1, 2, 3]},
+        {"m": "-", "text": "근무시간 경직성 불만 다수", "src": [1]},
+        {"m": "-", "text": "출퇴근 자율화 선호 58%, 재택근무 확대 24% (응답자 312명)", "src": [2]},
+        {"m": "-", "text": "현행 시차출퇴근제 출근 시각 선택폭 1시간으로 체감 효과 작음", "src": [3]},
+        {"m": "□", "text": "대안 검토", "src": [4]},
+        {"m": "-", "text": "(1) 시차 출퇴근 선택폭 2시간 확대 : 취업규칙 변경만으로 즉시 시행 가능하나 효과 제한적", "src": [5]},
+        {"m": "-", "text": "(2) 선택적 근로시간 도입 : 정산기간 기준 근로시간 정산으로 프로젝트 몰아일 특성 적합", "src": [6]},
+        {"m": "※", "text": "(2) 도입 시 서면 합의 필요, 급여 시스템 개편 비용 약 1.2억원 예상", "src": [7]},
+        {"m": "□", "text": "추진 계획", "src": [9]},
+        {"m": "-", "text": "(1) 올해 내 시행, (2) 내년 상반기 도입 추진", "src": [9]},
+        {"m": "※", "text": "노조 협의 필요로 빨라야 내년 2분기 시행 가능, 법적 해석은 법무팀 확인 필요", "src": [8, 10]}],
+        "dropped": []}
+    requests = []
+
+    def ask(system, user):
+        if system == AUDIT_SYSTEM:
+            return '{"missing":[]}'
+        requests.append(user)
+        return json.dumps(first, ensure_ascii=False)
+
+    draft(TEXT2, ask=ask, year=2026)
+    retry = requests[1]
+    assert "몰아일" in retry and "표도 ①② 줄도 없음" in retry
