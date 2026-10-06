@@ -1,5 +1,7 @@
 # doc2report 작업 노트
 
+> **새 세션이면 먼저 [docs/session-handoff.md](docs/session-handoff.md)를 읽을 것** — 지금 상태·사용자 원칙·미해결 과제·다음 할 일이 있다(2026-10-07).
+
 Confluence·Markdown 문서를 사내 규격 보고서(.docx)로 바꾸는 도구.
 사용법은 [README.md](README.md)에 있고, 이 문서는 **코드만 봐서는 알기 어려운 판단 근거**를 적는다.
 
