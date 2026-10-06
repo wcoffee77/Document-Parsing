@@ -42,9 +42,13 @@ def _brief(number: int, result, scored: dict) -> str:
     replaced = [n for n in notes if "원문 문장으로 대체" in n]
     kinds = sorted({_kind(m.group(1)) for n in replaced for m in [re.search(r"개조식, (.*?)\): ", n)] if m})
     ruled = sum(1 for n in notes if n.startswith("규칙 교정"))
+    dropped = [m.group(1) for n in notes for m in [re.match(r"생략한 원문 문장 \[(\d+)\]", n)] if m]
+    gaps = [n.split("—")[0].replace("수치 누락(인용한 문장 ", "").replace(" 기준):", "").strip()
+            for n in notes if n.startswith("수치 누락(")]
     diag = next((re.sub(r"^.*?\(", "(", n)[:70] for n in notes if "형식 오류" in n), "")
     return (f"[{number}] 분량 {scored['ratio']} | 서술체 {scored['hard']} | 수치왜곡 {scored['invented']} | 핵심수치보존 {scored['numbers']}" + ("" if scored["missing"] == "-" else f" 빠진 {scored['missing']}") + " | "
             f"형식오류 {fmt}회 | 줄단위해결 {fixed} | 원문대체 {len(replaced)}({'·'.join(kinds) or '-'}) | 규칙교정 {ruled}"
+            f"\n     생략문장 {','.join(dropped) or '없음'} | 수치누락 {'; '.join(gaps) or '없음'}"
             + (f"\n     형식오류 진단 {diag}" if diag else ""))
 
 
