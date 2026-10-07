@@ -770,8 +770,10 @@ def test_three_option_table_becomes_ordinal_list():
     assert ("③", "실비 지원") in shown and ("-", "고려 사항 : 관리 부담, 비용 통제 어려움") in shown
     rich = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "- a\n- b", "- c\n- d"], ["단점", "- e\n- f", "- g\n- h"]])]
     assert tables_to_ordinals(rich) == [] and rich[0].is_table          # 내용이 많은 두 안은 표 그대로
-    simple = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "- a", "- c"], ["단점", "- e", "- g"]])]
-    assert tables_to_ordinals(simple) and simple[0].m == "①"            # 간단하면 ①② 줄
+    pros_cons = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "- a", "- c"], ["단점", "- e", "- g"]])]
+    assert tables_to_ordinals(pros_cons) == [] and pros_cons[0].is_table    # 장·단점 비교는 칸이 한 줄씩이어도 표(2026-10-09 문서 2)
+    simple = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["내용", "- a", "- c"], ["비용", "- e", "- g"]])]
+    assert tables_to_ordinals(simple) and simple[0].m == "①"                # 장·단점 비교가 아니고 간단하면 ①② 줄
 
 
 def test_weekday_is_added_only_to_real_dates():
