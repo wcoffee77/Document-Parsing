@@ -56,6 +56,7 @@ class Rules:
     alternative_cues: list[str] = field(default_factory=list)
     alternative_strong_cues: list[str] = field(default_factory=list)
     parallel_cues: list[str] = field(default_factory=list)
+    arrow_cues: list[str] = field(default_factory=list)
     audit_skip_clause: list[str] = field(default_factory=list)
     progress_line: list[str] = field(default_factory=list)
     progress_source: list[str] = field(default_factory=list)

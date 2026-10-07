@@ -834,3 +834,41 @@ def test_date_dots_are_removed_in_ranges_and_singles():
              Line("-", "기 간 : 8.22.(토) ~ 23.", [1])]
     normalize_dates(lines, sents)
     assert [l.text for l in lines] == ["8.22 ~ 23 진행", "최종 확정 9.5 인사위원회", "만족도 4.3점", "기 간 : 8.22(토) ~ 23"]
+
+
+# ── 2026-10-09 4차: 표 행 3개로, 화살표는 꼭 필요할 때만 ──────────────────────────
+
+def test_comparison_table_rows_are_merged_into_three():
+    from doc2report.drafting import Line, consolidate_table_rows
+
+    table = Line("표", "", [4, 5], [
+        ["구분", "(1안) 선택 폭 확대", "(2안) 선택적 근로시간제"],
+        ["내용", "- 출근 선택 폭 1시간 → 2시간", "- 정산기간 기준 근로시간 관리"],
+        ["장점", "- 즉시 시행 可", "- R&D 특성에 적합"],
+        ["단점", "- 효과 제한적", "- 근로자대표 서면 합의 필요"],
+        ["비용", "- 추가 비용 없음", "- 급여 시스템 개편 약 1.2억원"],
+        ["일정", "- 올해 內", "- 내년 2분기 이후"]])
+    lines = [table]
+    assert consolidate_table_rows(lines)
+    rows = lines[0].rows
+    assert [r[0] for r in rows] == ["구분", "내용", "장점", "단점/고려 사항"]
+    assert rows[3][2].split("\n") == ["- 근로자대표 서면 합의 필요", "- 비용 : 급여 시스템 개편 약 1.2억원", "- 일정 : 내년 2분기 이후"]
+
+
+def test_non_comparison_table_is_left_alone():
+    from doc2report.drafting import Line, consolidate_table_rows
+
+    table = Line("표", "", [1], [["구분", "2025", "2026"], ["매출", "100", "120"], ["비용", "80", "90"], ["이익", "20", "30"]])
+    lines = [table]
+    assert consolidate_table_rows(lines) == [] and len(lines[0].rows) == 4
+
+
+def test_arrow_without_causal_source_becomes_explanation_dot():
+    from doc2report.drafting import Line, restrict_arrows
+
+    sents = ["과제는 5명씩 6개 팀으로 12월 중순에 발표합니다.", "팀장들에게 주당 4시간 업무 조정을 요청할 계획입니다.",
+             "경력자가 부족해서 공석이 3개월 넘게 이어지고 있습니다."]
+    lines = [Line("1.", "추진", [1]), Line("-", "실제 과제 수행 : 6개팀(5명/팀)", [1]), Line("→", "팀장 주당 4시간 업무 조정 요청", [2]),
+             Line("-", "경력자 부족", [3]), Line("→", "3개월 이상 공석 포지션 2개", [3]), Line("→", "또 다른 화살표", [3])]
+    restrict_arrows(lines, sents)
+    assert [l.m for l in lines] == ["1.", "-", "∙", "-", "→", "∙"]    # 인과 근거가 있는 첫 → 하나만 남김

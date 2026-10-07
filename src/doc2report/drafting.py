@@ -255,11 +255,13 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 - 한 □ 아래 '-'는 2~4개로 묶습니다. 같은 주제의 사실(원인과 그 근거 수치, 현황과 영향)은 한 '-'에 이어 써서 맥락이
   이어지게 하고, 낱말 몇 개씩 파편으로 나열하지 않습니다(X '- 물가 상승 / - 기준 노후 / - 응답 18명 / - 부담 발생'
   O '- 최근 3년간 물가 평균 15% 상승 / - 직원 20명 중 14명이 비용 부족으로 추가 부담 중').
-- 앞 줄의 원인 때문에 생긴 결과·영향은 그 줄 바로 아래 "→"로 씁니다(X 따로 '- 공석 2개 미채움' O '→ 3개월 이상 공석 포지션 2개').
-  공석·결원은 '미채움'이라 쓰지 않고 '공석'이라고만 씁니다.
+- "→"는 꼭 필요할 때만 씁니다: 바로 윗줄의 직접적인 원인→결과(인과)이거나 절차·진행의 다음 단계일 때뿐입니다. 윗줄을 설명·보충하는
+  내용, 참고, 나란한 계획은 "→"가 아니라 윗줄 아래의 "∙"(하위 설명)나 "※"(단서·참고)로 씁니다. 한 문서에 "→"는 많아야 한두 개입니다.
+공석·결원은 '미채움'이라 쓰지 않고 '공석'이라고만 씁니다.
 - 제목과 같은 말을 되풀이하는 줄(예: 제목이 '하반기 신입 연수 계획'인데 '하반기 신입 연수 운영')은 쓰지 않습니다. 그 문장은 dropped.
 - 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
-  표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열), 그 아래 행이 장점·단점·비용 등(항목이 행)입니다. 행과 열을 바꾸지 않습니다.
+  표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열)이고, 그 아래 행은 **내용 / 장점 / 단점·고려 사항** 세 개로 씁니다(행과 열을 바꾸지 않습니다).
+  비용·일정·조건·제약처럼 따로 쪼갤 수 있는 것도 별도 행을 만들지 말고 '단점·고려 사항' 칸에 "-" 줄로 모두 담습니다.
   표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 씁니다. 절은 빼지 않되, 한 줄은 조건 하나를
   공백 빼고 32자 이내의 짧은 명사형으로 씁니다(X '- 식당 좌석을 늘리려면 바닥 배관을 옮겨야 하므로 공사 기간이 길어지고 비용도 약 2억원 정도 들 것으로 예상됨'
   O '- 배관 이설로 공사비 약 2억원 발생').
@@ -271,7 +273,7 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
   · 나란한 사실뿐이면: "1. 배경 및 현황" 바로 아래 "-" 항목들. 절 제목에 '및'은 한 번만 씁니다.
 - 결론·추진 방향의 요지는 "→"가 아니라 "□ 핵심 문장"으로 씁니다(□ 하나라도 핵심 문장이면 됩니다).
 - 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
-  "→"(바로 윗줄의 결과·목표일 때만 — 나란한 두 계획은 둘 다 "-"), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
+  "→"(윗줄의 직접 결과·다음 단계일 때만 — 설명·참고는 "∙" 또는 "※", 나란한 계획은 "-"), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
 - 특정 대안에만 해당하는 내용(조건·비용·일정)은 그 대안의 표 칸이나 하위 항목(-, ∙)에 넣습니다.
 - 사실 나열은 "항목명 : 값"으로 씁니다(교육 인원 : 총 120명 / 장 소 : 본사 대강당).
 - 결론·제안은 마지막 절에 두고, 앞의 대안 번호를 다시 부릅니다(우선 ① …, 이후 ② …).
@@ -306,7 +308,7 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
  {"m": "-", "text": "만족도 : 4.3점/5점 (전년 4.1점 대비 상승)", "src": [3]},
  {"m": "□", "text": "개선 방향", "src": [4, 5, 6]},
  {"m": "-", "text": "직무 실습 시간 부족 의견 다수", "src": [4]},
- {"m": "→", "text": "차년도 실습 1일 확대 검토", "src": [5]},
+ {"m": "-", "text": "차년도 실습 1일 확대 검토", "src": [5]},
  {"m": "※", "text": "추가 예산 약 1,500만원 소요 예상, 재무팀 협의 필요", "src": [6]}],
  "dropped": [7]}
 
@@ -800,10 +802,12 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         pass
     notes += orient_tables(result.lines)
     notes += tables_to_ordinals(result.lines)
+    notes += consolidate_table_rows(result.lines)
     notes += drop_title_echoes(result, title)
     notes += lift_lone_groups(result.lines)
     notes += fix_level_order(result.lines)
     notes += fix_arrows(result.lines, sentences)
+    notes += restrict_arrows(result.lines, sentences)
     notes += normalize_dates(result.lines, sentences)
     notes += add_weekdays(result.lines, sentences, year)
     tidy_labels(result.lines)
@@ -1516,4 +1520,89 @@ def normalize_dates(lines: list[Line], sentences: list[str]) -> list[str]:
         if fixed != line.text:
             notes.append(f"날짜 표기 정리: {line.text[:25]} → {fixed[:25]}")
             line.text = fixed
+    return notes
+
+
+_TABLE_CONTENT = re.compile(r"^(내용|개요|방식|요지|주요\s*내용|설명)")
+_TABLE_PROS = re.compile(r"장점|효과|기대|이점")
+_TABLE_KNOWN = re.compile(r"장점|단점|효과|기대|이점|고려|조건|한계|제약|비용|리스크|위험|일정|시기|소요|요건")
+
+
+def consolidate_table_rows(lines: list[Line]) -> list[str]:
+    """대안 비교 표의 행을 내용 / 장점 / 단점·고려 사항 세 개로 합친다(2026-10-09 사용자: 내용·장점·단점·비용·일정으로 너무
+    쪼개 가독성·맥락이 떨어졌다. 단점·고려 사항 한 칸에 많은 내용을 담는 것이 일반적인 방식). 비용·일정 같은 행은 단점·고려 사항
+    칸으로 옮기며 항목 앞에 그 행 이름을 붙인다. 대안 비교 표(머리가 1안·2안…)만 대상이다."""
+    notes: list[str] = []
+    for line in lines:
+        rows = line.rows
+        if not rows or len(rows) < 3 or len({len(r) for r in rows}) != 1 or len(rows[0]) < 3:
+            continue
+        if sum(1 for c in rows[0][1:] if _OPTION_HEAD.search(c.strip())) < 2:
+            continue
+        labels = [r[0].replace("\n", " ").strip() for r in rows[1:]]
+        if not any(_TABLE_KNOWN.search(l) for l in labels):
+            continue
+        content: list[list[str]] = []
+        pros: list[list[str]] = []
+        cons: list[tuple[str, list[str]]] = []
+        for label, row in zip(labels, rows[1:]):
+            if _TABLE_CONTENT.match(label):
+                content.append(row)
+            elif _TABLE_PROS.search(label) and not re.search(r"단점|한계", label):
+                pros.append(row)
+            else:
+                cons.append((label, row))
+        if len(content) <= 1 and len(pros) <= 1 and len(cons) <= 1 and (len(rows) - 1) <= 3:
+            continue
+
+        def merge(group: list[list[str]], width: int) -> list[str]:
+            return ["\n".join(p for p in (r[c].strip() for r in group) if p.strip(" -")) for c in range(1, width)]
+
+        width = len(rows[0])
+        new = [rows[0]]
+        if content:
+            new.append(["내용"] + merge(content, width))
+        if pros:
+            new.append(["장점"] + merge(pros, width))
+        if cons:
+            label = cons[0][0] if len(cons) == 1 else "단점/고려 사항"
+            cells = []
+            for c in range(1, width):
+                parts: list[str] = []
+                for name, row in cons:
+                    items = [i.strip() for i in row[c].split("\n") if i.strip(" -")]
+                    plain = re.search(r"단점|고려|한계|제약|조건|리스크|위험", name)
+                    for k, item in enumerate(items):
+                        body = re.sub(r"^-\s*", "", item)
+                        if not plain and len(cons) > 1 and k == 0:
+                            body = f"{name} : {body}"
+                        parts.append(f"- {body}")
+                cells.append("\n".join(parts))
+            new.append([label] + cells)
+        line.rows = new
+        notes.append(f"구조 보정: 대안 비교 표 행 {len(rows) - 1}개를 {len(new) - 1}개(내용/장점/단점·고려 사항)로 합침")
+    return notes
+
+
+def restrict_arrows(lines: list[Line], sentences: list[str], rules=None) -> list[str]:
+    """"→"는 꼭 필요할 때만(2026-10-09 사용자 건3·4: 인과·진행이 아닌 설명에 화살표를 썼다). 근거 원문에 원인·결과를 잇는 말
+    (rules/drafting.yaml::arrow_cues)이 없으면 "→"를 하위 설명 "∙"(윗줄이 -·∙·→일 때) 또는 "-"로 바꾸고, 한 번호 절(또는 문서)
+    안에서 "→"는 첫 하나만 남긴다."""
+    cues = (rules or _load_rules()).arrow_cues
+    notes: list[str] = []
+    kept_in_section = False
+    for k, line in enumerate(lines):
+        if _SECTION_MARK.match(line.m):
+            kept_in_section = False
+            continue
+        if line.m != "→":
+            continue
+        source = " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences))
+        causal = bool(cues) and any(re.search(c, source) for c in cues)
+        if causal and not kept_in_section:
+            kept_in_section = True
+            continue
+        previous = lines[k - 1].m if k else ""
+        line.m = "∙" if previous in ("-", "∙", "→") else "-"
+        notes.append(f"구조 보정: 인과·진행이 아닌 '→'를 '{line.m}'로 — {line.text[:20]}")
     return notes

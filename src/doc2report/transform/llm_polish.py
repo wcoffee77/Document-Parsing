@@ -152,6 +152,7 @@ def _ask_openai_compatible(texts: list[str], base_url: str, system: str = _SYSTE
                 json={
                     "model": model,
                     "temperature": 0,
+                    "seed": _seed(),
                     **extra,
                     "messages": [
                         {"role": "system", "content": system},
@@ -219,7 +220,7 @@ def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool =
             raise RuntimeError("DOC2REPORT_LLM_BASE_URL 사용 시 DOC2REPORT_MODEL 이 필수입니다")
         api_key = os.environ.get("DOC2REPORT_LLM_API_KEY")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        body = {"model": model, "temperature": 0, "max_tokens": max_tokens,
+        body = {"model": model, "temperature": 0, "seed": _seed(), "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         if not thinking:
             body["chat_template_kwargs"] = {"enable_thinking": False}
@@ -262,3 +263,15 @@ def ask_chat(system: str, user: str, *, max_tokens: int = 4096, thinking: bool =
 def _chunks(items: list[str], size: int):
     for start in range(0, len(items), size):
         yield items[start : start + size]
+
+
+def _seed() -> int:
+    """같은 입력이 실행마다 다르게 나오는 것을 줄이려고 고정 시드를 보낸다(2026-10-09 사용자: 변경이 없어도 결과가 달라짐).
+    온도 0만으로는 서버의 배치·병렬 처리 때문에 같아지지 않을 수 있다(추정). 서버가 seed를 무시하면 효과가 없다.
+    DOC2REPORT_LLM_SEED로 바꿀 수 있다."""
+    import os
+
+    try:
+        return int(os.environ.get("DOC2REPORT_LLM_SEED", "20261009"))
+    except ValueError:
+        return 20261009
