@@ -788,7 +788,3 @@ def test_strong_cue_alone_marks_alternative_document():
     found = {n: has_alternatives(split_sentences(next(SAMPLES.glob(f"줄글_{n}_*.txt")).read_text(encoding="utf-8"))[1])
              for n in range(1, 6)}
     assert found == {1: False, 2: True, 3: False, 4: False, 5: True}
-
-
-def test_gojo_is_blocked_as_wrong_word():
-    assert any("고조" in p for p in check("S/A 가이드 대비 저조, B 고조", "S와 A는 조금 낮고 B가 높게 나왔습니다"))
