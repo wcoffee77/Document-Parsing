@@ -243,6 +243,8 @@ class TableRules(_Base):
     row_height: int | None = None  # 행 최소 높이
     row_height_relaxed: int | None = None  # 지면에 여유가 있을 때의 행 최소 높이
     equal_columns: bool = False
+    cell_hanging: bool = False    # 칸 안 "- 내용"이 줄바꿈되면 둘째 줄을 말머리 뒤 글자에 맞춤(내어쓰기)
+    uniform_cells: bool = False   # 표 안 내용 칸의 장평·정렬을 하나로 통일(정식보고서, 2026-10-08 사용자)
     # true: 같은 성격(값)의 열은 폭을 같게 한다 — 정식보고서 표(2026-10-01 사용자: 구분·목표·실적·달성률 폭 동일).
     #       참고 열(note_columns)은 데이터가 아니라 비중을 작게 둔다.
     note_columns: list[str] = Field(default_factory=list)  # 머리가 이 말이면 참고 열(비고·이슈 …)
@@ -366,6 +368,7 @@ class TextRules(_Base):
     #       줄을 나눠 왼쪽 끝을 윗줄 글자에 맞춘다(layout/lines.py).
     condense_max: int | None = None   # 글자 간격을 좁히는 최대치 (0.5pt)
     condense_step: int | None = None  # 좁히는 단위 (0.1pt)
+    wrap_break_after: str = ""        # 좁혀도 한 줄에 안 들어가 줄을 내려 쓸 때, 이 글자(쉼표) 뒤에서 내용 단위로 끊는다 — 이 경우 글자 간격은 좁히지 않는다
     fit_margin: float = 0.0           # 줄 폭을 이만큼 덜 쓴다(글꼴 측정 오차 대비)
     balance_sbcs_dbcs: bool = False
     # Word 호환 옵션 "한글·영문 글자 폭 균형"(balanceSingleByteDoubleByteWidth)을 문서에 켠다. 한글 판 Word의

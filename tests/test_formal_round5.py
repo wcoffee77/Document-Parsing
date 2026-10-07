@@ -259,7 +259,7 @@ def test_gaps_same_level_6pt_up_12_or_18pt(tmp_path, fake_fonts):
     after = {p.text.strip(): p.paragraph_format.space_after for p in doc.paragraphs}
     assert after["- 다"] == Pt(6)                          # - → - 같은 단계
     assert after["- 라"] in (Pt(12), Pt(18))               # - → □ 올라감
-    assert after["□ 나"] == Pt(12)                         # 제목 같은 □("□ 나") 아래는 12pt (2026-10-03 사용자)
+    assert after["□ 나"] == Pt(6)                          # □ → - 하부 내용은 제목 같은 □여도 6pt (2026-10-08 사용자가 12pt 규칙을 정정)
 
 
 def test_balance_sbcs_dbcs_flag_only_in_formal():
@@ -421,11 +421,11 @@ def test_note_gap_follows_level_it_belongs_to(tmp_path):
     assert _spacing_after(tmp_path, to_dash, True)["※ 참고2"] == 12
 
 
-def test_heading_like_square_gets_12pt_but_sentence_square_6pt(tmp_path, fake_fonts):
-    """2026-10-03 사용자: "□ 추진 방향"(제목 같은 □) 아래 -는 12pt, "□ 요지 문장, …" 아래는 6pt."""
+def test_square_to_dash_is_6pt_even_for_heading_like_square(tmp_path, fake_fonts):
+    """2026-10-08 사용자 정정: □ 아래 하부 내용(-)은 제목 같은 □("□ 추진 방향")여도 6pt. 12pt는 - 가 끝나고 새 □가 올 때."""
     doc, _ = _convert(tmp_path, "□ 추진 방향\n- 가\n□ 채용 현황 : 입사 확정 27명, 처우 협의 6명\n- 나\n")
     after = {p.text.strip(): p.paragraph_format.space_after for p in doc.paragraphs}
-    assert after["□ 추진 방향"] == Pt(12)
+    assert after["□ 추진 방향"] == Pt(6)
     assert after["□ 채용 현황 : 입사 확정 27명, 처우 협의 6명"] == Pt(6)
 
 

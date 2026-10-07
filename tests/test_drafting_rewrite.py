@@ -788,3 +788,13 @@ def test_strong_cue_alone_marks_alternative_document():
     found = {n: has_alternatives(split_sentences(next(SAMPLES.glob(f"줄글_{n}_*.txt")).read_text(encoding="utf-8"))[1])
              for n in range(1, 6)}
     assert found == {1: False, 2: True, 3: False, 4: False, 5: True}
+
+
+def test_weekday_added_to_range_end_date():
+    from doc2report.drafting import Line, add_weekdays
+
+    sents = ["캘리브레이션을 8월 22일부터 이틀간 진행했습니다."]
+    lines = [Line("-", "기 간 : 8.22 ~ 23 (2일간)", [1]), Line("-", "기 간 : 8.22(토) ~ 23", [1])]
+    add_weekdays(lines, sents, 2026)
+    assert lines[0].text == "기 간 : 8.22(토) ~ 23(일) (2일간)"
+    assert lines[1].text == "기 간 : 8.22(토) ~ 23(일)"

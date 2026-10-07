@@ -392,7 +392,7 @@ class DocxRenderer:
             cont_spaces = round((head_w + text_w(extra)) / space_w) if space_w else 0
             cont_room = usable - indent - cont_spaces * space_w
             cont_indent = indent
-        def layout(current: list[Run]) -> tuple[str, list[Line], int]:
+        def layout(current: list[Run], relayout: bool = True) -> tuple[str, list[Line], int]:
             current_text = "".join(run.text for run in current)
             protect = _label_end(current_text)
             widths: list[float] = []
@@ -407,19 +407,28 @@ class DocxRenderer:
             for segment in current_text.split("\n"):
                 if segment.strip():
                     count += 1
-                    made += [Line(offset + line.start, offset + line.end, line.steps, line.need) for line in fit_text(
-                        segment, widths[offset:offset + len(segment)],
-                        first_room=cont_room if made else first_room, cont_room=cont_room,
-                        max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
-                        margin=rules.fit_margin, pad=rules.condense_pad or 0,
-                        weights=[0.0 if offset + k < protect
-                                 else rules.condense_wide_weight if is_wide(c)
-                                 else rules.condense_space_weight if c == " " else 1.0
-                                 for k, c in enumerate(segment)])]
+
+                    def run(condense: float, units: str):
+                        return fit_text(
+                            segment, widths[offset:offset + len(segment)],
+                            first_room=cont_room if made else first_room, cont_room=cont_room,
+                            max_condense=condense, step=rules.condense_step or 0,
+                            margin=rules.fit_margin, pad=rules.condense_pad or 0,
+                            weights=[0.0 if offset + k < protect
+                                     else rules.condense_wide_weight if is_wide(c)
+                                     else rules.condense_space_weight if c == " " else 1.0
+                                     for k, c in enumerate(segment)], break_after=units)
+
+                    found = run(rules.condense_max or 0, "")
+                    if relayout and len(found) > 1:
+                        # 좁혀도 한 줄에 안 들어가는 문장은 좁히지 않고 내용 단위(쉼표)에서 끊어 두 줄로 쓴다
+                        # (2026-10-08 사용자: 1pt를 줄이고도 마지막 "7명"만 내려 쓰는 것보다 자연스럽다)
+                        found = run(0, rules.wrap_break_after)
+                    made += [Line(offset + line.start, offset + line.end, line.steps, line.need) for line in found]
                 offset += len(segment) + 1
             return current_text, made, count
 
-        text, lines, segments = layout(runs)
+        text, lines, segments = layout(runs, relayout=False)   # 좁혀서 맞춘 모양 — 두세 글자만 넘치는지 가리는 용도
         shortened_text = False
         if not hard and len(lines) == 2 and lines[1].end - lines[1].start <= rules.orphan_max:
             # 좁히기 한도까지 써도 두세 글자가 다음 줄로 넘어간다 — 표현을 줄여 한 줄로 쓰는 것이 가장 좋다
@@ -429,9 +438,10 @@ class DocxRenderer:
             if shortened is not None:
                 runs = shortened
                 shortened_text = True
-                text, lines, segments = layout(runs)
+                text, lines, segments = layout(runs, relayout=False)
             else:
                 self._orphans.append((text.strip()[:24], orphan))
+        text, lines, segments = layout(runs)   # 좁혀도 안 들어가는 문장은 좁히지 않고 내용 단위로 끊는다
         if not hard and len(lines) <= 1 and not any(line.steps for line in lines) and not shortened_text:
             return None  # 줄일 필요도 좁힐 필요도 없는 문장 — 단, LLM이 줄인 문장은 줄인 글을 써야 하니 계획을 낸다
         if len(lines) > segments:
@@ -896,16 +906,32 @@ class DocxRenderer:
         for i, inner in enumerate(blocks):
             reuse = docx_cell.paragraphs[0] if i == 0 else None
             if isinstance(inner, Paragraph):
-                self._paragraph(inner.runs, spec, docx_cell, reuse=reuse)
+                self._cell_hang(self._paragraph(inner.runs, spec, docx_cell, reuse=reuse), inner.runs, spec)
             elif isinstance(inner, Heading):
                 # 셀 안 제목은 본문용 제목 서식(14pt·앞 간격)이 아니라 표 글자 크기의 굵은 글씨로.
                 bold = [replace(run, bold=True) for run in inner.runs]
                 self._paragraph(bold, spec, docx_cell, reuse=reuse)
             elif isinstance(inner, ListItem):
-                self._paragraph(self._cell_item_runs(inner), spec, docx_cell, reuse=reuse)
+                runs = self._cell_item_runs(inner)
+                self._cell_hang(self._paragraph(runs, spec, docx_cell, reuse=reuse), runs, spec)
             else:
                 self._block(inner, docx_cell)
         _drop_leading_blank(docx_cell)
+
+    def _cell_hang(self, paragraph, runs: list[Run], spec: FontSpec) -> None:
+        """칸 안 "- 내용"이 줄바꿈되면 둘째 줄을 말머리 뒤 글자에 맞춘다(내어쓰기, 2026-10-08 사용자). 말머리 폭은 칸 글꼴로 잰다."""
+        if not self.profile.tables.cell_hanging:
+            return
+        text = "".join(run.text for run in runs)
+        match = re.match(r"^\s*([-·∙•*]|\d+[.)])\s", text)
+        if match is None:
+            return
+        measure = self._measurer(spec, False)
+        if not measure.font_available:
+            return
+        hang = int(measure.width(text[:match.end()]))
+        if hang > 0:
+            oxml.set_list_indent(paragraph, 0, hang)
 
     def _cell_item_runs(self, item: ListItem) -> list[Run]:
         """표 안 목록 항목: 본문용 번호 체계(1. □ -)와 들여쓰기를 쓰면 좁은 칸에서 깨지고

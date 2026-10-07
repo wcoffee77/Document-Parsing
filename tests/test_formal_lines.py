@@ -392,3 +392,50 @@ def test_bold_widen_knob_changes_the_measured_width():
     plain = TextMeasurer("바탕체", "바탕체", 177800).width("가나다")
     assert TextMeasurer("바탕체", "바탕체", 177800, bold=True).width("가나다") == pytest.approx(plain * 1.04)
     assert TextMeasurer("바탕체", "바탕체", 177800, bold=True, bold_widen=1.0).width("가나다") == pytest.approx(plain)
+
+
+def test_wrapped_sentence_is_not_condensed_and_breaks_at_comma(tmp_path, fake_fonts):
+    """좁혀도 한 줄에 안 들어가는 문장은 자간을 좁히지 않고 쉼표(내용 단위)에서 끊어 두 줄로 쓴다(2026-10-08 사용자)."""
+    prof = load_profile("formal")
+    unit = "가나다라마바사 아자차카"                                  # 한 덩어리 12자(공백 포함)
+    body = ", ".join([unit] * 3) + ", 마지막 덩어리 일곱"
+    paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]), Paragraph(runs=[Run("- " + body)])])
+    items = [p for p in paragraphs if "가나다" in p.text or "마지막" in p.text]
+    assert len(items) == 2
+    assert items[0].text.rstrip().endswith(",")                       # 쉼표 뒤에서 끊음
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    assert all(r._r.rPr is None or r._r.rPr.find(w + "spacing") is None for p in items for r in p.runs)   # 좁히지 않음
+
+
+def test_table_cell_dash_item_gets_hanging_indent(tmp_path, fake_fonts):
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "t.txt"
+    src.write_text("1. 검토\n\n구분\t(1안)\t(2안)\n장점\t- 짧음\t- 긴 내용이 칸 안에서 줄바꿈 되어도 윗줄 글자에 맞춘다\n", encoding="utf-8")
+    out = tmp_path / "t.docx"
+    convert(str(src), out, "formal", polish="none")
+    paragraphs = [p for t in OpenDocx(str(out)).tables for row in t.rows for c in row.cells for p in c.paragraphs]
+    item = next(p for p in paragraphs if "긴 내용" in p.text)
+    assert item.paragraph_format.first_line_indent < 0 and item.paragraph_format.left_indent > 0
+
+
+def test_table_body_cells_share_scale_and_alignment(tmp_path):
+    """정식보고서 표: 글씨가 적은 칸도 많은 칸과 같은 장평·왼쪽 정렬(2026-10-08 사용자)."""
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "u.txt"
+    long = "<br>".join(f"- 근로기준법상 근로자대표 서면 합의가 필요한 항목 {i}" for i in range(1, 5))
+    src.write_text(f"1. 검토\n\n구분\t(1안) 짧은 안\t(2안) 긴 안\n장점\t- 즉시 시행 可\t{long}\n단점\t- 효과 제한적\t{long}\n",
+                   encoding="utf-8")
+    out = tmp_path / "u.docx"
+    convert(str(src), out, "formal", polish="none")
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    table = OpenDocx(str(out)).tables[0]
+    seen = set()
+    for row in table.rows[1:]:
+        for cell in row.cells[1:]:
+            for p in cell.paragraphs:
+                for r in p.runs:
+                    x = r._r.rPr.find(w + "w") if r._r.rPr is not None else None
+                    seen.add((x.get(w + "val") if x is not None else "100", p.alignment))
+    assert len({scale for scale, _ in seen}) == 1 and len({a for _, a in seen}) == 1

@@ -106,9 +106,37 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     _shrink_long_cells(table, profile, layout)
     _unify_column_fonts(table, layout)
     _balance_table_font(profile, layout)
+    _uniform_cells(table, profile, layout)
     _drop_redundant_cell_fonts(layout)
     _stretch_to(layout, available_width)
     return layout
+
+
+def _uniform_cells(table: Table, profile: Profile, layout: TableLayout) -> None:
+    """표 안 내용 칸의 글자 성격(장평)과 정렬을 하나로 맞춘다(2026-10-08 사용자: 글씨가 많지 않아 여유가 있는 (1안) 칸도
+    같은 장평 90%·왼쪽 정렬이어야 통일감이 있다). 열마다 따로 정하면 표 안에서 칸마다 모양이 달라 보인다.
+    크기가 다른 칸(참고 열 10pt)과 머리행·저자가 정렬을 정한 칸은 건드리지 않는다."""
+    if not profile.tables.uniform_cells:
+        return
+    notes = note_column_set(table, profile) if profile.tables.equal_columns else set()
+    body = [(ri, ci, cell, col, span) for ri, ci, cell, col, span in _iter_grid_indexed(table)
+            if not cell.is_header and col not in notes]
+    if not body:
+        return
+    scales = [layout.char_scale] + [scale for (ri, ci), (size, scale) in layout.cell_font.items()
+                                     if size == layout.font_size]
+    target = min(scales)
+    if target < layout.char_scale:
+        for ri, ci, cell, col, span in body:
+            current = layout.cell_font.get((ri, ci))
+            if current is None or current[0] == layout.font_size:
+                layout.cell_font[(ri, ci)] = (layout.font_size, target)
+        layout.notes.append(f"표 안 칸 장평을 {round(target * 100)}%로 통일")
+    if "left" in layout.cell_align.values():
+        for ri, ci, cell, col, span in body:
+            if not cell.align:
+                layout.cell_align[(ri, ci)] = "left"
+        layout.notes.append("표 안 칸 정렬을 왼쪽으로 통일")
 
 
 def _stretch_to(layout: TableLayout, available_width: int) -> None:

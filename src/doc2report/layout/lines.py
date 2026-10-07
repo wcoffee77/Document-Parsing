@@ -40,11 +40,15 @@ def apply_autospace(text: str, widths: list[float], gap: float, is_wide, is_lati
 
 def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: float,
              max_condense: float = 0.0, step: float = 0.0, margin: float = 0.0,
-             pad: float = 0.0, weights: list[float] | None = None) -> list[Line]:
+             pad: float = 0.0, weights: list[float] | None = None, break_after: str = "",
+             min_break: float = 0.5) -> list[Line]:
     """text를 줄로 나눈다. widths[i]는 text[i]의 폭, room은 글자가 쓸 수 있는 줄 폭(같은 단위).
 
     weights[i]는 text[i]에 글자 간격 1을 줬을 때 실제로 줄어드는 폭의 배수다(기본 1). Word의 "한글·영문 폭 균형"
-    옵션 아래에서는 한글이 간격의 2배, 영문·숫자가 1배 줄었다(2026-10-02 사용자 실측)."""
+    옵션 아래에서는 한글이 간격의 2배, 영문·숫자가 1배 줄었다(2026-10-02 사용자 실측).
+
+    break_after: 이 글자(쉼표) 뒤에서 끊을 수 있으면 어절 경계보다 우선한다 — 문장이 길어 줄을 내려 쓸 때는 내용 단위로
+    끊는 편이 읽기 좋다(2026-10-08 사용자). 단 그렇게 끊은 줄이 가능한 줄 길이의 min_break 비율보다 짧으면 쓰지 않는다."""
     lines: list[Line] = []
     n = len(text)
     pos = 0
@@ -55,6 +59,7 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             break
         room = max((cont_room if lines else first_room) * (1.0 - margin), min(widths[pos:pos + 1] or [1.0]))
         best: Line | None = None
+        unit: Line | None = None   # 쉼표 뒤에서 끊는 후보(좁히지 않고 들어가는 것 중 가장 긴 것)
         need = 0.0
         total = 0.0
         effect = 0.0  # 글자 간격 1을 줬을 때 이 줄에서 줄어드는 폭(글자 수 × 배수)
@@ -69,6 +74,8 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             overflow = total - room
             if overflow <= 1e-6:
                 best = Line(pos, j)
+                if break_after and text[j - 1] in break_after:
+                    unit = best
             elif max_condense > 0 and step > 0 and overflow <= max_condense * effect:
                 steps = max(1, math.ceil(overflow / effect / step - 1e-9))
                 if pad > 0:  # 계산 오차 대비 여유 — 단, 최대치는 넘기지 않는다
@@ -77,6 +84,10 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
             else:
                 need = overflow / max(effect, 1e-9)  # 좁히지 않는 글자(항목명)만 있는 구간이면 effect가 0
                 break
+        if (unit is not None and best is not None and best.end < n and unit.end < best.end
+                and (unit.end - pos) >= min_break * (best.end - pos)):
+            best = unit
+            need = 0.0
         if best is not None and need:
             best = Line(best.start, best.end, best.steps, need)
         if best is None:  # 첫 어절부터 한 줄에 안 들어간다 — 글자 단위로 끊는다
