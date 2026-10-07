@@ -246,6 +246,10 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 - 한 지표를 여러 단면으로 보여 주면 한 □ 아래 '- 구분 : 값'으로 나란히 씁니다(예: □ 지역별 판매 현황 아래 '- 권역별 : …',
   '- 매장 유형별 : …'). 그 수치에 대한 설명·평가(원인, 기준 대비 높고 낮음)는 그 수치 줄 아래 "∙"로 씁니다.
 - □는 그 아래 내용을 대표하는 말로 씁니다(조정한 결과를 쓰면 '□ 조정 결과').
+- 한 절 안에서 "□"와 "-"를 섞을 때는 □가 먼저이고 "-"는 □ 아래에만 둡니다. 절 바로 아래에 "-"를 쓰면 그 절에는 "□"를 쓰지 않습니다.
+- 줄 글 맨 앞에 말머리(-, →, ※)를 또 쓰지 않습니다. 말머리는 m에만 씁니다. 결과·영향은 m을 "→"로, 윗줄의 부가 설명은 m을 "※"로 쓰고
+  "-"와 겹치지 않습니다("-"는 나란한 항목에만 씁니다).
+- 날짜 뒤에 점을 찍지 않습니다(8.22. X → 8.22 O, 8.22 ~ 23 O).
 - 개요·계획의 구분은 '대상 / 일정 / 장소 / 예산'처럼 같은 종류로 나눕니다. 선발·접수·행사·발표 같은 세부 단계는 새 구분이
   아니라 '일정'의 하위(일정 : 접수(~3월 둘째 주), 발표(4월 첫째 주))로 묶습니다(X '- 대상 / - 접수 / - 발표').
 - 한 □ 아래 '-'는 2~4개로 묶습니다. 같은 주제의 사실(원인과 그 근거 수치, 현황과 영향)은 한 '-'에 이어 써서 맥락이
@@ -379,6 +383,28 @@ def _valid_mark(mark: str) -> bool:
     return mark in _PLAIN_MARKS or mark == "표" or bool(_ORDINAL.match(mark) or _SECTION_MARK.match(mark))
 
 
+_TEXT_MARKER = re.compile(r"^([→※*□∙·ㅁ-]|[①-⑳])\s+")
+
+
+def _split_text_marker(mark: str, text: str, warnings: list[str]) -> tuple[str, str]:
+    """줄 글 맨 앞에 말머리가 또 들어 있으면 정리한다("- → 결과"처럼 겹쳐 찍히던 것 — 2026-10-09 사용자). →·※·*는 그 줄의
+    성격을 정하는 말머리라 m을 그것으로 바꾸고, 그 밖의 말머리는 m과 겹치니 글에서 뗀다."""
+    found = _TEXT_MARKER.match(text)
+    if found is None or mark in ("표", "1.") or _SECTION_MARK.match(mark):
+        return mark, text
+    first = _MARK_ALIASES.get(found.group(1), found.group(1))
+    rest = text[found.end():].strip()
+    if not rest:
+        return mark, text
+    if first in ("→", "※", "*") and first != mark:
+        warnings.append(f"말머리 겹침 보정: '{mark}' + '{first}' → '{first}'")
+        return first, rest
+    if first == mark or first in ("□", "∙", "-"):
+        warnings.append(f"말머리 겹침 보정: 글 앞 '{first}'를 뗌")
+        return mark, rest
+    return mark, text
+
+
 def parse_rewrite(raw: str, count: int) -> Rewrite:
     """LLM 응답 → Rewrite. 형식이 어긋나면 ValueError(사유)."""
     start, end = raw.find("{"), raw.rfind("}")
@@ -418,6 +444,7 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
         text = str(item.get("text") or "").strip()
         if not text:
             raise ValueError(f"글이 빈 줄({mark})")
+        mark, text = _split_text_marker(mark, text, warnings)
         lines.append(Line(mark, text, src))
     if not lines:
         raise ValueError("줄이 하나도 없음")
@@ -775,7 +802,9 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     notes += tables_to_ordinals(result.lines)
     notes += drop_title_echoes(result, title)
     notes += lift_lone_groups(result.lines)
+    notes += fix_level_order(result.lines)
     notes += fix_arrows(result.lines, sentences)
+    notes += normalize_dates(result.lines, sentences)
     notes += add_weekdays(result.lines, sentences, year)
     tidy_labels(result.lines)
     body = rewrite_text(result)
@@ -1433,5 +1462,58 @@ def add_weekdays(lines: list[Line], sentences: list[str], year: int | None) -> l
         fixed = fix(line.text, source)
         if fixed != line.text:
             notes.append(f"날짜에 요일 붙임: {line.text[:25]} → {fixed[:30]}")
+            line.text = fixed
+    return notes
+
+
+def fix_level_order(lines: list[Line]) -> list[str]:
+    """한 절 안에서 □보다 앞에 나온 '-'는 □로 올린다. 정식보고서는 말머리 단계를 나온 순서로 정하므로 '-'가 먼저 나오면
+    그 뒤의 □가 '-'보다 깊은 단계가 되어 머리말 체계가 통째로 뒤집힌다(2026-10-09 사용자 건5: '- … / ㅁ …' 뒤섞임).
+    □ 없이 '-'만 있는 절은 그대로 둔다."""
+    notes: list[str] = []
+    bounds = [k for k, l in enumerate(lines) if _SECTION_MARK.match(l.m)] or [-1]
+    if bounds[0] != -1 and bounds[0] > 0:
+        bounds.insert(0, -1)
+    for n, at in enumerate(bounds):
+        end = bounds[n + 1] if n + 1 < len(bounds) else len(lines)
+        body = range(at + 1, end)
+        first_box = next((k for k in body if lines[k].m == "□"), None)
+        if first_box is None:
+            continue
+        for k in body:
+            if k >= first_box:
+                break
+            if lines[k].m == "-":
+                lines[k].m = "□"
+                notes.append(f"구조 보정: □보다 앞선 '-'를 □로 올림 — {lines[k].text[:20]}")
+    return notes
+
+
+def normalize_dates(lines: list[Line], sentences: list[str]) -> list[str]:
+    """날짜 뒤 점을 뗀다: '8.22.~23. 진행' → '8.22 ~ 23 진행'(2026-10-09 사용자: 요일은 없어도 되지만 점은 안 된다).
+    근거 원문에 'M월 D일'이 있는 날짜에만 적용한다(소수·버전과 구분)."""
+    notes: list[str] = []
+
+    def fix(text: str, source: str) -> str:
+        def known(month: str, day: str) -> bool:
+            return bool(re.search(rf"(?<!\d){int(month)}\s*월\s*{int(day)}\s*일", source))
+
+        text = re.sub(r"(?<![\d.])(\d{1,2}\.\d{1,2})\.(?![\d])", lambda m: m.group(1) if known(*m.group(1).split(".")) else m.group(0), text)
+
+        def span(m: re.Match) -> str:
+            if not known(*m.group(1).split(".")):
+                return m.group(0)
+            return f"{m.group(1)}{m.group(2) or ''} ~ {m.group(3)}{m.group(4) or ''}"
+        text = re.sub(r"(?<![\d.])(\d{1,2}\.\d{1,2})(\([월화수목금토일]\))?\s*~\s*(\d{1,2})\.?(\([월화수목금토일]\))?(?![\d.월일])", span, text)
+        return text
+
+    for line in lines:
+        source = " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences))
+        if line.is_table:
+            line.rows = [[fix(c, source) for c in row] for row in line.rows or []]
+            continue
+        fixed = fix(line.text, source)
+        if fixed != line.text:
+            notes.append(f"날짜 표기 정리: {line.text[:25]} → {fixed[:25]}")
             line.text = fixed
     return notes

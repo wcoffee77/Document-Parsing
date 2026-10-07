@@ -798,3 +798,39 @@ def test_weekday_added_to_range_end_date():
     add_weekdays(lines, sents, 2026)
     assert lines[0].text == "기 간 : 8.22(토) ~ 23(일) (2일간)"
     assert lines[1].text == "기 간 : 8.22(토) ~ 23(일)"
+
+
+# ── 2026-10-09 사용자 피드백 3차 ─────────────────────────────────────────────
+
+def test_duplicate_marker_in_text_is_resolved():
+    raw = json.dumps({"title": "t", "lines": [
+        {"m": "-", "text": "→ 3개월 이상 공석 포지션 2개 발생", "src": [1]},
+        {"m": "-", "text": "※ 현 시차출퇴근제는 효과가 작다는 의견", "src": [1]},
+        {"m": "-", "text": "- 이중 대시", "src": [1]},
+        {"m": "-", "text": "-5% 하락", "src": [1]}], "dropped": []}, ensure_ascii=False)
+    from doc2report.drafting import parse_rewrite
+
+    rewrite = parse_rewrite(raw, 1)
+    assert [(l.m, l.text) for l in rewrite.lines] == [
+        ("→", "3개월 이상 공석 포지션 2개 발생"), ("※", "현 시차출퇴근제는 효과가 작다는 의견"),
+        ("-", "이중 대시"), ("-", "-5% 하락")]
+
+
+def test_dash_before_first_square_in_a_section_is_promoted():
+    from doc2report.drafting import Line, fix_level_order
+
+    lines = [Line("1.", "배경 및 현황", [1]), Line("-", "물가 상승으로 불만", [1]), Line("□", "보조금 부족으로 부담 증가", [1]),
+             Line("-", "주거비 22% 상승", [1]), Line("□", "경쟁사 지원 현황", [2]), Line("-", "A사 연동", [2]),
+             Line("1.", "검토 방안", [3]), Line("-", "나란한 항목", [3]), Line("-", "나란한 항목 2", [3])]
+    fix_level_order(lines)
+    assert [l.m for l in lines] == ["1.", "□", "□", "-", "□", "-", "1.", "-", "-"]   # □ 없는 절은 그대로
+
+
+def test_date_dots_are_removed_in_ranges_and_singles():
+    from doc2report.drafting import Line, normalize_dates
+
+    sents = ["캘리브레이션을 8월 22일부터 이틀간 진행했습니다. 최종 등급은 9월 5일에 확정합니다."]
+    lines = [Line("-", "8.22.~23. 진행", [1]), Line("-", "최종 확정 9.5. 인사위원회", [1]), Line("-", "만족도 4.3점", [1]),
+             Line("-", "기 간 : 8.22.(토) ~ 23.", [1])]
+    normalize_dates(lines, sents)
+    assert [l.text for l in lines] == ["8.22 ~ 23 진행", "최종 확정 9.5 인사위원회", "만족도 4.3점", "기 간 : 8.22(토) ~ 23"]
