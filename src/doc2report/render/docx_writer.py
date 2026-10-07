@@ -881,20 +881,25 @@ class DocxRenderer:
                 target = table.cell(r, col)
                 if (end_row, end_col) != (r, col):
                     target = target.merge(table.cell(end_row, end_col))
+                row_head = bool(self.profile.tables.row_header and col == 0 and r > 0
+                                and end_col == col and block.rows[0].cells[0].is_header)
                 self._fill_cell(target, cell, layout,
                                 sum(layout.col_widths[col : end_col + 1]),
-                                font_override=layout.cell_font.get((r, index)))
+                                font_override=None if row_head else layout.cell_font.get((r, index)),
+                                row_head=row_head)
                 col = end_col + 1
 
     def _fill_cell(self, docx_cell, cell: Cell, layout: TableLayout, width: int,
-                  *, font_override: tuple[int, float] | None = None) -> None:
+                  *, font_override: tuple[int, float] | None = None, row_head: bool = False) -> None:
+        if row_head:  # 행 이름 칸: 머리행과 같은 글꼴·크기·장평, 가운데 정렬(2026-10-09 사용자)
+            cell = replace(cell, align="center")
         oxml.set_cell_width(docx_cell, width)
         oxml.set_vertical_align(docx_cell, self.profile.tables.valign)
         if cell.is_header and self.profile.tables.header_shading:
             oxml.shade_cell(docx_cell, self.profile.tables.header_shading)
 
         size, scale = font_override or (layout.font_size, layout.char_scale)
-        spec = self.profile.font("table_header" if cell.is_header else "table")
+        spec = self.profile.font("table_header" if (cell.is_header or row_head) else "table")
         spec = spec.resized(size)
         if scale != (spec.char_scale or 1.0):
             spec = spec.model_copy(update={"char_scale": scale})

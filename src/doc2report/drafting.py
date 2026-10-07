@@ -238,7 +238,7 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 [구성]
 - 보고서 유형에 맞게 절을 나눕니다(예):
   현황 보고 → □ 현황(항목명 : 값) → □ 추진 방향
-  방안 검토 → 1. 배경 및 현황 / 2. 검토 방안(대안 2개는 표, 3개 이상은 ①②③) / 3. 추진 방향
+  방안 검토 → 1. 배경 및 현황 / 2. 검토 방안(내용이 많고 복잡하면 표, 간단하면 ①②③) / 3. 추진 방향
   결과 보고 → □ 운영 경과 → □ 주요 결과 → □ (조정·후속) 결과 → □ 향후 계획
   추진 계획 → □ 개요(- 대상 : … / - 일정 : …) → □ 세부 내용 → □ 소요 예산
   이슈·건의 → 1. 배경 및 이슈 / 2. 검토 가능(안)(①②③) / 3. 건의 사항
@@ -259,7 +259,11 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
   내용, 참고, 나란한 계획은 "→"가 아니라 윗줄 아래의 "∙"(하위 설명)나 "※"(단서·참고)로 씁니다. 한 문서에 "→"는 많아야 한두 개입니다.
 공석·결원은 '미채움'이라 쓰지 않고 '공석'이라고만 씁니다.
 - 제목과 같은 말을 되풀이하는 줄(예: 제목이 '하반기 신입 연수 계획'인데 '하반기 신입 연수 운영')은 쓰지 않습니다. 그 문장은 dropped.
-- 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
+- 원문이 대안을 비교하면(첫째·둘째, 1안·2안, A안·B안) 내용의 양으로 형식을 고릅니다.
+  · 대안마다 장점·단점·조건이 여러 개씩이고 복잡하면 표(대안 2개가 일반적)로 씁니다.
+  · 대안이 3개 이상이거나 대안마다 할 말이 한두 마디로 간단하면 ①②③ 줄로 쓰고, 안 이름 뒤에 쌍점으로 핵심(장·단점을 함께 요약)을
+    한 줄로 붙입니다(O '① 점심시간 30분 연장 : 월 400만원 추가, 노사 협의 필요'). 안 이름을 되풀이하는 '내용' 줄이나
+    '장점/단점' 소제목을 따로 만들지 않습니다. 더 쓸 말이 있을 때만 그 아래 짧은 "-" 한두 줄을 둡니다.
   표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열)이고 그 아래 행(항목)은 행과 열을 바꾸지 않고 문서 내용에 맞게 정합니다
   (항목 이름과 개수는 문서마다 다릅니다: 내용·장점·단점/고려 사항, 효과·비용·리스크 등).
   **행은 그 항목에 대안별로 쓸 내용이 충분할 때만 만듭니다.** 한 칸에 "-" 한 줄뿐인 항목을 여러 개 만들어 표를 잘게 쪼개지 말고,
@@ -385,7 +389,7 @@ def _valid_mark(mark: str) -> bool:
     return mark in _PLAIN_MARKS or mark == "표" or bool(_ORDINAL.match(mark) or _SECTION_MARK.match(mark))
 
 
-_TEXT_MARKER = re.compile(r"^([→※*□∙·ㅁ-]|[①-⑳])\s+")
+_TEXT_MARKER = re.compile(r"^([→※*□∙·ㅁ-]|[①-⑳]|\(\d{1,2}\))\s+")
 
 
 def _split_text_marker(mark: str, text: str, warnings: list[str]) -> tuple[str, str]:
@@ -395,9 +399,16 @@ def _split_text_marker(mark: str, text: str, warnings: list[str]) -> tuple[str, 
     if found is None or mark in ("표", "1.") or _SECTION_MARK.match(mark):
         return mark, text
     first = _MARK_ALIASES.get(found.group(1), found.group(1))
+    paren = re.fullmatch(r"\((\d{1,2})\)", first)
+    if paren and 1 <= int(paren.group(1)) <= 20:
+        first = chr(ord("①") + int(paren.group(1)) - 1)
     rest = text[found.end():].strip()
     if not rest:
         return mark, text
+    if _ORDINAL.match(first) and not _ORDINAL.match(mark):
+        # "- (1) 방안 : …"처럼 원문자·번호 앞에 "-"가 겹치면 "-"를 뺀다(2026-10-09 사용자 건2)
+        warnings.append(f"말머리 겹침 보정: '{mark}' + '{first}' → '{first}'")
+        return first, rest
     if first in ("→", "※", "*") and first != mark:
         warnings.append(f"말머리 겹침 보정: '{mark}' + '{first}' → '{first}'")
         return first, rest
@@ -803,6 +814,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     notes += orient_tables(result.lines)
     notes += tables_to_ordinals(result.lines)
     notes += consolidate_table_rows(result.lines)
+    notes += compact_ordinals(result.lines)
     notes += drop_title_echoes(result, title)
     notes += lift_lone_groups(result.lines)
     notes += fix_level_order(result.lines)
@@ -1392,31 +1404,35 @@ def drop_title_echoes(rewrite: Rewrite, title: str) -> list[str]:
 
 
 _ORDINALS = "①②③④⑤⑥⑦⑧⑨"
+ORDINAL_ITEMS_MAX = 3      # 대안 2개 비교 표에서, 대안마다 항목이 이 개수 이하면 표 대신 ①② 줄(내용이 간단하다고 본다)
 
 
 def tables_to_ordinals(lines: list[Line]) -> list[str]:
-    """대안이 셋 이상인 비교 표는 ①②③ 줄로 바꾼다 — 세 안을 나열해 설명하는 편이 읽기 쉽다(2026-10-08 사용자 건5,
-    정답 5와 같은 방식). 칸 안 줄이 하나면 '- 항목 : 내용', 여럿이면 '- 항목' 아래 '∙ 내용'."""
+    """대안이 셋 이상이거나 내용이 간단한(대안마다 항목 3개 이하) 비교 표는 ①②③ 줄로 바꾼다 — 안을 나열해 설명하는 편이 읽기 쉽다(2026-10-08 사용자 건5,
+    정답 5와 같은 방식). 항목마다 '- 항목 : 내용' 줄로 풀어 둔 것을 `compact_ordinals`가 한 줄 요약으로 줄인다."""
     notes: list[str] = []
     out: list[Line] = []
     for line in lines:
         rows = line.rows
         options = rows[0][1:] if rows else []
-        if (not rows or len(options) < 3 or len(options) > len(_ORDINALS) or len({len(r) for r in rows}) != 1
+        if (not rows or len(options) < 2 or len(options) > len(_ORDINALS) or len({len(r) for r in rows}) != 1
                 or sum(1 for c in options if _OPTION_HEAD.search(c.strip())) < 2):
             out.append(line)
             continue
+        if len(options) == 2:
+            # 대안 2개라도 내용이 간단하면(대안마다 항목이 ORDINAL_ITEMS_MAX개 이하) 표보다 ①② 줄이 낫다(2026-10-09 사용자)
+            counts = [sum(len([i for i in row[j].split("\n") if i.strip(" -")]) for row in rows[1:]) for j in (1, 2)]
+            if max(counts) > ORDINAL_ITEMS_MAX:
+                out.append(line)
+                continue
         for j, option in enumerate(options, 1):
             name = re.sub(r"^\(?\s*(?:\d|[A-C])\s*안\s*\)?\s*", "", option.replace("\n", " ")).strip() or option
             out.append(Line(_ORDINALS[j - 1], name, list(line.src)))
             for row in rows[1:]:
                 pieces = [re.sub(r"^\s*-\s*", "", p).strip() for p in row[j].split("\n") if p.strip(" -")]
                 attr = row[0].replace("\n", " ").strip()
-                if len(pieces) == 1:
-                    out.append(Line("-", f"{attr} : {pieces[0]}", list(line.src)))
-                elif pieces:
-                    out.append(Line("-", attr, list(line.src)))
-                    out += [Line("∙", p, list(line.src)) for p in pieces]
+                if pieces:
+                    out.append(Line("-", f"{attr} : {', '.join(pieces)}", list(line.src)))
         notes.append(f"구조 보정: 대안 {len(options)}개 비교 표를 ①②③ 줄로 바꿈")
     lines[:] = out
     return notes
@@ -1593,4 +1609,60 @@ def restrict_arrows(lines: list[Line], sentences: list[str], rules=None) -> list
         previous = lines[k - 1].m if k else ""
         line.m = "∙" if previous in ("-", "∙", "→") else "-"
         notes.append(f"구조 보정: 인과·진행이 아닌 '→'를 '{line.m}'로 — {line.text[:20]}")
+    return notes
+
+
+_ATTR_LINE = re.compile(r"^(?P<attr>[가-힣/·]{2,8}(?:\s*사항)?)\s*:\s*(?P<text>\S.*)$")
+_ATTR_CONTENT = re.compile(r"^(내용|개요|방식|요지|설명|방안)$")
+_ATTR_JUDGE = re.compile(r"^(장점|단점|효과|장단점|고려\s*사항|단점/고려\s*사항|한계|제약|비용|일정|조건|리스크|위험|특징)$")
+SUMMARY_LIMIT = 34       # 안 이름 뒤에 한 줄로 붙일 요약의 길이(공백 뺀 글자 수)
+
+
+def compact_ordinals(lines: list[Line]) -> list[str]:
+    """①②③ 대안 줄을 간결하게 한다(2026-10-09 사용자 건5: 안 이름과 같은 '내용' 줄, '장점/단점' 소제목이 붙어 장황했다).
+    ① 안 이름을 되풀이하는 '내용 : …' 줄은 뺀다. ② 남은 항목을 쉼표로 이어 짧으면(공백 빼고 SUMMARY_LIMIT자 이하)
+    '① 안 이름 : 요약' 한 줄로, 길면 항목 줄을 그대로 둔다('장점 : …' 같은 이름은 유지). 새 말을 만들지 않고 있는 조각만 이어 붙인다."""
+    notes: list[str] = []
+    i = 0
+    while i < len(lines):
+        head = lines[i]
+        if head.is_table or not _ORDINAL.match(head.m):
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and lines[j].m in ("-", "∙") and not lines[j].is_table:
+            j += 1
+        children = lines[i + 1:j]
+        if not children or " : " in head.text:
+            i = j
+            continue
+        title = _stems(head.text)
+        kept: list[tuple[str | None, str, Line]] = []
+        for child in children:
+            found = _ATTR_LINE.match(child.text)
+            attr, body = (found.group("attr").strip(), found.group("text").strip()) if found and (
+                _ATTR_CONTENT.match(found.group("attr").strip()) or _ATTR_JUDGE.match(found.group("attr").strip())) else (None, child.text)
+            words = _stems(body)
+            echoes = attr is not None and _ATTR_CONTENT.match(attr) and (
+                body.replace(" ", "") in head.text.replace(" ", "") or head.text.replace(" ", "") in body.replace(" ", "")
+                or (len(words) >= 2 and len(words & title) / len(words) >= 0.6))
+            if echoes:
+                head.src = sorted(set(head.src) | set(child.src))
+                continue
+            kept.append((attr, body, child))
+        removed = len(children) - len(kept)
+        pieces = [body for attr, body, _ in kept]
+        summary = ", ".join(pieces)
+        if kept and len(summary.replace(" ", "")) <= SUMMARY_LIMIT:
+            head.text = f"{head.text} : {summary}"
+            head.src = sorted(set(head.src) | {n for _, _, c in kept for n in c.src})
+            lines[i + 1:j] = []
+            notes.append(f"구조 보정: ①②③ 안 '{head.text[:20]}'을 한 줄로 요약(항목 {len(children)}개 → 0개)")
+            j = i + 1
+        else:
+            lines[i + 1:j] = [c for _, _, c in kept]
+            j = i + 1 + len(kept)
+            if removed:
+                notes.append(f"구조 보정: ①②③ 안 '{head.text[:20]}' 아래 안 이름을 되풀이한 '내용' 줄 {removed}개를 뺌")
+        i = j
     return notes

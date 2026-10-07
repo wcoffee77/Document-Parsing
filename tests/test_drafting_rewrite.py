@@ -545,7 +545,8 @@ def test_case2_replay_retry_names_missing_table_and_coined_word():
 
     draft(TEXT2, ask=ask, year=2026)
     retry = requests[1]
-    assert "몰아일" in retry and "표도 ①② 줄도 없음" in retry
+    # "- (1) …"의 "(1)"은 2026-10-09부터 ①로 읽는다(겹친 말머리 정리) — 그래서 '표도 ①② 줄도 없음'은 더는 안 걸리고 번호 절·줄임말이 걸린다
+    assert "몰아일" in retry and "번호 절이 없음" in retry
 
 
 def test_coined_word_inside_a_table_cell_is_repaired_and_unrepairable_ones_are_reported():
@@ -766,9 +767,11 @@ def test_three_option_table_becomes_ordinal_list():
     assert tables_to_ordinals(lines)
     shown = [(l.m, l.text) for l in lines]
     assert shown[0] == ("①", "기준 상향") and ("-", "비용 : 연 4억원 증가") in shown
-    assert ("③", "실비 지원") in shown and ("∙", "비용 통제 어려움") in shown
-    two = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "a", "b"]])]
-    assert tables_to_ordinals(two) == [] and two[0].is_table          # 두 안은 표 그대로
+    assert ("③", "실비 지원") in shown and ("-", "고려 사항 : 관리 부담, 비용 통제 어려움") in shown
+    rich = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "- a\n- b", "- c\n- d"], ["단점", "- e\n- f", "- g\n- h"]])]
+    assert tables_to_ordinals(rich) == [] and rich[0].is_table          # 내용이 많은 두 안은 표 그대로
+    simple = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "- a", "- c"], ["단점", "- e", "- g"]])]
+    assert tables_to_ordinals(simple) and simple[0].m == "①"            # 간단하면 ①② 줄
 
 
 def test_weekday_is_added_only_to_real_dates():
@@ -884,3 +887,26 @@ def test_arrow_without_causal_source_becomes_explanation_dot():
              Line("-", "경력자 부족", [3]), Line("→", "3개월 이상 공석 포지션 2개", [3]), Line("→", "또 다른 화살표", [3])]
     restrict_arrows(lines, sents)
     assert [l.m for l in lines] == ["1.", "-", "∙", "-", "→", "∙"]    # 인과 근거가 있는 첫 → 하나만 남김
+
+
+def test_ordinals_are_compacted_into_one_line_each():
+    from doc2report.drafting import Line, compact_ordinals
+
+    lines = [Line("1.", "검토 방안", [1]),
+             Line("①", "기준표 일괄 상향", [2]), Line("-", "내용 : 기준표 일괄 상향", [2]), Line("-", "장점 : 즉시 반영 可", [2]),
+             Line("-", "단점 : 연 4억원 추가", [2]),
+             Line("②", "물가 연동 방식 전환", [3]), Line("-", "내용 : 물가 연동 방식으로 전환", [3]),
+             Line("-", "장점 : 형평 확보", [3]), Line("-", "단점 : 연동 지표 선정 어려움, 관리 부담, 연 1회 점검 필요, 노조 협의 및 취업규칙 개정 필요", [3])]
+    compact_ordinals(lines)
+    shown = [(l.m, l.text) for l in lines]
+    assert shown[1] == ("①", "기준표 일괄 상향 : 즉시 반영 可, 연 4억원 추가")          # 이름 되풀이 줄 삭제 + 장·단점 한 줄 요약
+    assert shown[2][0] == "②" and len(shown) == 5                                       # ②는 길어서 항목 줄 유지('내용' 줄만 삭제)
+    assert not any(t.startswith("내용") for _, t in shown)
+
+
+def test_dash_before_paren_number_becomes_ordinal():
+    raw = json.dumps({"title": "t", "lines": [{"m": "-", "text": "(1) 방안 : 올해 시행", "src": [1]},
+                                               {"m": "□", "text": "② 방안 : 내년 도입", "src": [1]}], "dropped": []}, ensure_ascii=False)
+    from doc2report.drafting import parse_rewrite
+
+    assert [(l.m, l.text) for l in parse_rewrite(raw, 1).lines] == [("①", "방안 : 올해 시행"), ("②", "방안 : 내년 도입")]

@@ -439,3 +439,21 @@ def test_table_body_cells_share_scale_and_alignment(tmp_path):
                     x = r._r.rPr.find(w + "w") if r._r.rPr is not None else None
                     seen.add((x.get(w + "val") if x is not None else "100", p.alignment))
     assert len({scale for scale, _ in seen}) == 1 and len({a for _, a in seen}) == 1
+
+
+def test_row_name_cells_use_header_font_and_center(tmp_path):
+    """정식보고서 표: 첫 열(행 이름)은 머리행과 같은 글꼴·크기·장평, 가운데 정렬(2026-10-09 사용자)."""
+    from doc2report.pipeline import convert
+
+    src = tmp_path / "r.txt"
+    src.write_text("1. 검토\n\n구분\t(1안) 가\t(2안) 나\n장점\t- 즉시 시행 可\t- 적합\n단점\t- 제한적\t- 서면 합의 필요\n", encoding="utf-8")
+    out = tmp_path / "r.docx"
+    convert(str(src), out, "formal", polish="none")
+    rows = OpenDocx(str(out)).tables[0].rows
+
+    def fmt(cell):
+        run = cell.paragraphs[0].runs[0]
+        return (run.font.name, run.font.size, run.bold, cell.paragraphs[0].alignment)
+
+    assert fmt(rows[1].cells[0])[:3] == fmt(rows[0].cells[0])[:3]
+    assert fmt(rows[1].cells[0])[3] == fmt(rows[2].cells[0])[3] == 1       # WD_ALIGN_PARAGRAPH.CENTER
