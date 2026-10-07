@@ -238,21 +238,29 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 [구성]
 - 보고서 유형에 맞게 절을 나눕니다(예):
   현황 보고 → □ 현황(항목명 : 값) → □ 추진 방향
-  방안 검토 → 1. 배경 / 2. 검토 방안(대안 비교 표) / 3. 추진 방향
-  결과 보고 → □ 운영 경과 → □ 주요 결과 → □ 향후 계획
-  추진 계획 → □ 대상 → □ 일정 → □ 세부 내용 → □ 소요 예산
-  이슈·건의 → □ 배경 → □ 검토안(①②③) → □ 건의 사항
+  방안 검토 → 1. 배경 및 현황 / 2. 검토 방안(대안 2개는 표, 3개 이상은 ①②③) / 3. 추진 방향
+  결과 보고 → □ 운영 경과 → □ 주요 결과 → □ (조정·후속) 결과 → □ 향후 계획
+  추진 계획 → □ 개요(- 대상 : … / - 일정 : …) → □ 세부 내용 → □ 소요 예산
+  이슈·건의 → 1. 배경 및 이슈 / 2. 검토 가능(안)(①②③) / 3. 건의 사항
+- 표나 ①②③ 대안 목록은 반드시 그것을 부르는 절 제목("2. 검토 방안" 등) 아래에 둡니다. 제목 없이 표가 나오면 안 됩니다.
+- 한 지표를 여러 단면으로 보여 주면 한 □ 아래 '- 구분 : 값'으로 나란히 씁니다(예: □ 지역별 판매 현황 아래 '- 권역별 : …',
+  '- 매장 유형별 : …'). 그 수치에 대한 설명·평가(원인, 기준 대비 높고 낮음)는 그 수치 줄 아래 "∙"로 씁니다.
+- □는 그 아래 내용을 대표하는 말로 씁니다(조정한 결과를 쓰면 '□ 조정 결과').
+- 제목과 같은 말을 되풀이하는 줄(예: 제목이 '하반기 신입 연수 계획'인데 '하반기 신입 연수 운영')은 쓰지 않습니다. 그 문장은 dropped.
 - 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
   표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열), 그 아래 행이 장점·단점·비용 등(항목이 행)입니다. 행과 열을 바꾸지 않습니다.
   표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 씁니다. 절은 빼지 않되, 한 줄은 조건 하나를
   공백 빼고 32자 이내의 짧은 명사형으로 씁니다(X '- 식당 좌석을 늘리려면 바닥 배관을 옮겨야 하므로 공사 기간이 길어지고 비용도 약 2억원 정도 들 것으로 예상됨'
   O '- 배관 이설로 공사비 약 2억원 발생').
-- 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안 비교 표가 있을 때만 "1."(번호 절)을 씁니다.
-- "1." 아래 "□"는 묶음이 둘 이상이거나, "□" 자체가 내용을 담은 핵심 문장일 때만 씁니다
-  (O '□ 구성원 설문 결과(120명), 근무 장소 관련 불만 高'). 내용 없는 항목명 "□" 하나만 두지 않습니다
-  (X '1. 배경' 아래 '□ 현황' 하나 → O '1. 배경 및 현황' 바로 아래 '-' 항목들).
+- 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안을 비교·검토하는 문서는 "1."(번호 절)을 씁니다.
+- "1." 아래 "□"는 묶음이 둘 이상이거나, "□" 자체가 내용을 담은 핵심 문장일 때만 씁니다. 내용 없는 항목명 "□" 하나만
+  두지 않습니다(X '1. 배경' 아래 '□ 현황' 하나).
+  · 현상·결론과 그 근거 수치가 있으면: "□ 핵심 문장" + 아래 "- 근거 수치"
+    (O '□ 구성원 설문 결과, 근무 장소 관련 불만 高' / '- 응답자 120명 中 사무실 이전 희망 40%')
+  · 나란한 사실뿐이면: "1. 배경 및 현황" 바로 아래 "-" 항목들. 절 제목에 '및'은 한 번만 씁니다.
+- 결론·추진 방향의 요지는 "→"가 아니라 "□ 핵심 문장"으로 씁니다(□ 하나라도 핵심 문장이면 됩니다).
 - 말머리(m): "1."(번호 절, text는 번호 없이), "□", "-"(세부), "∙"(- 아래 세부), "①" "②" "③"(안·계획 나열),
-  "→"(목표·결과), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
+  "→"(바로 윗줄의 결과·목표일 때만 — 나란한 두 계획은 둘 다 "-"), "※"(단서·확인 필요·후속 일정), "*"(바로 윗줄을 보충하는 참고 수치·기준), "표".
 - 특정 대안에만 해당하는 내용(조건·비용·일정)은 그 대안의 표 칸이나 하위 항목(-, ∙)에 넣습니다.
 - 사실 나열은 "항목명 : 값"으로 씁니다(교육 인원 : 총 120명 / 장 소 : 본사 대강당).
 - 결론·제안은 마지막 절에 두고, 앞의 대안 번호를 다시 부릅니다(우선 ① …, 이후 ② …).
@@ -264,7 +272,10 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 - 한자 약어는 高 中 現 可 必 時 順 內 人 月 만 씁니다(협의 中, 확인 必, 점검時, 2회/人, 1회/月).
 - 숫자: 만원·억원은 붙여 씁니다. 날짜 M.D, 기한 (~11.3일), 변화 (기존 10% → 15%), 분모 20명 中 16명.
 - 특정 회사명(A사·B사)은 '경쟁사'로 묶습니다.
-- 한 항목은 공백 빼고 대개 20~35자, 길어도 50자 안팎. 한 문장에 사실이 여럿이면 사실마다 항목을 나눕니다.
+- 한 항목은 한 줄(공백 포함 32자 안팎)에 들어가게 씁니다. 넘으면 군더더기를 덜어 줄이고, 사실이 여럿이면 사실마다 항목을
+  나눕니다(X '- 현장 실습 : 4명씩 5개 조로 나눠 지역 매장을 하나씩 맡아 운영한 뒤 11월 말 결과 발표'
+  O '- 현장 실습 : 조별 매장 운영 및 11월 말 결과 발표(4명/조)').
+- 높고 낮음은 '高·低' 또는 '높음·낮음'으로 씁니다('고조'·'저조'처럼 뜻이 다른 말을 짝 맞춰 만들지 않습니다).
 - 날짜 줄과 맺음말("- 이 상 -")은 쓰지 않습니다(변환기가 붙입니다).
 
 [예시]
@@ -474,9 +485,12 @@ def has_alternatives(sentences: list[str], rules=None) -> bool:
     """원문이 대안을 비교하는 글인가(rules/drafting.yaml의 alternative_cues)."""
     from .transform.factcheck import load_rules
 
-    cues = (rules or load_rules()).alternative_cues
+    rules = rules or load_rules()
     text = " ".join(sentences)
-    return sum(1 for cue in cues if re.search(cue, text)) >= 2
+    # '방안은 세 가지' 같은 강한 단서는 하나로 충분하다(2026-10-08 사용자 건5: 단서가 하나뿐이라 번호 절·검토안 요구가 빠졌다)
+    if any(re.search(cue, text) for cue in rules.alternative_strong_cues):
+        return True
+    return sum(1 for cue in rules.alternative_cues if re.search(cue, text)) >= 2
 
 
 def _table_cell_limit() -> int:
@@ -751,7 +765,11 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     except Exception:  # noqa: BLE001
         pass
     notes += orient_tables(result.lines)
+    notes += tables_to_ordinals(result.lines)
+    notes += drop_title_echoes(result, title)
     notes += lift_lone_groups(result.lines)
+    notes += fix_arrows(result.lines, sentences)
+    notes += add_weekdays(result.lines, sentences, year)
     tidy_labels(result.lines)
     body = rewrite_text(result)
     notes += _coverage_notes(result, sentences, body)
@@ -1271,10 +1289,131 @@ def lift_lone_groups(lines: list[Line]) -> list[str]:
             continue
         section = lines[at]
         label, heading = box.text.strip(), section.text.strip()
-        if label.replace(" ", "") not in heading.replace(" ", ""):
+        children = [k for k in range(boxes[0] + 1, end) if lines[k].m in ("-", "→")]
+        if (len(children) >= 2 and not _NUMBER.search(lines[children[0]].text) and not _LABEL.match(lines[children[0]].text)
+                and all(_NUMBER.search(lines[k].text) for k in children[1:])):
+            # 첫 '-'가 현상·결론이고 나머지가 그 근거 수치면, 그 첫 줄을 □ 핵심 문장으로 올린다(2026-10-08 사용자 건2:
+            # '□ R&D 조직 설문 결과, 불만 高' 아래 '- 응답자 312명 중 …')
+            first = lines[children[0]]
+            box.text, box.src = first.text, sorted(set(box.src) | set(first.src))
+            del lines[children[0]]
+            notes.append(f"구조 보정: '{heading}' 절의 항목명 □ '{label}' 대신 첫 항목을 □ 핵심 문장으로 올림 — 아래 수치 항목은 그 근거")
+            continue
+        # 절 제목에 이미 '및'이나 괄호가 있으면 더 붙이지 않는다('배경 및 현황 및 설문 결과' X — 2026-10-08 사용자)
+        if label.replace(" ", "") not in heading.replace(" ", "") and not re.search(r"\s및\s|[()（）]", heading):
             joined = f"{heading} 및 {label}" if len(label.replace(" ", "")) <= 4 else f"{heading} ({label})"
             section.text = joined
         section.src = sorted(set(section.src) | set(box.src))
         del lines[boxes[0]]
         notes.append(f"구조 보정: '{heading}' 절 아래 하나뿐인 항목명 □ '{label}'를 빼고 절 제목을 '{section.text}'로")
+    return notes
+
+
+def fix_arrows(lines: list[Line], sentences: list[str], rules=None) -> list[str]:
+    """'→'는 바로 윗줄의 결과·목표에만 쓴다(2026-10-08 사용자). 절(1.) 바로 아래 첫 줄이면 □로, 근거 원문이 병렬 표현
+    ('같이 검토'·'아울러' 등, rules/drafting.yaml::parallel_cues)이면 '-'로 바꾼다."""
+    cues = (rules or _load_rules()).parallel_cues
+    notes: list[str] = []
+    for k, line in enumerate(lines):
+        if line.m != "→" or k == 0:
+            continue
+        if _SECTION_MARK.match(lines[k - 1].m):
+            line.m = "□"
+            notes.append(f"구조 보정: 절 바로 아래 '→' 줄을 □로 — {line.text[:20]}")
+        elif line.src and all(any(re.search(c, sentences[i - 1]) for c in cues)
+                              for i in line.src if 1 <= i <= len(sentences)):
+            line.m = "-"
+            notes.append(f"구조 보정: 윗줄의 결과가 아닌 병렬 항목이라 '→'를 '-'로 — {line.text[:20]}")
+    return notes
+
+
+def _stems(text: str) -> set[str]:
+    return {w[:2] for w in re.findall(r"[가-힣]{2,}", text)}
+
+
+def drop_title_echoes(rewrite: Rewrite, title: str) -> list[str]:
+    """제목을 되풀이할 뿐인 줄(숫자 없음, 낱말 60% 이상이 제목과 같음)은 뺀다(2026-10-08 사용자 건4: '차세대 리더 육성
+    프로그램 …'이 제목과 같은 말). 근거 문장은 생략(dropped)으로 남긴다. 그 결과 아래가 빈 항목명 □는 같이 뺀다."""
+    heading = _stems(f"{title} {rewrite.title}")
+    notes: list[str] = []
+    keep: list[Line] = []
+    for line in rewrite.lines:
+        words = _stems(line.text)
+        if (not line.is_table and line.m in ("-", "∙", "→", "□") and not _NUMBER.search(line.text)
+                and ":" not in line.text and len(words) >= 3 and len(words & heading) / len(words) >= 0.6):
+            rewrite.dropped = sorted(set(rewrite.dropped) | set(line.src))
+            notes.append(f"구조 보정: 제목과 같은 말을 되풀이한 줄을 뺌 — {line.text[:30]}")
+            continue
+        keep.append(line)
+    rewrite.lines[:] = [l for k, l in enumerate(keep)
+                        if not (l.m == "□" and _is_bare_label(l.text)
+                                and (k + 1 == len(keep) or keep[k + 1].m in ("□", "표") or _SECTION_MARK.match(keep[k + 1].m)))]
+    return notes
+
+
+_ORDINALS = "①②③④⑤⑥⑦⑧⑨"
+
+
+def tables_to_ordinals(lines: list[Line]) -> list[str]:
+    """대안이 셋 이상인 비교 표는 ①②③ 줄로 바꾼다 — 세 안을 나열해 설명하는 편이 읽기 쉽다(2026-10-08 사용자 건5,
+    정답 5와 같은 방식). 칸 안 줄이 하나면 '- 항목 : 내용', 여럿이면 '- 항목' 아래 '∙ 내용'."""
+    notes: list[str] = []
+    out: list[Line] = []
+    for line in lines:
+        rows = line.rows
+        options = rows[0][1:] if rows else []
+        if (not rows or len(options) < 3 or len(options) > len(_ORDINALS) or len({len(r) for r in rows}) != 1
+                or sum(1 for c in options if _OPTION_HEAD.search(c.strip())) < 2):
+            out.append(line)
+            continue
+        for j, option in enumerate(options, 1):
+            name = re.sub(r"^\(?\s*(?:\d|[A-C])\s*안\s*\)?\s*", "", option.replace("\n", " ")).strip() or option
+            out.append(Line(_ORDINALS[j - 1], name, list(line.src)))
+            for row in rows[1:]:
+                pieces = [re.sub(r"^\s*-\s*", "", p).strip() for p in row[j].split("\n") if p.strip(" -")]
+                attr = row[0].replace("\n", " ").strip()
+                if len(pieces) == 1:
+                    out.append(Line("-", f"{attr} : {pieces[0]}", list(line.src)))
+                elif pieces:
+                    out.append(Line("-", attr, list(line.src)))
+                    out += [Line("∙", p, list(line.src)) for p in pieces]
+        notes.append(f"구조 보정: 대안 {len(options)}개 비교 표를 ①②③ 줄로 바꿈")
+    lines[:] = out
+    return notes
+
+
+_WEEKDAYS = "월화수목금토일"
+
+
+def add_weekdays(lines: list[Line], sentences: list[str], year: int | None) -> list[str]:
+    """보고서 날짜 M.D 뒤에 요일을 붙인다(9.5 → 9.5(토), 2026-10-08 사용자). 근거 원문에 'M월 D일'이 있을 때만 — 9.5점 같은
+    소수와 헷갈리지 않게. 요일은 달력으로 계산한다."""
+    import datetime
+
+    if not year:
+        return []
+    notes: list[str] = []
+    pattern = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{1,2})(?![\d.%]|\s*\(|일|점|배|명|건|개|회|시간|년)")
+
+    def fix(text: str, source: str) -> str:
+        def one(m: re.Match) -> str:
+            month, day = int(m.group(1)), int(m.group(2))
+            if not re.search(rf"(?<!\d){month}\s*월\s*{day}\s*일", source):
+                return m.group(0)
+            try:
+                weekday = _WEEKDAYS[datetime.date(year, month, day).weekday()]
+            except ValueError:
+                return m.group(0)
+            return f"{m.group(0)}({weekday})"
+        return pattern.sub(one, text)
+
+    for line in lines:
+        source = " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences))
+        if line.is_table:
+            line.rows = [[fix(c, source) for c in row] for row in line.rows or []]
+            continue
+        fixed = fix(line.text, source)
+        if fixed != line.text:
+            notes.append(f"날짜에 요일 붙임: {line.text[:25]} → {fixed[:30]}")
+            line.text = fixed
     return notes

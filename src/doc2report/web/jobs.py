@@ -120,7 +120,9 @@ class JobRunner:
             job.say("문구·구조 규칙 적용 중")
             result = convert_document(merged, docx_path, profile, polish=polish, llm=llm,
                                       date=opts.date_text(options.get("date"), profile),
-                                      notes=notes, progress=job.say)
+                                      notes=notes, progress=job.say,
+                                      # 줄글을 보고서로 새로 쓴 글은 두세 글자 넘치는 줄을 LLM으로 줄여 한 줄로(CLI draft와 같게)
+                                      shorten=bool(drafted) and llm_status()["configured"])
             files = [docx_path.name]
             formats = set(options.get("formats") or [])
             if "md" in formats:

@@ -75,7 +75,7 @@ def fit_text(text: str, widths: list[float], *, first_room: float, cont_room: fl
                     steps = min(steps + math.ceil(pad / step - 1e-9), int(max_condense / step + 1e-9))
                 best = Line(pos, j, steps)
             else:
-                need = overflow / effect
+                need = overflow / max(effect, 1e-9)  # 좁히지 않는 글자(항목명)만 있는 구간이면 effect가 0
                 break
         if best is not None and need:
             best = Line(best.start, best.end, best.steps, need)

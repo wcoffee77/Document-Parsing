@@ -155,6 +155,29 @@ def test_slight_overflow_condenses_instead_of_wrapping(tmp_path, fake_fonts):
     assert values and all(-20 <= v <= -2 for v in values)           # 0.1~1pt (여유 0.4pt가 더해져 최대 1pt까지)
 
 
+def test_condensed_label_line_keeps_label_width(tmp_path, fake_fonts):
+    """긴 '항목명 : 값' 줄을 좁힐 때 항목명은 좁히지 않는다 — 공백으로 맞춘 쌍점이 짧은 줄과 어긋나지 않게(2026-10-08 사용자)."""
+    prof = load_profile("formal")
+    count = int(prof.page.usable_width / prof.font("body").size) - 2
+    label = "실제 과제   : "
+    body = label + "가" * (count + 1 - len(label) // 2 - 2)
+    paragraphs = _render(tmp_path, [Heading(level=2, runs=[Run("추진 배경")]),
+                                    Paragraph(runs=[Run("- 짧은 항목 : 가나")]),
+                                    Paragraph(runs=[Run("- " + body)])])
+    item = next(p for p in paragraphs if "실제 과제" in p.text)
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+    def spacing(run):
+        x = run._r.rPr.find(w + "spacing") if run._r.rPr is not None else None
+        return int(x.get(w + "val")) if x is not None else 0
+
+    label_runs = [r for r in item.runs if "실제" in r.text]
+    value_runs = [r for r in item.runs if "가가" in r.text]
+    assert label_runs and value_runs
+    assert all(spacing(r) == 0 for r in label_runs)                  # 항목명·쌍점은 그대로
+    assert any(spacing(r) < 0 for r in value_runs)                   # 값만 좁힘
+
+
 # ── 서식 없는 txt: 제목·날짜 ──────────────────────────────────────────
 
 def test_txt_title_and_date_are_recognised():

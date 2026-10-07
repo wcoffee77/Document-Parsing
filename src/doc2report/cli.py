@@ -43,7 +43,8 @@ def draft(
     mode: str = typer.Option("rewrite", "--mode",
                              help="rewrite: 말투를 보고서 형식으로 다듬고 배열(사실은 원문 그대로 검증) / "
                                   "place: 원문 문장 그대로 배치만"),
-    shorten: bool = typer.Option(False, "--shorten", help="줄 맞춤에서 두세 글자 넘치는 문장만 LLM으로 줄임"),
+    shorten: bool = typer.Option(True, "--shorten/--no-shorten",
+                                 help="줄 맞춤에서 두세 글자 넘치는 문장을 LLM으로 줄여 한 줄로(기본 켬, 줄인 글도 숫자·날짜 검증)"),
     runs: int = typer.Option(1, "--runs", min=1, max=5,
                              help="같은 입력을 N번 돌려 남은 문제가 가장 적은 결과를 씀(LLM은 실행마다 결과가 다름)"),
     report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),

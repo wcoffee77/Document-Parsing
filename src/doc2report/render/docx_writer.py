@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -392,6 +394,7 @@ class DocxRenderer:
             cont_indent = indent
         def layout(current: list[Run]) -> tuple[str, list[Line], int]:
             current_text = "".join(run.text for run in current)
+            protect = _label_end(current_text)
             widths: list[float] = []
             for run in current:
                 widths.extend(char_w(self._measurer(spec, bool(spec.bold or run.bold)), c) for c in run.text)
@@ -409,8 +412,10 @@ class DocxRenderer:
                         first_room=cont_room if made else first_room, cont_room=cont_room,
                         max_condense=rules.condense_max or 0, step=rules.condense_step or 0,
                         margin=rules.fit_margin, pad=rules.condense_pad or 0,
-                        weights=[rules.condense_wide_weight if is_wide(c)
-                                 else rules.condense_space_weight if c == " " else 1.0 for c in segment])]
+                        weights=[0.0 if offset + k < protect
+                                 else rules.condense_wide_weight if is_wide(c)
+                                 else rules.condense_space_weight if c == " " else 1.0
+                                 for k, c in enumerate(segment)])]
                 offset += len(segment) + 1
             return current_text, made, count
 
@@ -440,7 +445,8 @@ class DocxRenderer:
         # 내어쓰기를 같이 준다. 줄이 맞게 들어가면 눈에 안 보인다.
         return _FitPlan(pieces, cont_spaces, cont_indent,
                         first_hang=0 if hanging else int(head_w + text_w(extra)),
-                        cont_hang=0 if hanging else int(cont_spaces * space_w))
+                        cont_hang=0 if hanging else int(cont_spaces * space_w),
+                        protect=min(_label_end(text), lines[0].end - lines[0].start) if lines else 0)
 
     def _shorten(self, runs: list[Run], text: str, first_chars: int, layout) -> list[Run] | None:
         """LLM에게 문장을 줄이게 해 한 줄로 들어가면 그 runs를, 아니면 None. 서식이 섞인 문장은 건드리지 않는다."""
@@ -460,6 +466,12 @@ class DocxRenderer:
             if len(candidate) >= len(original) or "\n" in candidate:
                 self._shorten_notes.append(
                     f"'{original[:12]}…' 응답이 안 짧아짐({len(original)}자 → {len(candidate)}자, 목표 {target}자)")
+                continue
+            from ..transform.factcheck import check
+
+            problems = check(candidate, original)
+            if problems:  # 줄이다 숫자·날짜·방향이 바뀌면 쓰지 않는다(사실은 절대 바뀌면 안 된다 — 사용자 원칙)
+                self._shorten_notes.append(f"'{original[:12]}…' 줄인 글이 사실 검증에 걸려 버림({problems[0][:30]})")
                 continue
             new_runs = [template.copy_with(candidate)]
             if len(layout(new_runs)[1]) == 1:
@@ -491,7 +503,14 @@ class DocxRenderer:
                 fmt.space_before = Emu(0)
                 if plan.cont_spaces:
                     oxml.apply_run_format(paragraph.add_run(" " * plan.cont_spaces), spec)
-            self._runs(paragraph, line_runs, spec, condense=condense)
+            if i == 0 and plan.protect and condense:
+                # "항목명 : " 부분은 좁히지 않는다 — 좁히면 같은 묶음의 다른 줄과 쌍점 세로 줄이 어긋난다(2026-10-08 사용자:
+                # 공백으로 맞춘 쌍점이 긴 줄에서만 두세 칸 어긋남)
+                self._runs(paragraph, _slice_runs(line_runs, 0, plan.protect), spec)
+                width = sum(len(r.text) for r in line_runs)
+                self._runs(paragraph, _slice_runs(line_runs, plan.protect, width), spec, condense=condense)
+            else:
+                self._runs(paragraph, line_runs, spec, condense=condense)
             if last:
                 self._last_para = paragraph
                 if space is not None:
@@ -958,6 +977,16 @@ class _FitPlan:
     cont_indent: int                      # 둘째 줄부터 문단 왼쪽 들여쓰기
     first_hang: int = 0                   # 첫 줄 접두 폭 — Word가 스스로 줄을 바꿀 때 이어지는 줄이 맞을 자리
     cont_hang: int = 0                    # 둘째 줄부터의 접두(공백) 폭
+    protect: int = 0                      # 첫 줄 앞에서 좁히지 않을 글자 수("항목명 : ")
+
+
+# "항목명 : 값" 줄의 항목명·쌍점(줄 글 기준). 항목명은 숫자로 시작하지 않고 16자 이내 — drafting._LABEL과 같은 기준.
+_FIT_LABEL = re.compile(r"^[^:：\d\n][^:：\n]{0,15}?\s*:\s")
+
+
+def _label_end(text: str) -> int:
+    match = _FIT_LABEL.match(text)
+    return match.end() if match else 0
 
 
 def _slice_runs(runs: list[Run], start: int, end: int) -> list[Run]:

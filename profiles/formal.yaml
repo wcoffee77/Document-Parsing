@@ -104,6 +104,10 @@ numbering:
     space_after_level_up_max: 18pt
 
 tables:
+  # 글자는 12pt 아래로 내리지 않는다 — 넘치면 장평(95→90%)과 줄바꿈으로 받는다(2026-10-08 사용자: 표 글자가 9pt까지 줄어 읽기 어려움;
+  # 정답 보고서 표도 12pt·장평 90%)
+  font_ladder: [12pt]
+  char_scale_ladder: [100%, 95%, 90%]
   align: right               # 표 오른쪽 끝을 여백선에 두고 폭 = 윗줄 글자 시작 ~ 오른쪽 여백이라 왼쪽 끝이 윗줄에 맞는다(left+들여쓰기는 Word에서 어긋남, 2026-10-01 사용자)
   note_space_before: 6pt     # 표 바로 아래 ※ 부연 설명은 표에 딸린 줄 — 앞 간격 18pt가 아니라 6pt (2026-10-01 사용자)
   equal_columns: true        # 같은 성격(값)의 열은 폭을 같게 (2026-10-01 사용자)

@@ -679,9 +679,19 @@ def test_lone_bare_box_under_section_is_lifted_into_heading():
              Line("1.", "검토 방안", [4]), Line("표", "", [5], [["구분", "(1안)", "(2안)"], ["장점", "a", "b"]])]
     notes = lift_lone_groups(lines)
     marks = [(l.m, l.text) for l in lines if not l.is_table]
-    assert ("1.", "배경 및 현황") in marks and ("1.", "추진 방향 (단계적 추진 계획)") in marks
-    assert not any(m == "□" for m, _ in marks) and len(notes) == 2
-    assert lines[0].src == [1, 2]
+    # 첫 '-'가 현상, 나머지가 수치 근거 → 첫 줄을 □ 핵심 문장으로 올림 / 나란한 항목 → □를 빼고 절 제목에 합침
+    assert marks[:3] == [("1.", "배경"), ("□", "설문 결과 불만 高"), ("-", "출퇴근 시간 자율화(58%) 희망")]
+    assert ("1.", "추진 방향 (단계적 추진 계획)") in marks and ("-", "1안 우선 시행") in marks
+    assert len(notes) == 2
+
+
+def test_lone_box_label_is_not_appended_when_heading_already_joined():
+    from doc2report.drafting import Line, lift_lone_groups
+
+    lines = [Line("1.", "배경 및 현황", [1]), Line("□", "설문 결과", [1]), Line("-", "불만 응답 58%", [1]),
+             Line("-", "재택근무 확대 24%", [1])]
+    lift_lone_groups(lines)
+    assert lines[0].text == "배경 및 현황" and [l.m for l in lines] == ["1.", "-", "-"]
 
 
 def test_meaningful_or_plural_boxes_are_kept():
@@ -712,3 +722,73 @@ def test_missing_respondent_count_is_appended_when_llm_repair_fails():
     rw = Rewrite("t", [Line("1.", "배경", [1, 2]), Line("-", "출퇴근 시간 자율화(58%), 재택근무 확대(24%) 희망", [2])], [])
     notes = _repair_numbers(rw, sentences, lambda s, u: "", 2026)
     assert "응답자 312명" in rw.lines[1].text and any("원문 어구로 보강" in n for n in notes)
+
+
+# ── 2026-10-08 사용자 피드백 2차 (건2~5) ─────────────────────────────────────
+
+def test_arrow_under_section_becomes_box_and_parallel_arrow_becomes_dash():
+    from doc2report.drafting import Line, fix_arrows
+
+    sents = ["업무 부담이 커질 수 있어 팀장들에게 주당 4시간 조정을 요청합니다.",
+             "우수 과제는 내년 계획에 반영하는 방안도 같이 검토하겠습니다.",
+             "1안을 올해 먼저 시행합니다."]
+    lines = [Line("1.", "추진 방향", [3]), Line("→", "1안 올해 우선 시행", [3]),
+             Line("-", "팀장 대상 주당 4시간 업무 조정 요청", [1]), Line("→", "우수 과제 내년 계획 반영 검토", [2])]
+    notes = fix_arrows(lines, sents)
+    assert [l.m for l in lines] == ["1.", "□", "-", "-"] and len(notes) == 2
+
+
+def test_real_result_arrow_is_kept():
+    from doc2report.drafting import Line, fix_arrows
+
+    lines = [Line("□", "개선 방향", [1]), Line("-", "실습 시간 부족 의견 다수", [1]), Line("→", "차년도 실습 1일 확대 검토", [2])]
+    fix_arrows(lines, ["실습 시간이 부족하다는 의견이 많았습니다.", "내년에는 실습을 하루 더 늘리는 방안을 검토하겠습니다."])
+    assert lines[2].m == "→"
+
+
+def test_line_repeating_the_title_is_dropped():
+    from doc2report.drafting import Line, Rewrite, drop_title_echoes
+
+    rw = Rewrite("하반기 신입 연수 프로그램 추진 계획",
+                 [Line("□", "운영 개요", [1]), Line("-", "신입 연수 프로그램 하반기 운영", [1]),
+                  Line("□", "대상", [2]), Line("-", "대 상 : 신입 40명", [2])], [])
+    notes = drop_title_echoes(rw, "하반기 신입 연수 프로그램 추진 계획")
+    assert [l.text for l in rw.lines] == ["대상", "대 상 : 신입 40명"] and 1 in rw.dropped and notes
+
+
+def test_three_option_table_becomes_ordinal_list():
+    from doc2report.drafting import Line, tables_to_ordinals
+
+    table = Line("표", "", [6, 7], [["구분", "(1안) 기준 상향", "(2안) 물가 연동", "(3안) 실비 지원"],
+                                   ["비용", "- 연 4억원 증가", "-", "-"],
+                                   ["고려 사항", "", "- 지표 선정 어려움", "- 관리 부담\n- 비용 통제 어려움"]])
+    lines = [table]
+    assert tables_to_ordinals(lines)
+    shown = [(l.m, l.text) for l in lines]
+    assert shown[0] == ("①", "기준 상향") and ("-", "비용 : 연 4억원 증가") in shown
+    assert ("③", "실비 지원") in shown and ("∙", "비용 통제 어려움") in shown
+    two = [Line("표", "", [1], [["구분", "(1안) A", "(2안) B"], ["장점", "a", "b"]])]
+    assert tables_to_ordinals(two) == [] and two[0].is_table          # 두 안은 표 그대로
+
+
+def test_weekday_is_added_only_to_real_dates():
+    from doc2report.drafting import Line, add_weekdays
+
+    sents = ["최종 등급은 9월 5일 인사위원회에서 확정합니다.", "만족도는 4.3점입니다."]
+    lines = [Line("-", "최종 등급 확정 : 9.5 인사위원회", [1]), Line("-", "만족도 4.3점", [2]),
+             Line("-", "기한 (~9.5일)", [1])]
+    add_weekdays(lines, sents, 2026)
+    assert lines[0].text == "최종 등급 확정 : 9.5(토) 인사위원회"
+    assert lines[1].text == "만족도 4.3점" and lines[2].text == "기한 (~9.5일)"
+
+
+def test_strong_cue_alone_marks_alternative_document():
+    from doc2report.drafting import has_alternatives, split_sentences
+
+    found = {n: has_alternatives(split_sentences(next(SAMPLES.glob(f"줄글_{n}_*.txt")).read_text(encoding="utf-8"))[1])
+             for n in range(1, 6)}
+    assert found == {1: False, 2: True, 3: False, 4: False, 5: True}
+
+
+def test_gojo_is_blocked_as_wrong_word():
+    assert any("고조" in p for p in check("S/A 가이드 대비 저조, B 고조", "S와 A는 조금 낮고 B가 높게 나왔습니다"))
