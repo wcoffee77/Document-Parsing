@@ -838,7 +838,7 @@ def test_date_dots_are_removed_in_ranges_and_singles():
 
 # ── 2026-10-09 4차: 표 행 3개로, 화살표는 꼭 필요할 때만 ──────────────────────────
 
-def test_comparison_table_rows_are_merged_into_three():
+def test_thin_cons_rows_are_merged_but_other_rows_are_kept():
     from doc2report.drafting import Line, consolidate_table_rows
 
     table = Line("표", "", [4, 5], [
@@ -851,8 +851,20 @@ def test_comparison_table_rows_are_merged_into_three():
     lines = [table]
     assert consolidate_table_rows(lines)
     rows = lines[0].rows
-    assert [r[0] for r in rows] == ["구분", "내용", "장점", "단점/고려 사항"]
+    assert [r[0] for r in rows] == ["구분", "내용", "장점", "단점/고려 사항"]       # 내용·장점은 그대로
     assert rows[3][2].split("\n") == ["- 근로자대표 서면 합의 필요", "- 비용 : 급여 시스템 개편 약 1.2억원", "- 일정 : 내년 2분기 이후"]
+
+
+def test_rows_with_enough_content_stay_separate():
+    from doc2report.drafting import Line, consolidate_table_rows
+
+    table = Line("표", "", [4, 5], [
+        ["구분", "(1안) A", "(2안) B"],
+        ["효과", "- 가\n- 나", "- 다\n- 라"],
+        ["비용", "- 약 1억원\n- 인건비 별도", "- 약 2억원\n- 설비 별도"],
+        ["위험", "- 일정 지연\n- 인력 이탈", "- 협의 난항\n- 법적 검토"]])
+    lines = [table]
+    assert consolidate_table_rows(lines) == [] and [r[0] for r in lines[0].rows] == ["구분", "효과", "비용", "위험"]
 
 
 def test_non_comparison_table_is_left_alone():

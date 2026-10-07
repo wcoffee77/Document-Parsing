@@ -260,11 +260,11 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 공석·결원은 '미채움'이라 쓰지 않고 '공석'이라고만 씁니다.
 - 제목과 같은 말을 되풀이하는 줄(예: 제목이 '하반기 신입 연수 계획'인데 '하반기 신입 연수 운영')은 쓰지 않습니다. 그 문장은 dropped.
 - 원문이 대안 2개를 비교하면(첫째·둘째, 1안·2안, A안·B안) 반드시 표로 씁니다. 대안 3개 이상이면 ①②③ 줄로 씁니다.
-  표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열)이고, 그 아래 행은 **내용 / 장점 / 단점·고려 사항** 세 개로 씁니다(행과 열을 바꾸지 않습니다).
-  비용·일정·조건·제약처럼 따로 쪼갤 수 있는 것도 별도 행을 만들지 말고 '단점·고려 사항' 칸에 "-" 줄로 모두 담습니다.
-  표 칸(장점·단점·비용 등)은 원문의 절마다 한 줄("- …", 칸 안 줄바꿈 \\n)로 씁니다. 절은 빼지 않되, 한 줄은 조건 하나를
-  공백 빼고 32자 이내의 짧은 명사형으로 씁니다(X '- 식당 좌석을 늘리려면 바닥 배관을 옮겨야 하므로 공사 기간이 길어지고 비용도 약 2억원 정도 들 것으로 예상됨'
-  O '- 배관 이설로 공사비 약 2억원 발생').
+  표는 첫 행이 "구분 | (1안) … | (2안) …"(대안이 열)이고 그 아래 행(항목)은 행과 열을 바꾸지 않고 문서 내용에 맞게 정합니다
+  (항목 이름과 개수는 문서마다 다릅니다: 내용·장점·단점/고려 사항, 효과·비용·리스크 등).
+  **행은 그 항목에 대안별로 쓸 내용이 충분할 때만 만듭니다.** 한 칸에 "-" 한 줄뿐인 항목을 여러 개 만들어 표를 잘게 쪼개지 말고,
+  성격이 비슷한 항목(단점·비용·일정·조건·제약 등)은 한 행(예: '단점/고려 사항')에 "-" 줄로 모아 담습니다. 행은 보통 2~4개입니다.
+  내용이 얼마 없으면 표 대신 ①② 줄로 씁니다.
 - 맨 위 단계는 "□"(절 제목 또는 핵심 문장). 대안을 비교·검토하는 문서는 "1."(번호 절)을 씁니다.
 - "1." 아래 "□"는 묶음이 둘 이상이거나, "□" 자체가 내용을 담은 핵심 문장일 때만 씁니다. 내용 없는 항목명 "□" 하나만
   두지 않습니다(X '1. 배경' 아래 '□ 현황' 하나).
@@ -1525,62 +1525,50 @@ def normalize_dates(lines: list[Line], sentences: list[str]) -> list[str]:
 
 _TABLE_CONTENT = re.compile(r"^(내용|개요|방식|요지|주요\s*내용|설명)")
 _TABLE_PROS = re.compile(r"장점|효과|기대|이점")
-_TABLE_KNOWN = re.compile(r"장점|단점|효과|기대|이점|고려|조건|한계|제약|비용|리스크|위험|일정|시기|소요|요건")
+_CONS_FAMILY = re.compile(r"단점|고려|조건|한계|제약|비용|리스크|위험|일정|시기|소요|요건|난점")
 
 
 def consolidate_table_rows(lines: list[Line]) -> list[str]:
-    """대안 비교 표의 행을 내용 / 장점 / 단점·고려 사항 세 개로 합친다(2026-10-09 사용자: 내용·장점·단점·비용·일정으로 너무
-    쪼개 가독성·맥락이 떨어졌다. 단점·고려 사항 한 칸에 많은 내용을 담는 것이 일반적인 방식). 비용·일정 같은 행은 단점·고려 사항
-    칸으로 옮기며 항목 앞에 그 행 이름을 붙인다. 대안 비교 표(머리가 1안·2안…)만 대상이다."""
+    """대안 비교 표에서 한 칸에 한 줄뿐인 '단점·비용·일정·조건…' 행이 여러 개로 쪼개지면 한 행('단점/고려 사항')으로 모은다
+    (2026-10-09 사용자: 항목 이름·개수는 문서마다 달라야 하지만, 칸마다 한 줄뿐인 항목을 많이 만들어 표를 잘게 쪼개면 가독성·맥락이
+    떨어진다). 내용·장점 등 다른 행은 그대로 둔다. 비용·일정처럼 이름이 단점이 아닌 행의 항목은 앞에 '비용 : '을 붙인다.
+    대안 비교 표(머리가 1안·2안…)만 대상이다."""
     notes: list[str] = []
     for line in lines:
         rows = line.rows
-        if not rows or len(rows) < 3 or len({len(r) for r in rows}) != 1 or len(rows[0]) < 3:
+        if not rows or len(rows) < 4 or len({len(r) for r in rows}) != 1 or len(rows[0]) < 3:
             continue
         if sum(1 for c in rows[0][1:] if _OPTION_HEAD.search(c.strip())) < 2:
             continue
-        labels = [r[0].replace("\n", " ").strip() for r in rows[1:]]
-        if not any(_TABLE_KNOWN.search(l) for l in labels):
-            continue
-        content: list[list[str]] = []
-        pros: list[list[str]] = []
-        cons: list[tuple[str, list[str]]] = []
-        for label, row in zip(labels, rows[1:]):
-            if _TABLE_CONTENT.match(label):
-                content.append(row)
-            elif _TABLE_PROS.search(label) and not re.search(r"단점|한계", label):
-                pros.append(row)
-            else:
-                cons.append((label, row))
-        if len(content) <= 1 and len(pros) <= 1 and len(cons) <= 1 and (len(rows) - 1) <= 3:
-            continue
 
-        def merge(group: list[list[str]], width: int) -> list[str]:
-            return ["\n".join(p for p in (r[c].strip() for r in group) if p.strip(" -")) for c in range(1, width)]
+        def items(cell: str) -> list[str]:
+            return [i.strip() for i in cell.split("\n") if i.strip(" -")]
 
+        family = [k for k, r in enumerate(rows) if k and _CONS_FAMILY.search(r[0]) and not _TABLE_PROS.search(r[0])]
+        thin = [k for k in family if all(len(items(c)) <= 1 for c in rows[k][1:])]
+        if len(family) < 2 or not thin:
+            continue
         width = len(rows[0])
-        new = [rows[0]]
-        if content:
-            new.append(["내용"] + merge(content, width))
-        if pros:
-            new.append(["장점"] + merge(pros, width))
-        if cons:
-            label = cons[0][0] if len(cons) == 1 else "단점/고려 사항"
-            cells = []
-            for c in range(1, width):
-                parts: list[str] = []
-                for name, row in cons:
-                    items = [i.strip() for i in row[c].split("\n") if i.strip(" -")]
-                    plain = re.search(r"단점|고려|한계|제약|조건|리스크|위험", name)
-                    for k, item in enumerate(items):
-                        body = re.sub(r"^-\s*", "", item)
-                        if not plain and len(cons) > 1 and k == 0:
-                            body = f"{name} : {body}"
-                        parts.append(f"- {body}")
-                cells.append("\n".join(parts))
-            new.append([label] + cells)
+        named = [rows[k][0].replace("\n", " ").strip() for k in family]
+        label = next((n for n in named if re.search(r"단점|고려|한계|제약", n)), None)
+        merged_label = label if label and len(family) == 1 else "단점/고려 사항"
+        cells = []
+        for c in range(1, width):
+            parts: list[str] = []
+            for k in family:
+                name = rows[k][0].replace("\n", " ").strip()
+                plain = re.search(r"단점|고려|한계|제약|조건|리스크|위험", name)
+                for n, item in enumerate(items(rows[k][c])):
+                    body = re.sub(r"^-\s*", "", item)
+                    if not plain and n == 0:
+                        body = f"{name} : {body}"
+                    parts.append(f"- {body}")
+            cells.append("\n".join(parts))
+        new = [r for k, r in enumerate(rows) if k not in family or k == family[0]]
+        new[new.index(rows[family[0]])] = [merged_label] + cells
         line.rows = new
-        notes.append(f"구조 보정: 대안 비교 표 행 {len(rows) - 1}개를 {len(new) - 1}개(내용/장점/단점·고려 사항)로 합침")
+        notes.append(f"구조 보정: 대안 비교 표의 '{'·'.join(named)}' 행 {len(family)}개를 '{merged_label}' 한 행으로 합침"
+                     f"(칸마다 한 줄뿐인 행이 있어 표가 잘게 쪼개짐)")
     return notes
 
 
