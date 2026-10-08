@@ -56,6 +56,14 @@ _FALLBACK_TABLE = {
 }
 
 
+# 고정폭("~체") 글꼴: 글꼴 파일이 없어도 폭을 알 수 있다 — 한글·전각·KS X 1001 2바이트 기호(원숫자·※·→·□·· 등)는 1em,
+# 영문·숫자·공백·ASCII 기호는 0.5em. 14pt 바탕체의 사내 Word 실측(한글 34자/줄, 영문·숫자 68자/줄, 공백 0.5em)과 맞는다.
+# 모호폭 기호(EAW 'A')를 1em으로 보는 것은 추정이다 — Word에서 확인 필요.
+_FIXED_PITCH = {"바탕체", "batangche", "굴림체", "gulimche", "돋움체", "dotumche"}
+_FIXED_WIDE = 1.0
+_FIXED_HALF = 0.5
+
+
 def _font_dirs() -> list[Path]:
     dirs = []
     win = os.environ.get("SystemRoot", r"C:\Windows")
@@ -147,8 +155,10 @@ class FontMetrics:
         self._cache: dict[str, float] = {}
         self.line_em: float | None = None  # 한 줄 높이(em) — Word의 단일 줄간격 기준
         self.loaded = False
+        self.fixed_pitch = False  # 글꼴 파일은 없지만 고정폭 모델로 폭을 아는 경우
         path = _find_font_file(name)
         if path is None:
+            self.fixed_pitch = name.strip().lower() in _FIXED_PITCH
             return
         try:
             if path.suffix.lower() == ".ttc":
@@ -163,6 +173,7 @@ class FontMetrics:
             self.loaded = True
         except Exception:
             self.loaded = False
+            self.fixed_pitch = name.strip().lower() in _FIXED_PITCH
 
     def char_em(self, ch: str) -> float:
         cached = self._cache.get(ch)
@@ -180,6 +191,9 @@ class FontMetrics:
                     return self._hmtx[glyph][0] / self._upem
                 except Exception:
                     pass
+        if self.fixed_pitch and not self.loaded:
+            wide = is_wide(ch) or (not ch.isascii() and unicodedata.east_asian_width(ch) == "A")
+            return _FIXED_WIDE if wide else _FIXED_HALF
         return _fallback_em(ch)
 
     def text_em(self, text: str) -> float:
@@ -233,6 +247,16 @@ class TextMeasurer:
     @property
     def font_available(self) -> bool:
         return self.ea.loaded and self.latin.loaded
+
+    @property
+    def widths_known(self) -> bool:
+        """글자 폭을 믿고 줄 맞춤을 해도 되는가 — 글꼴 파일을 읽었거나 고정폭 모델로 알 때."""
+        return all(m.loaded or m.fixed_pitch for m in (self.ea, self.latin))
+
+    @property
+    def widths_estimated(self) -> bool:
+        """폭을 글꼴 파일이 아니라 고정폭 모델로 어림하는가(리포트에 알린다)."""
+        return self.widths_known and not self.font_available
 
     def char_width(self, ch: str) -> float:
         metrics = self.ea if is_wide(ch) else self.latin

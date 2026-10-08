@@ -367,11 +367,15 @@ class DocxRenderer:
             return None
         hard = "\n" in text  # 글쓴이가 엔터로 나눈 줄 — 그 자리를 지키고 이어지는 줄을 윗줄 글자에 맞춘다
         measure = self._measurer(spec, bool(spec.bold))
-        if not measure.font_available:
+        if not measure.widths_known:
             if not self._fit_warned:
                 self.notes.append(f"글꼴({spec.east_asia})을 찾지 못해 줄 맞춤(글자 간격 좁히기·줄 나눔)을 건너뜀")
                 self._fit_warned = True
             return None
+        if measure.widths_estimated and not self._fit_warned:
+            self.notes.append(f"글꼴({spec.east_asia}) 파일이 없어 고정폭 모델(한글 1em·영문/숫자/공백 0.5em, 원숫자·※·→ 같은 "
+                              "기호는 1em 추정)로 줄 맞춤함 — Word에서 줄바꿈 위치 확인 필요")
+            self._fit_warned = True
         def char_w(measurer: TextMeasurer, c: str) -> float:
             return measurer.char_width(c)
 
@@ -932,7 +936,7 @@ class DocxRenderer:
         if match is None:
             return
         measure = self._measurer(spec, False)
-        if not measure.font_available:
+        if not measure.widths_known:
             return
         hang = int(measure.width(text[:match.end()]))
         if hang > 0:

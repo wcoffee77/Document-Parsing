@@ -959,6 +959,7 @@ uv.exe를 USB로), `uv sync`가 lock의 URL만 찾다 실패, wheelhouse 수작�
   eval 요약에 `번호절`·`검증회차`, 형식 오류 진단에 사유. 건1 '수치누락 [1] 9'는 '9월 말 기준'의 9 — 정답 1도 이 날짜를 안 썼다(알림만, 대체 사유 아님).
 - **구조 보정 (2026-10-08 사용자)**: "1." 아래 □는 둘 이상이거나 핵심 문장일 때만 — 내용 없는 항목명 □ 하나면 빼고 절 제목에 합침(`lift_lone_groups`); 대안 표는 대안이 열·항목이 행(`orient_tables`가 뒤집힌 표를 바로잡음); 끝내 빠진 수치는 원문 '낱말+수치'를 괄호로 붙임(`_number_phrase`). 상세는 docs/session-handoff.md 9절.
 - **5건 docx 검수 반영 (2026-10-08 사용자)**: 수치 근거 아래 둔 현상 줄을 □로 승격, 절 아래 →는 □·병렬 →는 -(`fix_arrows`, `parallel_cues`), 제목 되풀이 줄 삭제(`drop_title_echoes`), 대안 3개 이상 표는 ①②③(`tables_to_ordinals`), 날짜 요일(`add_weekdays`), formal 표 최소 12pt(장평 90%까지), **긴 줄을 좁힐 때 '항목명 : '은 안 좁힘**(쌍점 정렬이 어긋난 원인), draft `--shorten` 기본 켬(줄인 글도 factcheck). 상세는 docs/session-handoff.md 10절.
+- **다문서 종합 (2026-10-08, `doc2report synthesize`, `synthesis.py`)**: 여러 정식보고서·Confluence를 핵심만 뽑은 새 보고서로. 설계·한계는 docs/session-handoff.md 19절. 글꼴 파일 없는 환경의 줄 맞춤은 고정폭 모델(바탕체 한글 1em·영문/숫자/공백 0.5em, `layout/measure.py`)로 한다 — 모호폭 기호는 추정이라 Word 확인 필요.
 - **다음 큰 일**: 줄글 → 정식보고서 편집, 다문서 → 요약·생성 — 계획은 [docs/roadmap-drafting.md](docs/roadmap-drafting.md).
 - **진행 상태**: 1단계 probe(서식·형식·문장 통계, 층별 종결·길이, 주석 상자 포함)를 합성 docx로 검증하고 사내 문서 8건으로
   1차 실측했다. 다음: 샘플 리포트로 변환 결과와의 차이 확인 →

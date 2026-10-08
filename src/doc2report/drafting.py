@@ -336,15 +336,16 @@ FORMAT_TAIL = """
 {"title": "보고서 제목(명사형)", "lines": [{"m": "□", "text": "...", "src": [1]}, {"m": "표", "rows": [["구분", "…"], ["…", "…"]], "src": [2, 3]}], "dropped": [번호, ...]}
 """
 
-def system_prompt(exclude_docs: set[int] | None = None) -> str:
+def system_prompt(exclude_docs: set[int] | None = None, base: str | None = None) -> str:
     """지시문 + 문장 → 보고서 줄 변환 예시(rules/report_style.yaml). exclude_docs는 채점용(그 정답에서 뽑은 예시를 뺀다)."""
     from .transform.report_style import examples_text
 
     shown = examples_text(exclude_docs=exclude_docs)
+    base = base or REWRITE_SYSTEM
     if not shown:
-        return REWRITE_SYSTEM + FORMAT_TAIL
+        return base + FORMAT_TAIL
     # 출력 형식은 맨 끝에 둔다 — 글로 된 예시("보고서: …")로 끝나면 LLM이 JSON 대신 보고서 글을 쓴다(2026-10-07 실측: 형식 오류 3회)
-    return (REWRITE_SYSTEM + "\n[문장 변환 예시 — 말투만 이렇게 바꾸고, 정보는 줄이지 않으며 원문에 없는 사실은 넣지 않습니다]\n"
+    return (base + "\n[문장 변환 예시 — 말투만 이렇게 바꾸고, 정보는 줄이지 않으며 원문에 없는 사실은 넣지 않습니다]\n"
             + shown + "\n" + FORMAT_TAIL)
 
 
@@ -353,6 +354,13 @@ _SECTION_MARK = re.compile(r"^\d{1,2}\.$")
 _PLAIN_MARKS = ("□", "-", "∙", "→", "※", "*")
 _LABEL = re.compile(r"^(?P<label>[^:：\d][^:：]{0,15}?)\s*:\s+(?P<value>\S.*)$")
 _POLITE_END = re.compile(r"(?:습니다|니다|어요|아요|해요|세요|입니다)\.?$")
+
+
+@dataclass
+class SynthSpec:
+    """다문서 종합 모드(synthesis.py) — 원문 일부만 쓰는 것이 정상이라 '빠짐없이' 점검을 끄고 분량 점검을 켠다."""
+    min_chars: int = 0     # 보고서 글자 수(공백 뺀) 목표 하한·상한 — 상한을 크게 넘으면 줄여 쓰게 한다
+    max_chars: int = 0
 
 
 @dataclass
@@ -466,7 +474,7 @@ def parse_rewrite(raw: str, count: int) -> Rewrite:
 
 
 def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
-           rules=None) -> tuple[dict[int, list[str]], list[str]]:
+           rules=None, synth: SynthSpec | None = None) -> tuple[dict[int, list[str]], list[str]]:
     """(줄 번호 → 사실 문제, 형식 문제 목록). 사실 문제가 남은 줄은 원문으로 바꾼다. 형식 문제는 다시 써 달라고만 한다."""
     from .transform.factcheck import check, coined_words, load_rules, uncovered_by_source
     from .transform.report_style import lint
@@ -495,14 +503,14 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
             facts[-1] = problems
     used = {i for line in rewrite.lines for i in line.src} | set(rewrite.dropped)
     missing = [i for i in range(1, len(sentences) + 1) if i not in used]
-    if missing:
+    if missing and synth is None:
         style.append(f"문장 {missing}이(가) 어느 줄의 src에도, dropped에도 없음")
     for index, line in enumerate(rewrite.lines):
         if line.src:
             made = coined_words(line.content(), " ".join(sentences[i - 1] for i in line.src if 1 <= i <= len(sentences)))
             if made:
                 style.append(f"{index + 1}번째 줄에 원문 어구를 잘라 붙인 사전에 없는 말 {made} — 뜻이 통하는 낱말로 풀어 쓰세요")
-    if has_alternatives(sentences, rules):
+    if synth is None and has_alternatives(sentences, rules):
         if not any(l.is_table or _ORDINAL.match(l.m) for l in rewrite.lines):
             style.append("원문이 대안을 비교하는데(첫째·둘째 등) 표도 ①② 줄도 없음 — 대안 2개면 표(구분/장점/단점·비용·조건 칸, "
                          "원문 절마다 한 줄), 3개 이상이면 ①②③ 줄로 쓰세요")
@@ -517,13 +525,18 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
             if long:
                 style.append(f"{index + 1}번째 줄(표)의 칸 안 줄이 김({len(long)}개, 예: {long[0][:30]}) — 칸 안 한 줄에는 조건 하나만, "
                              f"공백 빼고 {cell_limit}자 이내의 명사형으로(예: '- 관련 법령상 노사 서면 합의 필요'). 내용은 빼지 말고 줄을 나누세요")
+    if synth is not None and synth.max_chars:
+        size = sum(len(re.sub(r"\s", "", piece)) for line in rewrite.lines for piece in _text_pieces(line))
+        if size > synth.max_chars * 1.25:
+            style.append(f"보고서가 공백 뺀 {size}자로 목표({synth.min_chars}~{synth.max_chars}자)보다 훨씬 김 — 핵심만 남기고 "
+                         "과정·세부·중복·이전 시점 값은 빼세요(쓰지 않을 문장은 src에 넣지 마세요)")
     ratio = _report_ratio(rewrite, sentences)
-    if ratio is not None and ratio < _min_ratio():
+    if synth is None and ratio is not None and ratio < _min_ratio():
         style.append(f"보고서가 원문의 {ratio:.0%}로 과도하게 축약됨(기준 {_min_ratio():.0%} 이상) — 조건·이유·주체를 되살려 맥락을 알 수 있게 쓰고, 표 칸도 원문 절마다 한 줄로 모두 쓰세요")
-    for i in sorted(set(rewrite.dropped)):
+    for i in sorted(set(rewrite.dropped)) if synth is None else []:
         if 1 <= i <= len(sentences) and re.search(r"\d", sentences[i - 1]) and i not in {j for l in rewrite.lines for j in l.src}:
             style.append(f"문장 [{i}]에 숫자가 있는데 dropped로 보냄 — 줄로 쓰고 숫자를 남기세요")
-    for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
+    for i, numbers in (uncovered_by_source(sentences, _cited_lines(rewrite), rules).items() if synth is None else []):
         style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 줄에 넣거나, 숫자를 뺄 거면 그 문장을 dropped로")
     return facts, style
 
@@ -721,11 +734,18 @@ def rewrite_text(rewrite: Rewrite) -> str:
 
 
 def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
-            holdout: set[int] | None = None) -> DraftResult:
-    """다듬기 모드: 줄글 → 보고서 말투의 개조식 글(사실은 원문 그대로). 형식이 끝내 안 맞으면 배치 모드로."""
+            holdout: set[int] | None = None, *, prepared: tuple[str, list[str], str, str] | None = None,
+            synth: SynthSpec | None = None, fallback=None) -> DraftResult:
+    """다듬기 모드: 줄글 → 보고서 말투의 개조식 글(사실은 원문 그대로). 형식이 끝내 안 맞으면 배치 모드로.
+
+    prepared = (제목, 번호 붙일 문장 목록, 사용자 메시지, 지시문) — 다문서 종합(synthesis.py)이 입력과 지시문을 직접 만들어 넘긴다.
+    synth가 있으면 종합 모드: 문장을 다 쓰지 않아도 되고(빠짐 점검 끔) 분량을 점검한다."""
     import datetime
 
-    title, sentences = split_sentences(text)
+    if prepared is not None:
+        title, sentences, prepared_user, prepared_system = prepared
+    else:
+        title, sentences = split_sentences(text)
     if not sentences:
         raise ValueError("문장을 찾지 못했습니다")
     ask_json = ask
@@ -736,12 +756,14 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     numbered = "\n".join(f"[{i}] {s}" for i, s in enumerate(sentences, 1))
     user = ((f"원문 제목: {title}\n" if title else "") + f"원문 문장 {len(sentences)}개:\n{numbered}"
             + "\n\n위 원문을 지시대로 다시 써서 JSON 하나로만 출력하세요(첫 글자는 {).")
+    if prepared is not None:
+        user = prepared_user
     notes: list[str] = []
     result: Rewrite | None = None
     facts: dict[int, list[str]] = {}
     message = user
     unavailable = False
-    system = system_prompt(holdout)
+    system = prepared_system if prepared is not None else system_prompt(holdout)
     format_errors = 0
     revised = 0
     while True:
@@ -771,7 +793,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
             notes.append(f"LLM 호출 실패: {exc}")
             unavailable = True
             break
-        facts, style = review(candidate, sentences, title, year)
+        facts, style = review(candidate, sentences, title, year, synth=synth)
         notes += [f"형식 보정: {w}" for w in candidate.warnings]
         result = candidate
         if not facts and not style:
@@ -789,8 +811,8 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     if result is None:
         # 형식 오류가 끝내 안 풀리면 배치 모드(원문 문장 그대로 — 2026-10-07 실측 d2.docx가 100% 서술체)로 가지 않고
         # 원문 문장 끝만 규칙으로 개조식으로 바꾼 기본 구조를 쓴다.
-        structure = fallback_structure(title, sentences)
-        ruled = [_rule_sentence(sentence, year) for sentence in sentences]
+        structure = fallback(title, sentences) if fallback is not None else fallback_structure(title, sentences)
+        ruled = [_rule_sentence(sentence, year) for sentence in sentences]   # 종합이면 문서별로 이어 붙인 구조
         why = "LLM 설정이 없거나 연결 실패" if unavailable else "LLM 응답 형식 오류가 끝내 안 풀림"
         notes.append(f"규칙 기본 구조 사용({why}; 한 절, 문장마다 □ — 원문 문장, 끝만 규칙으로 개조식). "
                      "문장 압축·재배열은 하지 못했습니다")
@@ -801,13 +823,15 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         notes += _repair_lines(result, facts, sentences, ask, year)
     notes += _restore_originals(result, facts, sentences, title, year)
     notes += _apply_style_fix(result, sentences, year)
-    notes += _repair_numbers(result, sentences, ask, year)
+    if synth is None:   # 종합은 원문의 일부만 쓰는 것이 정상이라 수치·내용을 '되살리는' 보강은 하지 않는다
+        notes += _repair_numbers(result, sentences, ask, year)
     notes += _repair_coined(result, sentences, ask, year)
-    notes += _audit_content(result, sentences, ask, year, ask_json)
+    if synth is None:
+        notes += _audit_content(result, sentences, ask, year, ask_json)
     notes += _style_residue(result)
     # 마지막 상태를 한 번 더 점검해 남은 문제를 그대로 알린다(예전엔 "형식 문제 2건"이라는 개수만 남아 무엇이 남았는지 report로 알 수 없었다)
     try:
-        _, leftover = review(result, sentences, title, year)
+        _, leftover = review(result, sentences, title, year, synth=synth)
         notes += [f"최종 점검에서 남음: {item}" for item in leftover]
     except Exception:  # noqa: BLE001
         pass
@@ -824,7 +848,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     notes += add_weekdays(result.lines, sentences, year)
     tidy_labels(result.lines)
     body = rewrite_text(result)
-    notes += _coverage_notes(result, sentences, body)
+    notes += _coverage_notes(result, sentences, body, synth=synth is not None)
     sections = sum(1 for line in result.lines if _SECTION_MARK.match(line.m)) or sum(
         1 for line in result.lines if line.m == "□")
     return DraftResult(body, None, notes, True, title=result.title or title, mode="rewrite", sections=sections)
@@ -1204,11 +1228,17 @@ def _audit_content(rewrite: Rewrite, sentences: list[str], ask: Ask, year: int |
     return notes
 
 
-def _coverage_notes(rewrite: Rewrite, sentences: list[str], body: str) -> list[str]:
-    """사람이 검수할 것: 생략한 원문 문장, 보고서에 안 나온 원문 수치."""
+def _coverage_notes(rewrite: Rewrite, sentences: list[str], body: str, synth: bool = False) -> list[str]:
+    """사람이 검수할 것: 생략한 원문 문장, 보고서에 안 나온 원문 수치. 종합이면 뺀 것이 많으니 숫자 든 문장만 따로 모아 알린다."""
     from .transform.factcheck import missing_numbers, uncovered_by_source
 
     notes: list[str] = []
+    if synth:
+        used = {i for line in rewrite.lines for i in line.src}
+        left = [i for i in range(1, len(sentences) + 1) if i not in used]
+        notes.append(f"종합: 원문 문장 {len(sentences)}개 중 {len(used)}개를 근거로 씀, {len(left)}개는 뺌")
+        notes += [f"뺀 원문 문장 [{i}]: {sentences[i - 1]}" for i in left if re.search(r"\d", sentences[i - 1])]
+        return notes
     for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite)).items():
         notes.append(f"수치 누락(인용한 문장 [{i}] 기준): {', '.join(numbers)} — {sentences[i - 1][:40]}")
     used = {i for line in rewrite.lines for i in line.src}

@@ -60,6 +60,10 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
     annotations = tuple(annotation_markers or ())
     patterns = [(re.compile(entry["pattern"]), int(entry["depth"])) for entry in (pattern_depths or [])]
 
+    if patterns:
+        doc, nested = _collapse_nested_markers(doc, marker_re, [pattern for pattern, _ in patterns])
+        changes += nested
+
     stack: list[tuple] = []  # levels_by_order: 문서에 나온 순서대로 쌓은 말머리 종류 — 인덱스가 곧 단계
 
     def _marked_depth(runs: list[Run]) -> int | None:
@@ -163,6 +167,36 @@ def fold_headings_into_levels(doc: Document, markers: list[str] | None = None, *
                   and not plain(b.runs).lstrip().startswith(skip or ("\0",)) else b
                   for b in blocks]
 
+    return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def _collapse_nested_markers(doc: Document, marker_re: re.Pattern | None, enums: list[re.Pattern]
+                             ) -> tuple[Document, list[Change]]:
+    """"□ ① B사"처럼 말머리(□ - ·) 뒤에 또 원숫자·(1) 같은 번호 말머리가 오면 바깥 말머리를 뗀다.
+    번호 말머리가 이미 단계를 나타내므로 □·- 가 겹치면 "□ ①"처럼 이중으로 찍힌다(2026-10-08 사용자).
+    번호 말머리(text.pattern_depths)가 안쪽에 있을 때만 — "□ - 항목"처럼 기호끼리는 건드리지 않는다."""
+    if marker_re is None or not enums:
+        return doc, []
+    changes: list[Change] = []
+
+    def fix(runs: list[Run]) -> list[Run]:
+        text = plain(runs)
+        outer = marker_re.match(text)
+        if outer is None:
+            return runs
+        rest = text[outer.end():]
+        if not any(rx.match(rest) for rx in enums) or not rest.strip():
+            return runs
+        changes.append(Change(text, rest, "중복 말머리 제거"))
+        return _drop_prefix(runs, outer.end())
+
+    blocks: list[Block] = []
+    for block in doc.blocks:
+        if isinstance(block, (Paragraph, ListItem)):
+            fixed = fix(block.runs)
+            if fixed is not block.runs:
+                block = replace(block, runs=fixed)
+        blocks.append(block)
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
 
 

@@ -185,3 +185,12 @@ git pull origin ccr-283e50d5-83grju
 - 한 일: `samples/synthesis/set_A·set_B` (README 참고). 원문 편당은 Word 1~2쪽 분량이다(실제 5장보다 짧음) — 실제 길이의 시험은 별도 필요.
 - **종합 초안은 도구가 아니라 Claude가 쓴 것**: 현재 코드에 다문서 종합 기능이 없고(`merge_documents`는 이어 붙이기만) 샌드박스에 LLM이 없다. 사용자가 고친 정답이 오면 그것과 비교해 규칙(최신 값 우선·미확정 유지·수치 보존)을 만든다.
 - 다음: 사용자 정답 수령 → `tools/score_synthesis.py`(수치 보존·최신값 채택·미확정 단정 여부·분량) 설계 → B2 요약(map-reduce 또는 통째 투입, 6만 토큰 안은 통째 가능) 구현.
+
+## 19. 업데이트 (2026-10-08, 후속) — 종합 생성 기능 + 형식 보정
+- **사용자 지적**: ① 종합 초안 A에 "□ ①"처럼 원숫자 앞에 □가 겹침 ② 이 샌드박스는 바탕체가 없어 줄 맞춤을 건너뛴다 ③ 종합 보고서를 기준 양식(줄 맞춤·줄바꿈·말머리·각주)으로, 기존 파이썬 기준 + LLM으로 생성할 수 있게.
+- ① **원인은 내가 원문 txt에 "□ ①"을 쳤기 때문**(도구 버그 아님). 그래도 같은 입력이 오면 막도록 `structure._collapse_nested_markers`: 말머리(□ - ·) 뒤에 `text.pattern_depths`의 번호 말머리(①, (1))가 바로 오면 바깥 말머리를 뗀다("중복 말머리 제거"로 --report). LLM 응답 쪽은 기존 `_split_text_marker`가 이미 막고 있었다.
+- ② **고정폭 글꼴 폭 모델**(`layout/measure.py`): 바탕체·굴림체·돋움체 등 "~체"는 글꼴 파일이 없어도 한글·전각·KS X 1001 기호(원숫자·※·→·□·· 모호폭) 1em, ASCII(영문·숫자·공백) 0.5em으로 잰다 — 사내 Word 실측(한글 34자/줄, 영문·숫자 68자/줄, 공백 0.5em)과 같은 모델이다. `TextMeasurer.widths_known/widths_estimated`. 렌더러는 파일이 없고 모델로 쟀을 때 --report에 "고정폭 모델로 줄 맞춤함 — Word에서 확인 필요"를 남긴다. **한계**: ㉠ 모호폭 기호를 1em으로 본 것은 추정(미실측) ㉡ 줄 높이는 모르므로 주석 텍스트 상자는 문단 주석으로 대체됨 ㉢ 이 샌드박스의 LibreOffice는 대체 글꼴로 그려 줄바꿈 위치를 검증할 수 없다 → 사내 Word에서 확인.
+- ③ **`doc2report synthesize a.docx b.docx [c…] -o out.docx --pages 1-2 [--report r.md] [--runs N]`** (`synthesis.py`): 입력(.docx·.txt·.md·Confluence URL 혼합)을 `load_document`로 읽어 `flatten`(글자로 친 말머리 분리·표는 행마다 문장·절 제목은 번호 없는 맥락) → 날짜순 정렬 → 문장에 문서를 가로지르는 번호 → LLM이 JSON(줄마다 src)으로 주제별 재구성 → `drafting.rewrite(prepared=, synth=SynthSpec)`가 기존 검증·후처리를 그대로 수행 → formal 변환(줄 맞춤 포함). 줄글 다듬기와 다른 점: ㉠ 지시문의 "정보를 빼지 않는다" 규칙을 "쓴 줄의 사실은 빠짐없이, 쓰지 않을 문장은 src에서 뺀다"로 교체 + 종합 규칙(최신 문서 값 우선·(기존 → 최신)·미확정 유지·새 숫자 계산 금지·분량) ㉡ 빠짐 점검·내용 보강·수치 복구는 끔(`review(synth=)`, `_repair_numbers`·`_audit_content` 생략), 분량 상한 1.25배 초과만 재작성 사유 ㉢ 뺀 문장 중 숫자 든 것은 --report("뺀 원문 문장 [n]") ㉣ LLM 실패 시 문서별 이어 붙이기(fallback, 종합 아님). 분량 환산은 `rules/report_style.yaml::limits.chars_per_page`(1,100자, 종합 샘플 820~840자가 1쪽 안이라는 어림 — 사내 Word 실측 필요).
+- **이 샌드박스에는 LLM이 없어 `synthesize`는 가짜 LLM 응답으로만 검증했다**(`tests/test_synthesis.py` 10개). 실제 모델이 종합을 얼마나 잘하는지, 문서 간 값 충돌을 제대로 고르는지는 온프렘 실측 필요. 문서 간 충돌(같은 항목·다른 값)을 파이썬이 따로 검사하는 장치는 아직 없다(다음 후보).
+- 종합 초안 샘플(`samples/synthesis/*/종합_초안.*`)은 여전히 Claude가 직접 쓴 것. A의 ①②③은 □ 없이 고쳐 다시 변환.
+- 테스트 482개 통과. 지시문 예시(종합 예시)가 샘플과 겹치지 않는지 `test_synthesis_prompt_example_is_not_taken_from_sample_documents`가 막는다.

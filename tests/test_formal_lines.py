@@ -71,6 +71,8 @@ def test_annotation_marker_is_unified_and_text_rules_skip_it():
 class _FakeMeasurer:
     """바탕체처럼 한글 1em, 반각 0.5em (글꼴 파일이 없는 환경용)."""
     font_available = True
+    widths_known = True
+    widths_estimated = False
 
     def __init__(self, spec, bold):
         self.size = spec.size
