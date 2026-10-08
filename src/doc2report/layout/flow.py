@@ -22,6 +22,7 @@ from ..ir import (
     HorizontalRule,
     Image,
     ListItem,
+    PageBreak,
     Paragraph,
     Table,
     plain,
@@ -43,6 +44,8 @@ class FlowPlan:
     pages: int = 1
     spare: int = 0  # 마지막 쪽에 남는 높이(EMU)
     notes: list[str] = field(default_factory=list)
+    # 표를 한 쪽에 넣으려고 줄간격을 줄일 문단·항목: id(block) → 배율(0.9 = 10% 줄임)
+    line_scale: dict[int, float] = field(default_factory=dict)
 
 
 def plan_flow(doc: Document, profile: Profile,
@@ -57,10 +60,88 @@ def plan_flow(doc: Document, profile: Profile,
     relaxed = extra > 0 and spare - extra > usable_h * SAFETY_SHARE
 
     plan = FlowPlan(relaxed=relaxed, estimated_height=height, pages=pages, spare=spare)
+    if profile.tables.keep_on_page and usable_h:
+        if relaxed and _fit_tables_on_pages(doc, profile, layouts, relaxed=True)[2]:
+            relaxed = plan.relaxed = False   # 넉넉한 간격이 표를 쪽 사이로 밀어낸다 — 표가 잘리지 않는 것이 먼저
+            plan.notes.append("넉넉한 간격을 쓰면 표가 쪽을 넘어가 간격을 기본값으로 둠")
+        scales, notes, _ = _fit_tables_on_pages(doc, profile, layouts, relaxed=relaxed)
+        plan.line_scale = scales
+        plan.notes += notes
     if relaxed:
         plan.notes.append(
             f"지면에 여유가 있어(약 {spare / usable_h:.0%} 쪽) 단락 간격과 행 높이를 넉넉히 적용함")
     return plan
+
+
+def _fit_tables_on_pages(doc: Document, profile: Profile, layouts: dict[int, TableLayout], *, relaxed: bool
+                         ) -> tuple[dict[int, float], list[str], bool]:
+    """쪽을 넘어 잘릴 표를 찾아, 그 쪽 앞쪽 문단·항목의 줄간격을 미세하게 줄여 한 쪽에 들어가게 한다(2026-10-08 사용자).
+
+    (줄간격을 줄일 블록 → 배율, 리포트 노트, 줄여도 못 넣은 표가 있는가). 높이는 어림이라 확실한 보장은 렌더러의 keep-with-next가 한다 —
+    여기서 줄이는 것은 표가 다음 쪽으로 통째로 밀려 윗쪽이 크게 비는 것을 막으려는 시도다. 쪽 높이보다 큰 표는 손대지 않는다."""
+    usable = profile.page.usable_height
+    rules = profile.tables
+    margin = rules.page_fit_margin or 0
+    min_scale = rules.page_fit_min_scale or 1.0
+    blocks = doc.blocks
+    title_h = (_text_height(doc.title, profile.font("title"), profile.page.usable_width, profile) if doc.title else 0)
+
+    def height(index: int, scale: float = 1.0) -> int:
+        previous = blocks[index - 1] if index else None
+        following = blocks[index + 1] if index + 1 < len(blocks) else None
+        h = _block_height(blocks[index], profile, layouts, previous, following, scale=scale)
+        return h + (_extra_for_block(blocks[index], following, profile, layouts) if relaxed else 0)
+
+    heights = [height(i) for i in range(len(blocks))]
+    scales: dict[int, float] = {}
+    notes: list[str] = []
+    failed = False
+    y = title_h
+    table_no = 0
+    for i, block in enumerate(blocks):
+        if isinstance(block, PageBreak):
+            y = (int(y // usable) + 1) * usable if y % usable else y
+            continue
+        if isinstance(block, Table):
+            table_no += 1
+            h = heights[i]
+            page_end = (int(y // usable) + 1) * usable
+            if 0 < h <= usable and y + h > page_end:
+                overflow = y + h - page_end + margin
+                window = [j for j in range(i) if isinstance(blocks[j], (Paragraph, ListItem)) and _block_start(heights, j, title_h) >= page_end - usable
+                          and id(blocks[j]) not in scales]
+                gain, chosen = _compress(window, overflow, min_scale, height, heights)
+                if chosen is not None:
+                    scales.update({id(blocks[j]): chosen for j in window})
+                    for j in window:
+                        heights[j] = height(j, chosen)
+                    y -= gain
+                    notes.append(f"표 {table_no}: 한 쪽에 넣으려고 앞 {len(window)}개 문장의 줄간격을 {round((1 - chosen) * 100)}% 줄임(어림)")
+                else:
+                    failed = True
+                    blank = page_end - y
+                    y = page_end    # Word가 표를 통째로 다음 쪽으로 옮긴다
+                    notes.append(f"표 {table_no}: 줄간격을 {round((1 - min_scale) * 100)}%까지 줄여도 한 쪽에 안 들어가 표를 다음 쪽으로 넘김"
+                                 f"(앞 쪽 아래 약 {blank / 36000:.0f}mm 비게 됨)")
+        y += heights[i]
+    return scales, notes, failed
+
+
+def _block_start(heights: list[int], index: int, title_h: int) -> int:
+    return title_h + sum(heights[:index])
+
+
+def _compress(window: list[int], overflow: int, min_scale: float, height, heights: list[int]) -> tuple[int, float | None]:
+    """overflow 이상 높이를 줄이는 가장 약한 배율(1% 단위)을 찾는다. (줄어드는 높이, 배율) — 못 찾으면 (0, None)."""
+    if not window or min_scale >= 1.0:
+        return 0, None
+    scale = 0.99
+    while scale >= min_scale - 1e-9:
+        gain = sum(heights[j] - height(j, scale) for j in window)
+        if gain >= overflow:
+            return gain, round(scale, 2)
+        scale = round(scale - 0.01, 2)
+    return 0, None
 
 
 # ── 높이 어림 ───────────────────────────────────────────────────────────
@@ -81,7 +162,7 @@ def _blocks_height(doc: Document, profile: Profile,
 
 
 def _block_height(block: Block, profile: Profile, layouts: dict[int, TableLayout],
-                  previous: Block | None = None, following: Block | None = None) -> int:
+                  previous: Block | None = None, following: Block | None = None, *, scale: float = 1.0) -> int:
     width = profile.page.usable_width
 
     if isinstance(block, Heading):
@@ -90,7 +171,7 @@ def _block_height(block: Block, profile: Profile, layouts: dict[int, TableLayout
         return _text_height(plain(block.runs), spec, width, profile)
 
     if isinstance(block, Paragraph):
-        return _text_height(plain(block.runs), profile.font("body"), width, profile)
+        return _text_height(plain(block.runs), profile.font("body"), width, profile, scale=scale)
 
     if isinstance(block, ListItem):
         # 렌더러(_item_spacing / _space_before)와 같은 규칙으로 간격을 더해야
@@ -112,7 +193,7 @@ def _block_height(block: Block, profile: Profile, layouts: dict[int, TableLayout
             before = max(before, profile.tables.space_after or 0)
 
         return _text_height(plain(block.runs), spec, width - indent, profile,
-                            extra=(after or 0) + before)
+                            extra=(after or 0) + before, scale=scale)
 
     if isinstance(block, Table):
         return table_height(block, profile, layouts.get(id(block)), relaxed=False)
@@ -192,12 +273,12 @@ def _cell_line_count(cell, profile: Profile, layout: TableLayout,
 
 
 def _text_height(text: str, spec: FontSpec, width: int, profile: Profile,
-                 *, extra: int = 0) -> int:
+                 *, extra: int = 0, scale: float = 1.0) -> int:
     if width <= 0:
         return 0
     measurer = TextMeasurer(spec.east_asia, spec.latin, spec.size, bold=bool(spec.bold))
     lines = measurer.wrap_count(text or "", width)
-    return int(lines * _line_height(spec) + (spec.space_before or 0)
+    return int(lines * _line_height(spec) * scale + (spec.space_before or 0)
                + (spec.space_after or 0) + extra)
 
 
@@ -211,28 +292,32 @@ def _line_height(spec: FontSpec) -> float:
 def _extra_if_relaxed(doc: Document, profile: Profile,
                       layouts: dict[int, TableLayout]) -> int:
     """간격과 행 높이를 넉넉한 값으로 바꿨을 때 늘어나는 총 높이."""
-    extra = 0
     blocks = doc.blocks
-    for index, block in enumerate(blocks):
-        following = blocks[index + 1] if index + 1 < len(blocks) else None
-        if isinstance(block, ListItem):
-            # 단계가 바뀌는 자리에서만 간격이 늘어난다 (같은 단계가 이어지면 그대로).
-            if isinstance(following, ListItem) and following.depth == block.depth:
-                continue
-            level = profile.numbering_level(block.depth)
-            if isinstance(following, ListItem) and following.depth < block.depth:
-                until = profile.text.level_up_relaxed_until
-                gap = ((level.level_up_space(True, following.depth, until) or 0)
-                       - (level.level_up_space(False, following.depth, until) or 0))
-            elif isinstance(following, ListItem):
-                heading = profile.text.heading_like(plain(block.runs))
-                gap = (level.level_down_space(True, heading) or 0) - (level.level_down_space(False, heading) or 0)
-            else:
-                gap = (level.level_change_space(True) or 0) - (level.level_change_space(False) or 0)
-            extra += max(0, gap)
-        elif isinstance(block, Table):
-            layout = layouts.get(id(block))
-            if layout is not None:
-                extra += max(0, table_height(block, profile, layout, relaxed=True)
-                             - table_height(block, profile, layout, relaxed=False))
+    return sum(_extra_for_block(block, blocks[index + 1] if index + 1 < len(blocks) else None, profile, layouts)
+               for index, block in enumerate(blocks))
+
+
+def _extra_for_block(block: Block, following: Block | None, profile: Profile, layouts: dict[int, TableLayout]) -> int:
+    """블록 하나가 넉넉한 값에서 늘어나는 높이."""
+    extra = 0
+    if isinstance(block, ListItem):
+        # 단계가 바뀌는 자리에서만 간격이 늘어난다 (같은 단계가 이어지면 그대로).
+        if isinstance(following, ListItem) and following.depth == block.depth:
+            return 0
+        level = profile.numbering_level(block.depth)
+        if isinstance(following, ListItem) and following.depth < block.depth:
+            until = profile.text.level_up_relaxed_until
+            gap = ((level.level_up_space(True, following.depth, until) or 0)
+                   - (level.level_up_space(False, following.depth, until) or 0))
+        elif isinstance(following, ListItem):
+            heading = profile.text.heading_like(plain(block.runs))
+            gap = (level.level_down_space(True, heading) or 0) - (level.level_down_space(False, heading) or 0)
+        else:
+            gap = (level.level_change_space(True) or 0) - (level.level_change_space(False) or 0)
+        extra += max(0, gap)
+    elif isinstance(block, Table):
+        layout = layouts.get(id(block))
+        if layout is not None:
+            extra += max(0, table_height(block, profile, layout, relaxed=True)
+                         - table_height(block, profile, layout, relaxed=False))
     return extra

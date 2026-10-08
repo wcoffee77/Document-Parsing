@@ -531,8 +531,14 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
         if size > synth.max_chars * 1.25:
             style.append(f"보고서가 공백 뺀 {size}자로 목표({synth.min_chars}~{synth.max_chars}자)보다 훨씬 김 — 핵심만 남기고 "
                          "과정·세부·중복·이전 시점 값은 빼세요(쓰지 않을 문장은 src에 넣지 마세요)")
+    if synth is not None and not rewrite.title.strip():
+        style.append("title이 비어 있음 — 보고서 전체를 대표하는 제목(명사형, 20자 안팎)을 title에 쓰세요")
     if synth is not None and synth.key_ids:
         cited = {i for line in rewrite.lines for i in line.src}
+        keyset = set(synth.key_ids)
+        for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
+            if i in keyset:   # 결과·결론·계획 절은 쓴 문장의 수치를 줄이지 않는다(2026-10-08 사용자: 파일럿 결과가 한 줄로 축약됐다)
+                style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 결과·결론·계획 절의 수치는 모두 남기세요")
         lost = [i for i in synth.key_ids if i not in cited]
         if lost:
             style.append(f"결론·제언·계획 절의 문장 {lost}이(가) 어느 줄의 src에도 없음 — 결론·목표·절감 효과·결정 사항은 핵심이니 쓰고, "

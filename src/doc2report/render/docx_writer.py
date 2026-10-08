@@ -174,11 +174,26 @@ class DocxRenderer:
     def _blocks(self, blocks: list[Block], container=None) -> None:
         for index, block in enumerate(blocks):
             following = blocks[index + 1] if index + 1 < len(blocks) else None
+            scale = self.flow.line_scale.get(id(block)) if container is None else None
+            existing = {id(e) for e in self.docx.element.body} if scale else set()
             self._block(block, container, following)
+            if scale:
+                self._scale_line_spacing(existing, scale)
             if container is None:
                 self._previous = block
                 if not self._is_side_line(block):
                     self._main_previous = block  # 표 아래 ※인지 가릴 때 주석·※ 줄은 건너뛴다
+
+    def _scale_line_spacing(self, existing: set[int], scale: float) -> None:
+        """표를 한 쪽에 넣으려고 줄인 줄간격(flow.line_scale)을 이 블록이 만든 문단에 적용한다."""
+        from docx.text.paragraph import Paragraph as DocxParagraph
+
+        for element in list(self.docx.element.body):
+            if id(element) in existing or not element.tag.endswith("}p"):
+                continue
+            fmt = DocxParagraph(element, self.docx).paragraph_format
+            if isinstance(fmt.line_spacing, float):
+                fmt.line_spacing = round(fmt.line_spacing * scale, 3)
 
     def _block(self, block: Block, container=None, next_block: Block | None = None) -> None:
         if container is None and not isinstance(block, (ListItem, Paragraph)):
@@ -817,11 +832,16 @@ class DocxRenderer:
             oxml.apply_page_setup(section, self.profile.page.landscape())
 
         self._table_seq += 1
+        if self.profile.tables.keep_on_page and container is None and not layout.landscape and self.docx.paragraphs:
+            # 표 바로 앞 줄(절 제목·도입 문장)은 표와 함께 움직인다 — 표만 다음 쪽으로 가고 제목이 앞 쪽에 홀로 남지 않게
+            self.docx.paragraphs[-1].paragraph_format.keep_with_next = True
         if block.caption:
             spec = self.profile.font("caption")
             if block.caption_align:
                 spec = spec.model_copy(update={"align": block.caption_align})
             caption = self._paragraph([Run(block.caption)], spec, container)
+            if self.profile.tables.keep_on_page:
+                caption.paragraph_format.keep_with_next = True   # 표 제목만 윗쪽에 남지 않게
             if layout.indent and container is None:  # 표 제목도 표와 같은 왼쪽 끝(가운데면 표 폭의 가운데)
                 caption.paragraph_format.left_indent = Emu(layout.indent)
 
@@ -851,11 +871,28 @@ class DocxRenderer:
             if min_height:
                 oxml.set_min_row_height(row, min_height)
 
+        if rules.keep_on_page and container is None and not layout.landscape:
+            self._keep_table_together(table, block, layout)
+
         self._table_notes(block, container)
 
         if section_switched:
             back = self.docx.add_section(WD_SECTION.NEW_PAGE)
             oxml.apply_page_setup(back, self.profile.page)
+
+    def _keep_table_together(self, table, block: Table, layout: TableLayout) -> None:
+        """표가 쪽 사이에서 잘리지 않게 마지막 행을 뺀 모든 행의 문단을 keep-with-next로 묶는다 — Word는 표가 안 들어가면 통째로
+        다음 쪽으로 옮긴다(2026-10-08 사용자: 표는 한 쪽에서 보여야 한다). 쪽 높이보다 큰 표는 어차피 한 쪽에 못 들어가 건드리지 않는다."""
+        from ..layout.flow import table_height
+
+        usable = self.profile.page.usable_height
+        if usable and table_height(block, self.profile, layout, relaxed=self.flow.relaxed) > usable:
+            self.notes.append(f"표 {self._table_seq}: 한 쪽보다 커서 쪽 사이 잘림을 막지 못함(행은 중간에서 안 잘림)")
+            return
+        for row in table.rows[:-1]:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.keep_with_next = True
 
     def _table_notes(self, block: Table, container=None) -> None:
         """표 바로 아래 주석 — "* 측정 기준은 …" 형태로 작은 글씨."""

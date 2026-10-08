@@ -38,13 +38,15 @@ SYNTH_RULE2 = """[절대 규칙 2 — 쓴 줄의 사실은 빠짐없이, 쓰지 
 SYNTH_RULES = """[종합 규칙 — 여러 문서를 새 보고서 하나로]
 - 입력은 같은 주제를 다룬 문서 여러 개(날짜 오름차순, 아래 문서일수록 최신)입니다. 문서별로 이어 붙이지 말고, 읽는 사람이 한 번에 이해하도록
   **주제별로 새로 구성**합니다. 절(1.)은 보통 3~4개이고 이 흐름을 따릅니다:
-  ① 현황(경과): 이미 일어난 일과 결과. 핵심 수치만 짧게(□ 2~3개). 현황과 문제·위험이 얽혀 있으면 '현황 및 리스크'처럼 한 절로 합칩니다.
+  ① 현황(경과): 이미 일어난 일과 결과. 과정·배경 설명은 줄이되 **결과 수치는 줄이지 않습니다** — 운영 결과·시험 결과·성과는 □ 아래에
+     지표마다 '-'로 쓰고(예: 단축률과 그 내역, 건수 전후 비교, 만족도·사용 현황), 앞 문서가 항목별로 풀어 쓴 결과를 뒤 문서가 한 줄로 되풀이했다면
+     그 한 줄이 아니라 **앞 문서의 상세 문장**을 근거로 씁니다. 현황과 문제·위험이 얽혀 있으면 '현황 및 리스크'처럼 한 절로 합칩니다.
      나중 문서에서 완료된 일(심사 완료, 착수 완료 등)도 이 절에 한 줄로 씁니다 — 뒤 절에 따로 떼어 두지 않습니다.
   ② 검토 내용: 대안·후보 비교(아래 '비교' 규칙).
   ③ 대응 계획(또는 추진 계획): '□ 단기 대응'과 '□ 중장기 대응'(또는 단계별)으로 묶고 그 아래 실행 내용·일정을 씁니다.
      비용·효과는 별도 절로 떼지 않고, 그 방안을 택한 근거로 방안 아래 '-'에 씁니다(예: 추가 비용이 지연 손실보다 작아 선제 조치가 유리).
   ④ 결정 요청(필요할 때만): 승인·결정할 일 2~3줄. 기대 효과·위험은 □ 한 줄씩 요약하고 나열하지 않습니다.
-- 앞부분(현황·경과)은 짧게, 뒷부분(대응·결정)을 자세히 씁니다.
+- 앞부분(현황·경과)에서 줄이는 것은 군더더기이지 결과 수치가 아닙니다. 뒷부분(대응·결정)은 자세히 씁니다. title은 비우지 않습니다.
 - 같은 사실이 여러 문서에 있으면 한 번만 쓰고 src에는 근거 문장을 모두 적습니다.
 - 같은 항목의 값이 문서마다 다르면 **가장 나중 문서의 값**을 씁니다. 바뀐 것을 남길 때는 '항목 : 기존 A → B (사유)'로 씁니다.
   화살표(→)는 **두 값 사이에만** 씁니다. 사유·원인은 괄호에 따로 씁니다('B (기존 A → 사유)'처럼 화살표 뒤에 사유를 쓰면 안 됩니다).
@@ -293,6 +295,31 @@ def synthesize(docs: list[SourceDoc], ask: Ask | None = None, pages: tuple[int, 
     low, high = page_chars(pages)
     result = rewrite("", ask, year or prep.year, prepared=(prep.title, prep.sentences, prep.user, prep.system),
                      synth=SynthSpec(low, high, prep.key_ids), fallback=concat_structure(prep.ranges))
+    if not (result.title or "").strip():
+        result.title = _fallback_title(result, docs, ask, result.notes)
     result.notes.insert(0, "종합 입력: " + ", ".join(f"문서{n} 문장 {a}~{b}" for n, (_, a, b) in enumerate(prep.ranges, 1))
                         + f" (날짜순: {' → '.join(d.date or '날짜 없음' for d in order_docs(docs))})")
     return result
+
+
+def _fallback_title(result: DraftResult, docs: list[SourceDoc], ask: Ask | None, notes: list[str]) -> str:
+    """LLM이 title을 끝내 비웠을 때(2026-10-08 실측 B 1회: 제목 없이 나옴): 보고서 글로 짧은 제목을 한 번 더 묻고, 안 되면 가장 최근 문서 제목."""
+    if ask is None:
+        try:
+            from .transform.llm_polish import ask_chat
+            ask = ask_chat
+        except Exception:  # noqa: BLE001
+            ask = None
+    if ask is not None and result.used_llm:
+        try:
+            raw = (ask("보고서 본문을 읽고 전체를 대표하는 제목을 한 줄로만 씁니다. 명사형, 공백 포함 25자 이내, 마침표·따옴표·번호 없이 제목 글자만 출력합니다.",
+                       result.text[:3000]) or "").strip().splitlines()
+            title = raw[0].strip(" \"'.「」") if raw else ""
+            if 2 <= len(title) <= 40:
+                notes.append(f"제목: LLM이 정하지 않아 보고서 본문으로 다시 물어 정함 — {title}")
+                return title
+        except Exception:  # noqa: BLE001
+            pass
+    newest = order_docs(docs)[-1].title
+    notes.append(f"제목: LLM이 정하지 않아 가장 최근 문서 제목을 씀 — {newest}")
+    return newest

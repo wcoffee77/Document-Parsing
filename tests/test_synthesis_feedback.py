@@ -120,3 +120,68 @@ def test_shortening_keeps_aligned_label(tmp_path, fake_fonts):
     body = [p.text for p in OpenDocx(str(out)).paragraphs if "가" in p.text]
     assert seen and not seen[0].startswith("미사용자")              # LLM에는 값만
     assert len(body) == 1 and label + "가나다 가나다" in body[0]       # 항목명·맞춤 공백은 그대로
+
+
+RESULT_DOC = """파일럿 운영 결과
+2026. 9. 18
+1. 운영 결과
+ □ 작업 시간 단축 : 평균 18% (신규 기능 24%, 버그 수정 12%)
+   - 테스트 코드 작성 시간은 31% 단축
+ □ 사용자 만족도 : 5점 만점 4.1점, 지속 사용 의향 88%
+"""
+NEXT_DOC = """확산 계획
+2026. 10. 5
+1. 추진 경과
+ □ 파일럿 결과 작업 시간 평균 18% 단축, 만족도 4.1점
+2. 확산 단계
+ □ 1단계 : 150석 도입
+"""
+
+
+def test_result_sections_are_key_sections_whose_numbers_must_survive():
+    """B: 앞 문서가 항목별로 푼 파일럿 결과가 뒤 문서의 한 줄 요약('18% 단축, 4.1점')만 남고 사라졌다."""
+    prep = prepare([_doc(RESULT_DOC, "d1"), _doc(NEXT_DOC, "d2")])
+    keyed = [prep.sentences[i - 1] for i in prep.key_ids]
+    assert any("신규 기능 24%" in s for s in keyed) and any("지속 사용 의향 88%" in s for s in keyed)
+    first = next(i for i, s in enumerate(prep.sentences, 1) if "신규 기능 24%" in s)
+    summary = next(i for i, s in enumerate(prep.sentences, 1) if s.startswith("파일럿 결과"))
+    thin = Rewrite("t", [Line("□", "파일럿 결과 : 평균 18% 단축, 만족도 4.1점", [summary, first])], [])
+    _, style = review(thin, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_ids))
+    assert any("수치" in s and "24" in s for s in style), style              # 24%·12%·31%·88%가 줄에 없다
+    tests_i = next(i for i, s in enumerate(prep.sentences, 1) if "테스트 코드" in s)
+    sat = next(i for i, s in enumerate(prep.sentences, 1) if "88%" in s)
+    full = Rewrite("t", [Line("□", "파일럿 결과", [first, tests_i, sat, summary]),
+                         Line("-", "작업 시간 평균 18% 단축 (신규 기능 24%, 버그 수정 12%, 테스트 코드 31%)", [first, tests_i]),
+                         Line("-", "만족도 4.1점/5점, 지속 사용 의향 88%", [sat, summary])], [])
+    _, style = review(full, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_ids))
+    assert not [s for s in style if "수치" in s], style
+
+
+def test_synthesis_without_title_gets_a_fallback_title():
+    """B 1회: 제목 없이 출력됐다 — review가 빈 제목을 재작성 사유로 올리고, 끝내 비면 본문으로 다시 묻거나 최신 문서 제목을 쓴다."""
+    docs = [_doc(DOC1, "d1"), _doc(DOC2, "d2")]
+    prep = prepare(docs)
+    ids = {s: i for i, s in enumerate(prep.sentences, 1)}
+    find = lambda part: next(i for s, i in ids.items() if part in s)   # noqa: E731
+    body = {"title": "", "lines": [
+        {"m": "1.", "text": "현 황", "src": [find("28주")]},
+        {"m": "□", "text": "리드타임 : 기존 26주 → 28주", "src": [find("26주"), find("28주")]}], "dropped": []}
+    seen = []
+
+    def ask(system, user):
+        seen.append(system[:12])
+        if "제목을 한 줄로" in system:
+            return "부품 수급 현황 및 대응\n"
+        return json.dumps(body, ensure_ascii=False)
+    from doc2report.synthesis import synthesize
+    result = synthesize(docs, ask=ask, year=2026)
+    assert result.title == "부품 수급 현황 및 대응"
+    assert any(n.startswith("제목:") for n in result.notes)
+    assert sum(1 for s in seen if not s.startswith("보고서 본문")) >= 2      # 빈 제목 때문에 한 번 다시 썼다
+
+    def broken_title(system, user):
+        if "제목을 한 줄로" in system:
+            raise RuntimeError("down")
+        return json.dumps(body, ensure_ascii=False)
+    result = synthesize(docs, ask=broken_title, year=2026)
+    assert result.title == "부품 대응 계획"                                     # 가장 최근(10. 2) 문서 제목

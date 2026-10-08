@@ -246,6 +246,9 @@ class TableRules(_Base):
     cell_hanging: bool = False    # 칸 안 "- 내용"이 줄바꿈되면 둘째 줄을 말머리 뒤 글자에 맞춤(내어쓰기)
     row_header: bool = False      # 첫 열(행 이름 칸)을 머리행과 같은 글꼴·크기·장평·가운데 정렬로
     uniform_cells: bool = False   # 표 안 내용 칸의 장평·정렬을 하나로 통일(정식보고서, 2026-10-08 사용자)
+    keep_on_page: bool = False    # 표가 쪽 사이에서 잘리지 않게(모든 행 keep-with-next) + 앞 문장 줄간격을 미세하게 줄여 한 쪽에 맞춤
+    page_fit_min_scale: float = 0.9   # 표를 한 쪽에 넣으려고 앞 문장 줄간격을 줄일 수 있는 하한(원래 줄간격의 배수, 0.9 = 최대 10%)
+    page_fit_margin: int | None = None  # 높이 어림 오차 여유 — 이만큼 더 줄어야 "들어간다"고 본다
     left_align_list_cells: bool = False  # "- 내용"처럼 말머리로 시작하는 칸이 있는 열은 한 줄짜리여도 왼쪽 정렬
     # true: 같은 성격(값)의 열은 폭을 같게 한다 — 정식보고서 표(2026-10-01 사용자: 구분·목표·실적·달성률 폭 동일).
     #       참고 열(note_columns)은 데이터가 아니라 비중을 작게 둔다.
@@ -256,7 +259,7 @@ class TableRules(_Base):
 
     @field_validator("border_width", "cell_margin_x", "cell_margin_y", "note_column_size",
                      "cell_margin_x_min", "space_after", "note_space_before", "max_font_spread",
-                     "header_rule_width", mode="before")
+                     "header_rule_width", "page_fit_margin", mode="before")
     @classmethod
     def _len(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
