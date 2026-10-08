@@ -37,38 +37,61 @@ SYNTH_RULE2 = """[절대 규칙 2 — 쓴 줄의 사실은 빠짐없이, 쓰지 
 
 SYNTH_RULES = """[종합 규칙 — 여러 문서를 새 보고서 하나로]
 - 입력은 같은 주제를 다룬 문서 여러 개(날짜 오름차순, 아래 문서일수록 최신)입니다. 문서별로 이어 붙이지 말고, 읽는 사람이 한 번에 이해하도록
-  **주제별로 새로 구성**합니다(예: 1. 현황 / 2. 위험·쟁점 / 3. 검토안 / 4. 대응 계획·결정 요청). 절 이름은 내용에 맞게 정합니다.
+  **주제별로 새로 구성**합니다. 절(1.)은 보통 3~4개이고 이 흐름을 따릅니다:
+  ① 현황(경과): 이미 일어난 일과 결과. 핵심 수치만 짧게(□ 2~3개). 현황과 문제·위험이 얽혀 있으면 '현황 및 리스크'처럼 한 절로 합칩니다.
+     나중 문서에서 완료된 일(심사 완료, 착수 완료 등)도 이 절에 한 줄로 씁니다 — 뒤 절에 따로 떼어 두지 않습니다.
+  ② 검토 내용: 대안·후보 비교(아래 '비교' 규칙).
+  ③ 대응 계획(또는 추진 계획): '□ 단기 대응'과 '□ 중장기 대응'(또는 단계별)으로 묶고 그 아래 실행 내용·일정을 씁니다.
+     비용·효과는 별도 절로 떼지 않고, 그 방안을 택한 근거로 방안 아래 '-'에 씁니다(예: 추가 비용이 지연 손실보다 작아 선제 조치가 유리).
+  ④ 결정 요청(필요할 때만): 승인·결정할 일 2~3줄. 기대 효과·위험은 □ 한 줄씩 요약하고 나열하지 않습니다.
+- 앞부분(현황·경과)은 짧게, 뒷부분(대응·결정)을 자세히 씁니다.
 - 같은 사실이 여러 문서에 있으면 한 번만 쓰고 src에는 근거 문장을 모두 적습니다.
-- 같은 항목의 값이 문서마다 다르면 **가장 나중 문서의 값**을 씁니다. 바뀐 것이 의미 있으면 (기존 26주 → 28주)처럼 변화를 괄호로 남기고,
-  기준 시점이 있으면 함께 씁니다(10.1 기준). 이전 값만 쓰고 최신 값을 빼지 않습니다.
+- 같은 항목의 값이 문서마다 다르면 **가장 나중 문서의 값**을 씁니다. 바뀐 것을 남길 때는 '항목 : 기존 A → B (사유)'로 씁니다.
+  화살표(→)는 **두 값 사이에만** 씁니다. 사유·원인은 괄호에 따로 씁니다('B (기존 A → 사유)'처럼 화살표 뒤에 사유를 쓰면 안 됩니다).
+  기준 시점이 있으면 함께 씁니다(10.1 기준).
 - 계획·예정이 나중 문서에서 완료·변경됐으면 현재 상태로 씁니다(예정 → 완료, 일정 연장).
 - 아직 정해지지 않은 사항(검토 中, 미확정, 통보 없음, 협의 필요)은 미확정으로 씁니다. 확정·완료처럼 쓰지 않습니다.
+- 결론·제언·목표(수치 목표, 절감 효과, 결정 요청)는 핵심이라 빼지 않습니다. 나중 문서에서 바뀐 계획이면 바뀐 내용을 쓴 줄의 src에 함께 넣습니다.
 - 문서에 없는 숫자를 계산해 만들지 않습니다(합계·비율·증감을 새로 구하지 않음). 원문에 있는 숫자만 씁니다.
 - 문서 제목·작성 날짜·"~에 따르면" 같은 출처 표기는 쓰지 않습니다(내부 문서에 근거한 보고서입니다).
-- 분량은 공백 뺀 {low}~{high}자(정식보고서 Word 약 {pages}쪽) 안으로 합니다. 많으면 핵심 위주로 줄이되 결정에 필요한 수치와 쟁점은 남깁니다.
-- 대안 비교가 있으면 비교표(대안이 열)나 ①②③ 줄로 씁니다. 결정이 필요한 사항은 마지막 절에 "결정 요청"으로 모읍니다.
+- 분량은 공백 뺀 {low}~{high}자(정식보고서 Word 약 {pages}쪽) 안으로 합니다. 많으면 경과를 줄이고 결정에 필요한 수치와 쟁점은 남깁니다.
+- 비교: 여러 대안을 **같은 항목**(단가·물량·기간·비용·보안 등)으로 비교하면 대안 수와 관계없이 표로 씁니다(첫 행 '구분 | 대안1 | 대안2 …').
+  · 원문 비교표의 항목(행)은 줄이지 않고 그대로 옮깁니다.
+  · 그 대안에 관한 다른 문서의 비교 내용(누적 비용·손익분기 등)도 표의 행으로 넣습니다. 표 밖에 줄글로 따로 쓰지 않습니다.
+  · 원문에 대안별 검토 의견·판단이 있으면 표 마지막 행 '검토 의견'에 대안마다 요약해 넣습니다.
+  · ①②③ 줄은 비교 항목 없이 대안을 한두 마디로 설명할 때만 씁니다.
 
 [종합 예시]
 원문:
-=== 문서 1: 사무실 이전 검토 (2026. 5. 7) ===
-[1] 임대 계약이 12월 말에 만료된다.
-[2] 후보지는 월 임대료 4,200만원을 제시했다.
-[3] 입주는 10월 중순 가능할 것으로 알려졌으나 확정은 아니다.
+=== 문서 1: 사무실 이전 후보지 검토 (2026. 5. 7) ===
+(1. 검토 배경)
+  [1] 현 사무실 임대 계약이 12월 말에 만료된다.
+(2. 후보지)
+  [2] 갑동 빌딩은 월 임대료 4,200만원이고 입주는 10월 중순 가능할 것으로 알려졌으나 확정은 아니다.
+  [3] 을동 빌딩은 월 임대료 3,600만원이고 입주는 내년 2월부터 가능하다.
+  [4] 갑동은 입주 시점이 맞으나 비용이 높고, 을동은 비용이 낮으나 두 달간 공백이 생긴다.
+  [5] 회의에서는 여러 의견이 있었다.
 === 문서 2: 사무실 이전 진행 (2026. 6. 3) ===
-[4] 임대료 협상 결과 월 3,900만원으로 합의했다.
-[5] 입주 시점은 11월 초로 확정됐다.
-[6] 이전 비용은 2.4억원이며 이사 업체는 선정 중이다.
-[7] 회의에서는 여러 의견이 있었다.
+(1. 진행 경과)
+  [6] 갑동 빌딩과 협상해 월 임대료 3,900만원으로 합의했다.
+  [7] 입주 시점은 11월 초로 확정됐다.
+(2. 향후 계획)
+  [8] 이전 비용은 2.4억원이며 이사 업체는 선정 중이다.
+  [9] 내년 중 을동 빌딩을 제2사무실로 쓰는 방안을 검토한다.
 출력:
 {"title": "사무실 이전 추진 현황", "lines": [
- {"m": "1.", "text": "추진 현황", "src": [1, 4]},
- {"m": "□", "text": "임대 계약 12월 말 만료, 후보지 계약 조건 합의", "src": [1, 4]},
- {"m": "-", "text": "월 임대료 : 3,900만원 (당초 제시 4,200만원 → 협상)", "src": [2, 4]},
- {"m": "-", "text": "입주 시점 : 11월 초 확정 (기존 10월 중순 예상)", "src": [3, 5]},
- {"m": "□", "text": "이전 비용 및 업체", "src": [6]},
- {"m": "-", "text": "이전 비용 : 2.4억원", "src": [6]},
- {"m": "-", "text": "이사 업체 : 선정 中", "src": [6]}],
- "dropped": [7]}
+ {"m": "1.", "text": "추진 경과", "src": [1, 6, 7]},
+ {"m": "□", "text": "현 사무실 임대 계약 12월 말 만료, 갑동 빌딩 임대 조건 합의 및 11월 초 입주 확정", "src": [1, 6, 7]},
+ {"m": "1.", "text": "후보지 비교", "src": [2, 3, 4]},
+ {"m": "표", "rows": [["구분", "갑동 빌딩", "을동 빌딩"],
+   ["월 임대료", "- 기존 4,200만원 → 3,900만원 (협상 결과)", "- 3,600만원"],
+   ["입주 시점", "- 11월 초 확정", "- 내년 2월부터 가능"],
+   ["검토 의견", "- 입주 시점 적합, 비용 높음", "- 비용 낮으나 두 달간 공백"]], "src": [2, 3, 4, 6, 7]},
+ {"m": "1.", "text": "대응 계획", "src": [8, 9]},
+ {"m": "□", "text": "단기 대응 : 11월 초 갑동 빌딩 입주", "src": [7, 8]},
+ {"m": "-", "text": "이전 비용 : 2.4억원, 이사 업체 선정 中", "src": [8]},
+ {"m": "□", "text": "중장기 대응 : 을동 빌딩 제2사무실 활용 검토(내년 中)", "src": [9]}],
+ "dropped": [5]}
 """
 
 
@@ -209,21 +232,31 @@ class Prepared:
     system: str
     ranges: list[tuple[str, int, int]]         # (문서 제목, 첫 문장 번호, 끝 문장 번호)
     year: int | None
+    key_ids: list[int] = field(default_factory=list)   # 결론·제언·계획 절의 문장(rules/drafting.yaml::synthesis_key_sections)
 
 
 def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title: str | None = None) -> Prepared:
+    from .transform.factcheck import load_rules
+
+    key_res = [re.compile(p) for p in load_rules().synthesis_key_sections]
     docs = order_docs(docs)
     sentences: list[str] = []
     ranges: list[tuple[str, int, int]] = []
     blocks: list[str] = []
+    key_ids: list[int] = []
     for n, doc in enumerate(docs, 1):
         first = len(sentences) + 1
         lines = [f"=== 문서 {n}: {doc.title}" + (f" ({doc.date})" if doc.date else "") + " ==="]
+        key_section = False
         for kind, depth, mark, text in doc.items:
             if kind == "절":
                 lines.append(f"({mark + ' ' if mark and mark != '표' else ''}{text})")
+                if mark != "표":   # 표의 열 머리는 절이 아니다
+                    key_section = any(rx.search(text) for rx in key_res)
                 continue
             sentences.append(text)
+            if key_section:
+                key_ids.append(len(sentences))
             lines.append("  " * depth + f"[{len(sentences)}] " + (f"{mark} " if mark and mark != "표" else "") + text)
         ranges.append((doc.title, first, len(sentences)))
         blocks.append("\n".join(lines))
@@ -240,7 +273,7 @@ def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title
             "하위 내용입니다.\n\n" + "\n\n".join(blocks)
             + "\n\n위 문서들을 지시대로 하나의 새 보고서로 종합해 JSON 하나로만 출력하세요(첫 글자는 {).")
     newest = max((d.when for d in docs if d.when), default=None)
-    return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None)
+    return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None, key_ids)
 
 
 def concat_structure(ranges: list[tuple[str, int, int]]):
@@ -259,7 +292,7 @@ def synthesize(docs: list[SourceDoc], ask: Ask | None = None, pages: tuple[int, 
     prep = prepare(docs, pages, title)
     low, high = page_chars(pages)
     result = rewrite("", ask, year or prep.year, prepared=(prep.title, prep.sentences, prep.user, prep.system),
-                     synth=SynthSpec(low, high), fallback=concat_structure(prep.ranges))
+                     synth=SynthSpec(low, high, prep.key_ids), fallback=concat_structure(prep.ranges))
     result.notes.insert(0, "종합 입력: " + ", ".join(f"문서{n} 문장 {a}~{b}" for n, (_, a, b) in enumerate(prep.ranges, 1))
                         + f" (날짜순: {' → '.join(d.date or '날짜 없음' for d in order_docs(docs))})")
     return result

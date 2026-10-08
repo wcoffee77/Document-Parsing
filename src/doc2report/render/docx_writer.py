@@ -468,9 +468,15 @@ class DocxRenderer:
             return None
         original = text.strip()
         template = next((r for r in runs if r.text), runs[0])
+        # '항목명     : ' 부분은 쌍점 세로 맞춤을 위해 공백까지 정해 둔 것이라 LLM에 보내지 않는다 — 보내면 '미사용자: 9명'처럼
+        # 맞춤 공백이 사라졌다(2026-10-08 종합 실측 B). 값 부분만 줄이고 앞에 그대로 붙인다.
+        label = original[:_label_end(original)]
+        value = original[len(label):]
         for target in (first_chars, first_chars - 2, first_chars - 4):  # 한 번에 안 맞으면 더 짧게 다시
             try:
-                candidate = (self.shortener(original, target) or "").strip()
+                shortened = (self.shortener(value, target - len(label)) or "").strip() if label else None
+                candidate = (label + shortened) if label and shortened else (
+                    "" if label else (self.shortener(original, target) or "").strip())
             except Exception as exc:
                 self._shorten_notes.append(f"'{original[:12]}…' LLM 호출 실패({type(exc).__name__})")
                 return None

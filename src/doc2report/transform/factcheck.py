@@ -29,6 +29,9 @@ _MONEY_PART = re.compile(rf"({_NUM})\s*(조|억|천만|백만|만|천)?")
 _PERCENT = re.compile(rf"({_NUM})\s*%")
 _KO_DATE = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일")
 _DOT_DATE = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{1,2})(?![\d%])")
+# 정식보고서의 띄어 쓴 날짜 "2026. 7. 1", "~ 8. 29" — 연도나 물결 뒤에 올 때만(번호 "1. 현황"과 헷갈리지 않게).
+# 원문 날짜로만 쓴다: 이게 없으면 같은 날짜를 "7.1 ~ 8.29"로 쓴 줄이 "원문에 없는 날짜"로 걸렸다(2026-10-08 종합 실측 B).
+_SPACED_DATE = re.compile(r"(?:(?<!\d)\d{4}\s*\.\s*|~\s*)(\d{1,2})\s*\.\s*(\d{1,2})(?![\d%])")
 _DURATION = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*부터\s*(\S+?)간")
 _WEEKDAY = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{1,2})\s*\(([월화수목금토일])\)")
 _RANGE_WEEKDAY = re.compile(r"~\s*(\d{1,2})\s*\(([월화수목금토일])\)")
@@ -63,6 +66,7 @@ class Rules:
     blocked_terms: list[str] = field(default_factory=list)
     bound_source: list[str] = field(default_factory=list)
     bound_line: list[str] = field(default_factory=list)
+    synthesis_key_sections: list[str] = field(default_factory=list)
 
 
 @lru_cache(maxsize=4)
@@ -108,6 +112,7 @@ def facts(text: str, rules: Rules) -> Facts:
     out.money = {v for m in _MONEY.finditer(text) if (v := _money_value(m.group(1))) is not None}
     out.dates = {(int(m), int(d)) for m, d in _KO_DATE.findall(text)}
     out.dates |= {(int(m), int(d)) for m, d in _DOT_DATE.findall(text)}
+    out.dates |= {(int(m), int(d)) for m, d in _SPACED_DATE.findall(text) if 1 <= int(m) <= 12}
     for word, number in rules.number_words.items():
         if re.search(rf"(?:^|[\s(]){re.escape(word)}", text):
             out.raw.add(str(number))

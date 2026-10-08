@@ -361,6 +361,7 @@ class SynthSpec:
     """다문서 종합 모드(synthesis.py) — 원문 일부만 쓰는 것이 정상이라 '빠짐없이' 점검을 끄고 분량 점검을 켠다."""
     min_chars: int = 0     # 보고서 글자 수(공백 뺀) 목표 하한·상한 — 상한을 크게 넘으면 줄여 쓰게 한다
     max_chars: int = 0
+    key_ids: list[int] = field(default_factory=list)   # 결론·제언·계획 절 문장 — 하나도 안 쓰면 다시 쓰게 한다
 
 
 @dataclass
@@ -530,6 +531,12 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
         if size > synth.max_chars * 1.25:
             style.append(f"보고서가 공백 뺀 {size}자로 목표({synth.min_chars}~{synth.max_chars}자)보다 훨씬 김 — 핵심만 남기고 "
                          "과정·세부·중복·이전 시점 값은 빼세요(쓰지 않을 문장은 src에 넣지 마세요)")
+    if synth is not None and synth.key_ids:
+        cited = {i for line in rewrite.lines for i in line.src}
+        lost = [i for i in synth.key_ids if i not in cited]
+        if lost:
+            style.append(f"결론·제언·계획 절의 문장 {lost}이(가) 어느 줄의 src에도 없음 — 결론·목표·절감 효과·결정 사항은 핵심이니 쓰고, "
+                         "나중 문서에서 바뀐 계획이면 바뀐 내용을 쓴 줄의 src에 함께 넣으세요")
     ratio = _report_ratio(rewrite, sentences)
     if synth is None and ratio is not None and ratio < _min_ratio():
         style.append(f"보고서가 원문의 {ratio:.0%}로 과도하게 축약됨(기준 {_min_ratio():.0%} 이상) — 조건·이유·주체를 되살려 맥락을 알 수 있게 쓰고, 표 칸도 원문 절마다 한 줄로 모두 쓰세요")
@@ -836,7 +843,9 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     except Exception:  # noqa: BLE001
         pass
     notes += orient_tables(result.lines)
-    notes += tables_to_ordinals(result.lines)
+    if synth is None:   # 종합은 같은 항목으로 여러 후보를 비교하는 표를 그대로 둔다(2026-10-08 사용자: 대체 공급사 3곳 비교는 표)
+        notes += tables_to_ordinals(result.lines)
+    notes += fix_change_arrows(result.lines)
     notes += consolidate_table_rows(result.lines)
     notes += compact_ordinals(result.lines)
     notes += drop_title_echoes(result, title)
@@ -1435,6 +1444,37 @@ def drop_title_echoes(rewrite: Rewrite, title: str) -> list[str]:
 
 _ORDINALS = "①②③④⑤⑥⑦⑧⑨"
 ORDINAL_ITEMS_MAX = 3      # 대안 2개 비교 표에서, 대안마다 항목이 이 개수 이하면 표 대신 ①② 줄(내용이 간단하다고 본다)
+
+
+_CHANGE_ARROW = re.compile(
+    r"(?P<new>\S[^()]*?)\s*\(\s*(?P<was>기존|당초|종전|이전)\s*(?P<old>[^()→]*?\d[^()→]*?)\s*→\s*(?P<why>[^()]+?)\s*\)")
+_VALUE_LIKE = re.compile(r"^[~약\s]*[\d,.]+\s*(?:%p?|[가-힣]{0,3})\s*$")   # "28주", "30%", "3,900만원" — 화살표 뒤에 와도 되는 값
+
+
+def fix_change_arrows(lines: list[Line]) -> list[str]:
+    """'28주 (기존 26주 → 8월 전력 제한 영향)'처럼 화살표 뒤에 값이 아니라 사유를 쓴 것을 '기존 26주 → 28주 (8월 전력 제한 영향)'으로.
+    화살표는 두 값 사이에만 쓴다(2026-10-08 사용자, 종합 실측 A). 새 값에 숫자가 있고 화살표 뒤에는 숫자가 없을 때만 고친다."""
+    notes: list[str] = []
+
+    def mend(text: str) -> str:
+        def swap(m: re.Match) -> str:
+            new, old, why = m.group("new").strip(), m.group("old").strip(), m.group("why").strip()
+            if not re.search(r"\d", new) or _VALUE_LIKE.match(why):
+                return m.group(0)
+            return f"{m.group('was')} {old} → {new} ({why})"
+        label = re.match(r"^(\s*-\s+)?(.*?:\s*)?", text)
+        head, body = (text[:label.end()], text[label.end():]) if label else ("", text)
+        fixed = head + _CHANGE_ARROW.sub(swap, body)
+        if fixed != text:
+            notes.append(f"변화 표기 보정(화살표는 값 사이에만): '{text[:34]}' → '{fixed[:34]}'")
+        return fixed
+
+    for line in lines:
+        if line.rows is None:
+            line.text = mend(line.text)
+        else:
+            line.rows = [row[:1] + ["\n".join(mend(p) for p in cell.split("\n")) for cell in row[1:]] for row in line.rows]
+    return notes
 
 
 def tables_to_ordinals(lines: list[Line]) -> list[str]:

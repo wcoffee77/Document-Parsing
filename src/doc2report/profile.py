@@ -246,6 +246,7 @@ class TableRules(_Base):
     cell_hanging: bool = False    # 칸 안 "- 내용"이 줄바꿈되면 둘째 줄을 말머리 뒤 글자에 맞춤(내어쓰기)
     row_header: bool = False      # 첫 열(행 이름 칸)을 머리행과 같은 글꼴·크기·장평·가운데 정렬로
     uniform_cells: bool = False   # 표 안 내용 칸의 장평·정렬을 하나로 통일(정식보고서, 2026-10-08 사용자)
+    left_align_list_cells: bool = False  # "- 내용"처럼 말머리로 시작하는 칸이 있는 열은 한 줄짜리여도 왼쪽 정렬
     # true: 같은 성격(값)의 열은 폭을 같게 한다 — 정식보고서 표(2026-10-01 사용자: 구분·목표·실적·달성률 폭 동일).
     #       참고 열(note_columns)은 데이터가 아니라 비중을 작게 둔다.
     note_columns: list[str] = Field(default_factory=list)  # 머리가 이 말이면 참고 열(비고·이슈 …)

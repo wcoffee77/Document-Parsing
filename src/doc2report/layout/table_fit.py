@@ -103,6 +103,7 @@ def fit_table(table: Table, profile: Profile, available_width: int) -> TableLayo
     _abbreviate_headers(table, profile, layout)
     _apply_note_column_fonts(table, profile, layout)
     _left_align_long_cells(table, profile, layout)
+    _left_align_list_cells(table, profile, layout)
     _shrink_long_cells(table, profile, layout)
     _unify_column_fonts(table, layout)
     _balance_table_font(profile, layout)
@@ -270,6 +271,31 @@ def _left_align_long_cells(table: Table, profile: Profile, layout: TableLayout) 
             continue
         if (row_index, cell_index) in long_cells or (span == 1 and col in long_cols):
             layout.cell_align[(row_index, cell_index)] = "left"
+
+
+def _left_align_list_cells(table: Table, profile: Profile, layout: TableLayout) -> None:
+    """비교표 칸이 "- 내용"처럼 말머리로 시작하면 가운데 정렬은 말머리가 줄마다 다른 자리에 와서 읽기 어렵다 — 한 줄짜리여도
+    그 열의 본문 칸을 왼쪽 정렬한다(2026-10-08 사용자, 종합 B: 항목이 한 줄뿐이어도 비교할 것이 많고 일부는 두 줄).
+    말머리 문자는 tables.cell_list_markers. 머리행·저자가 정렬을 정한 칸·첫 열(행 이름)은 건드리지 않는다."""
+    if not profile.tables.left_align_list_cells:
+        return
+    markers = tuple(m for m in profile.tables.cell_list_markers if m) or ("-",)
+    body = [(ri, ci, cell, col, span) for ri, ci, cell, col, span in _iter_grid_indexed(table)
+            if not cell.is_header and col > 0]
+
+    def listed(cell) -> bool:
+        for block in cell.blocks:
+            if isinstance(block, ListItem):
+                return True
+            text = plain(getattr(block, "runs", []) or []).lstrip()
+            if text.startswith(tuple(f"{m} " for m in markers)):
+                return True
+        return False
+
+    cols = {col for ri, ci, cell, col, span in body if span == 1 and listed(cell)}
+    for ri, ci, cell, col, span in body:
+        if not cell.align and (col in cols or (span > 1 and listed(cell))):
+            layout.cell_align[(ri, ci)] = "left"
 
 
 def _fit_widths(table: Table, profile: Profile, available_width: int) -> TableLayout:
