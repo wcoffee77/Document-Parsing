@@ -361,7 +361,10 @@ class SynthSpec:
     """다문서 종합 모드(synthesis.py) — 원문 일부만 쓰는 것이 정상이라 '빠짐없이' 점검을 끄고 분량 점검을 켠다."""
     min_chars: int = 0     # 보고서 글자 수(공백 뺀) 목표 하한·상한 — 상한을 크게 넘으면 줄여 쓰게 한다
     max_chars: int = 0
-    key_ids: list[int] = field(default_factory=list)   # 결론·제언·계획 절 문장 — 하나도 안 쓰면 다시 쓰게 한다
+    # 결과·결론·계획 절의 **주제 묶음**(맨 위 문장 + 그 하위 문장들). 묶음마다 문장이 하나라도 인용돼야 한다 — 주제가 통째로 사라지는 것만 막고,
+    # 어떤 문장·수치를 남길지는 LLM이 정한다(문장 모양으로 중요도를 단정하지 않는다 — 2026-10-09 사용자).
+    key_groups: list[list[int]] = field(default_factory=list)
+    number_ids: list[int] = field(default_factory=list)  # 결론·계획 절 문장 — 인용했다면 그 문장의 수치는 줄에 남아야 한다
 
 
 @dataclass
@@ -533,16 +536,17 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
                          "과정·세부·중복·이전 시점 값은 빼세요(쓰지 않을 문장은 src에 넣지 마세요)")
     if synth is not None and not rewrite.title.strip():
         style.append("title이 비어 있음 — 보고서 전체를 대표하는 제목(명사형, 20자 안팎)을 title에 쓰세요")
-    if synth is not None and synth.key_ids:
+    if synth is not None and (synth.key_groups or synth.number_ids):
         cited = {i for line in rewrite.lines for i in line.src}
-        keyset = set(synth.key_ids)
-        for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
-            if i in keyset:   # 결과·결론·계획 절은 쓴 문장의 수치를 줄이지 않는다(2026-10-08 사용자: 파일럿 결과가 한 줄로 축약됐다)
-                style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 결과·결론·계획 절의 수치는 모두 남기세요")
-        lost = [i for i in synth.key_ids if i not in cited]
+        lost = [g for g in synth.key_groups if not any(i in cited for i in g)]
         if lost:
-            style.append(f"결론·제언·계획 절의 문장 {lost}이(가) 어느 줄의 src에도 없음 — 결론·목표·절감 효과·결정 사항은 핵심이니 쓰고, "
-                         "나중 문서에서 바뀐 계획이면 바뀐 내용을 쓴 줄의 src에 함께 넣으세요")
+            shown = "; ".join(f"[{g[0]}] {sentences[g[0] - 1][:24]}" for g in lost[:6])
+            style.append(f"결과·결론·계획 절의 주제 {len(lost)}개가 통째로 빠짐({shown}) — 각 주제는 핵심만이라도 쓰세요"
+                         "(나중 문서에서 바뀐 계획이면 바뀐 내용을 쓴 줄의 src에 함께 넣으세요)")
+        keyset = set(synth.number_ids)
+        for i, numbers in uncovered_by_source(sentences, _cited_lines(rewrite), rules).items():
+            if i in keyset:   # 결론·계획 절은 쓴 문장의 수치를 줄이지 않는다
+                style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 결론·계획 절의 수치는 모두 남기세요")
     ratio = _report_ratio(rewrite, sentences)
     if synth is None and ratio is not None and ratio < _min_ratio():
         style.append(f"보고서가 원문의 {ratio:.0%}로 과도하게 축약됨(기준 {_min_ratio():.0%} 이상) — 조건·이유·주체를 되살려 맥락을 알 수 있게 쓰고, 표 칸도 원문 절마다 한 줄로 모두 쓰세요")

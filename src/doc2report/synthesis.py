@@ -38,10 +38,10 @@ SYNTH_RULE2 = """[절대 규칙 2 — 쓴 줄의 사실은 빠짐없이, 쓰지 
 SYNTH_RULES = """[종합 규칙 — 여러 문서를 새 보고서 하나로]
 - 입력은 같은 주제를 다룬 문서 여러 개(날짜 오름차순, 아래 문서일수록 최신)입니다. 문서별로 이어 붙이지 말고, 읽는 사람이 한 번에 이해하도록
   **주제별로 새로 구성**합니다. 절(1.)은 보통 3~4개이고 이 흐름을 따릅니다:
-  ① 현황(경과): 이미 일어난 일과 결과. 절 전체가 **8~10줄 안팎**이 되게 씁니다(□ 2~3개, 각 □ 아래 '-' 1~3개). 결과는 **대표 지표만**:
-     핵심 성과 수치(예: 단축률과 그 대표 내역, 건수 전후 비교, 만족도·사용 현황)는 남기고, 하위 세부(사용자 분류, 미사용 사유, 내역의 내역)와
-     과정·배경 설명은 뺍니다. 한 줄에 지표 둘까지 이어 써도 됩니다. 뒤 문서가 앞 문서의 결과를 한 줄로 되풀이했다면, 그 한 줄만 쓰지 말고
-     **앞 문서의 대표 지표**(핵심 수치 2~4개)를 근거로 씁니다. 현황과 문제·위험이 얽혀 있으면 '현황 및 리스크'처럼 한 절로 합칩니다.
+  ① 현황(경과): 이미 일어난 일과 결과. 절 전체가 **보고서 분량의 1/4~1/3 이내**가 되게 씁니다. 결과는 **주제마다 대표 내용만**:
+     원문의 결과 주제(□ 항목)는 하나도 빼지 않되, 주제마다 핵심 수치·결론 한두 줄로 줄이고 하위 세부(분류, 사유, 내역의 내역)와 과정·배경 설명은 뺍니다.
+     뒤 문서가 앞 문서의 결과를 한 줄로 되풀이했다면, 그 한 줄만 쓰지 말고 **앞 문서의 주제별 대표 내용**을 근거로 씁니다.
+     현황과 문제·위험이 얽혀 있으면 '현황 및 리스크'처럼 한 절로 합칩니다.
      나중 문서에서 완료된 일(심사 완료, 착수 완료 등)도 이 절에 한 줄로 씁니다 — 뒤 절에 따로 떼어 두지 않습니다.
   ② 검토 내용: 대안·후보 비교(아래 '비교' 규칙).
   ③ 대응 계획(또는 추진 계획): '□ 단기 대응'과 '□ 중장기 대응'(또는 단계별)으로 묶고 그 아래 실행 내용·일정을 씁니다.
@@ -235,7 +235,8 @@ class Prepared:
     system: str
     ranges: list[tuple[str, int, int]]         # (문서 제목, 첫 문장 번호, 끝 문장 번호)
     year: int | None
-    key_ids: list[int] = field(default_factory=list)   # 결론·제언·계획 절의 문장(rules/drafting.yaml::synthesis_key_sections)
+    key_groups: list[list[int]] = field(default_factory=list)   # 결과·결론·계획 절의 주제 묶음(맨 위 문장 + 하위 문장)
+    number_ids: list[int] = field(default_factory=list)         # 결론·계획 절 문장(수치 보존 점검 대상)
 
 
 def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title: str | None = None) -> Prepared:
@@ -248,22 +249,30 @@ def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title
     sentences: list[str] = []
     ranges: list[tuple[str, int, int]] = []
     blocks: list[str] = []
-    key_ids: list[int] = []
+    key_groups: list[list[int]] = []
+    number_ids: list[int] = []
     for n, doc in enumerate(docs, 1):
         first = len(sentences) + 1
         lines = [f"=== 문서 {n}: {doc.title}" + (f" ({doc.date})" if doc.date else "") + " ==="]
         key_section = result_section = False
+        group: list[int] = []
         for kind, depth, mark, text in doc.items:
             if kind == "절":
                 lines.append(f"({mark + ' ' if mark and mark != '표' else ''}{text})")
                 if mark != "표":   # 표의 열 머리는 절이 아니다
                     key_section = any(rx.search(text) for rx in key_res)
                     result_section = any(rx.search(text) for rx in result_res)
+                    group = []
                 continue
             sentences.append(text)
-            if key_section or (result_section and depth == 0 and re.search(r"\d", text)):
-                key_ids.append(len(sentences))
             lines.append("  " * depth + f"[{len(sentences)}] " + (f"{mark} " if mark and mark != "표" else "") + text)
+            if key_section or result_section:
+                if depth == 0 or not group:   # 맨 위 문장이 새 주제를 연다 — 하위 문장은 그 주제에 속한다
+                    group = []
+                    key_groups.append(group)
+                group.append(len(sentences))
+                if key_section:
+                    number_ids.append(len(sentences))
         ranges.append((doc.title, first, len(sentences)))
         blocks.append("\n".join(lines))
     low, high = page_chars(pages)
@@ -279,7 +288,7 @@ def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title
             "하위 내용입니다.\n\n" + "\n\n".join(blocks)
             + "\n\n위 문서들을 지시대로 하나의 새 보고서로 종합해 JSON 하나로만 출력하세요(첫 글자는 {).")
     newest = max((d.when for d in docs if d.when), default=None)
-    return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None, key_ids)
+    return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None, key_groups, number_ids)
 
 
 def concat_structure(ranges: list[tuple[str, int, int]]):
@@ -298,7 +307,7 @@ def synthesize(docs: list[SourceDoc], ask: Ask | None = None, pages: tuple[int, 
     prep = prepare(docs, pages, title)
     low, high = page_chars(pages)
     result = rewrite("", ask, year or prep.year, prepared=(prep.title, prep.sentences, prep.user, prep.system),
-                     synth=SynthSpec(low, high, prep.key_ids), fallback=concat_structure(prep.ranges))
+                     synth=SynthSpec(low, high, prep.key_groups, prep.number_ids), fallback=concat_structure(prep.ranges))
     if not (result.title or "").strip():
         result.title = _fallback_title(result, docs, ask, result.notes)
     result.notes.insert(0, "종합 입력: " + ", ".join(f"문서{n} 문장 {a}~{b}" for n, (_, a, b) in enumerate(prep.ranges, 1))

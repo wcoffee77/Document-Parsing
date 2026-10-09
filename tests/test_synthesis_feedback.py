@@ -58,13 +58,13 @@ def test_synthesis_prompt_example_lines_pass_fact_check():
 KEY = DOC2 + "3. 향후 계획\n □ 중기 목표 : A사 60%, 대체 40%\n"
 
 
-def test_key_section_sentences_are_tracked_and_demanded():
+def test_key_section_topics_are_tracked_and_demanded():
     prep = prepare([_doc(DOC1, "d1"), _doc(KEY, "d2")])
-    keyed = [prep.sentences[i - 1] for i in prep.key_ids]
-    assert any("중기 목표" in s for s in keyed) and any("200개" in s for s in keyed) is False
+    keyed = [prep.sentences[g[0] - 1] for g in prep.key_groups]
+    assert any("중기 목표" in s for s in keyed) and not any("200개" in s for s in keyed if "리드" in s)
     rewrite = Rewrite("t", [Line("□", "리드타임 : 28주", [next(i for i, s in enumerate(prep.sentences, 1) if "28주" in s)])], [])
-    _, style = review(rewrite, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_ids))
-    assert any("결론·제언·계획 절" in s for s in style)
+    _, style = review(rewrite, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_groups, prep.number_ids))
+    assert any("통째로 빠짐" in s for s in style)
 
 
 def test_synthesis_keeps_three_candidate_comparison_table():
@@ -138,24 +138,43 @@ NEXT_DOC = """확산 계획
 """
 
 
-def test_result_sections_are_key_sections_whose_numbers_must_survive():
-    """B: 앞 문서가 항목별로 푼 파일럿 결과가 뒤 문서의 한 줄 요약('18% 단축, 4.1점')만 남고 사라졌다."""
+def test_result_topics_must_not_vanish_but_wording_is_left_to_the_llm():
+    """B: 파일럿 결과가 뒤 문서의 한 줄 요약만 남고 사라졌다. 규칙은 주제(□ 항목 + 하위)가 통째로 빠지는 것만 막는다 —
+    문장 모양(숫자 유무·단계)으로 중요도를 단정하지 않는다(2026-10-09 사용자)."""
     prep = prepare([_doc(RESULT_DOC, "d1"), _doc(NEXT_DOC, "d2")])
-    keyed = [prep.sentences[i - 1] for i in prep.key_ids]
-    assert any("신규 기능 24%" in s for s in keyed) and any("지속 사용 의향 88%" in s for s in keyed)
-    assert not any("테스트 코드" in s for s in keyed)          # 하위 세부(- 항목)는 핵심이 아니다 — 종합 초안 수준으로 짧게
-    first = next(i for i, s in enumerate(prep.sentences, 1) if "신규 기능 24%" in s)
+    groups = [[prep.sentences[i - 1][:6] for i in g] for g in prep.key_groups]
+    assert any(g[0].startswith("작업 시간") and len(g) == 2 for g in groups)       # 하위 "- 테스트 코드 …"가 같은 주제에 묶인다
+    assert any(g[0].startswith("사용자 만족") for g in groups)
+    idx = {s[:6]: i for i, s in enumerate(prep.sentences, 1)}
+    spec = SynthSpec(0, 0, prep.key_groups, prep.number_ids)
     summary = next(i for i, s in enumerate(prep.sentences, 1) if s.startswith("파일럿 결과"))
-    thin = Rewrite("t", [Line("□", "파일럿 결과 : 평균 18% 단축, 만족도 4.1점", [summary, first])], [])
-    _, style = review(thin, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_ids))
-    assert any("수치" in s and "24" in s for s in style), style              # 24%·12%·31%·88%가 줄에 없다
-    tests_i = next(i for i, s in enumerate(prep.sentences, 1) if "테스트 코드" in s)
-    sat = next(i for i, s in enumerate(prep.sentences, 1) if "88%" in s)
-    full = Rewrite("t", [Line("□", "파일럿 결과", [first, sat, summary]),
-                         Line("-", "작업 시간 평균 18% 단축 (신규 기능 24%, 버그 수정 12%)", [first]),
-                         Line("-", "만족도 4.1점/5점, 지속 사용 의향 88%", [sat, summary])], [])
-    _, style = review(full, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_ids))
-    assert not [s for s in style if "수치" in s], style
+    thin = Rewrite("t", [Line("□", "파일럿 결과 : 평균 18% 단축", [summary])], [])         # 만족도 주제가 사라짐
+    _, style = review(thin, prep.sentences, "t", 2026, synth=spec)
+    assert any("주제" in s and "만족" in s for s in style), style
+    brief_ok = Rewrite("t", [Line("□", "파일럿 결과", [idx["작업 시간 단축 :"[:6]]]),     # 하위 문장 없이 맨 위 문장만 써도 통과
+                             Line("-", "만족도 4.1점", [idx["사용자 만족도"[:6]]])], [])
+    _, style = review(brief_ok, prep.sentences, "t", 2026, synth=spec)
+    assert not [s for s in style if "주제" in s], style
+
+
+def test_topics_without_digits_or_short_phrases_are_protected_too():
+    """숫자 없는 □ 항목·짧은 구로 된 □ 항목이 핵심인 문서에서도 주제가 빠지지 않게 한다."""
+    doc = "검토 보고\n2026. 10. 1\n1. 검토 결과\n □ 보안 우려 해소\n □ 예산 부담\n   - 증액 불가\n"
+    prep = prepare([_doc(doc, "d1"), _doc(NEXT_DOC, "d2")])
+    texts = [[prep.sentences[i - 1] for i in g] for g in prep.key_groups]
+    assert ["보안 우려 해소"] in texts and ["예산 부담", "증액 불가"] in texts
+    only_first = Rewrite("t", [Line("□", "보안 우려 해소", [prep.sentences.index("보안 우려 해소") + 1])], [])
+    _, style = review(only_first, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_groups, prep.number_ids))
+    assert any("예산 부담" in s for s in style), style
+
+
+def test_numbers_in_cited_plan_sentences_must_survive():
+    prep = prepare([_doc(DOC1, "d1"), _doc(KEY, "d2")])
+    target = next(i for i, s in enumerate(prep.sentences, 1) if "중기 목표" in s)
+    assert target in prep.number_ids
+    lost = Rewrite("t", [Line("□", "중기 목표 설정", [target])], [])
+    _, style = review(lost, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_groups, prep.number_ids))
+    assert any("수치" in s and "60" in s for s in style), style
 
 
 def test_synthesis_without_title_gets_a_fallback_title():
