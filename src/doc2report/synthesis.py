@@ -14,7 +14,7 @@ import datetime
 import re
 from dataclasses import dataclass, field
 
-from .drafting import (REWRITE_SYSTEM, Ask, DraftResult, Group, Section, Structure, SynthSpec, rewrite,
+from .drafting import (REWRITE_SYSTEM, has_alternatives, Ask, DraftResult, Group, Section, Structure, SynthSpec, rewrite,
                        system_prompt)
 from .ir import (DATE_LINE, Callout, Document, Heading, ListItem, Paragraph, Table, plain)
 
@@ -47,7 +47,7 @@ SYNTH_RULES = """[종합 규칙 — 여러 문서를 새 보고서 하나로]
   ③ 대응 계획(또는 추진 계획): '□ 단기 대응'과 '□ 중장기 대응'(또는 단계별)으로 묶고 그 아래 실행 내용·일정을 씁니다.
      비용·효과는 별도 절로 떼지 않고, 그 방안을 택한 근거로 방안 아래 '-'에 씁니다(예: 추가 비용이 지연 손실보다 작아 선제 조치가 유리).
   ④ 결정 요청(필요할 때만): 승인·결정할 일 2~3줄. 기대 효과·위험은 □ 한 줄씩 요약하고 나열하지 않습니다.
-- 앞부분(현황·경과)은 간결하게(대표 지표만), 뒷부분(대응·결정)은 자세히 씁니다. title은 비우지 않습니다.
+- 앞부분(현황·경과)은 간결하게(대표 지표만), 뒷부분(대응·결정)은 자세히 씁니다. title은 비우지 않고, 핵심만 함축한 명사형으로 **반드시 한 줄**(공백 포함 20자 이내)로 씁니다.
 - 같은 사실이 여러 문서에 있으면 한 번만 쓰고 src에는 근거 문장을 모두 적습니다.
 - 같은 항목의 값이 문서마다 다르면 **가장 나중 문서의 값**을 씁니다. 바뀐 것을 남길 때는 '항목 : 기존 A → B (사유)'로 씁니다.
   화살표(→)는 **두 값 사이에만** 씁니다. 사유·원인은 괄호에 따로 씁니다('B (기존 A → 사유)'처럼 화살표 뒤에 사유를 쓰면 안 됩니다).
@@ -237,14 +237,22 @@ class Prepared:
     year: int | None
     key_groups: list[list[int]] = field(default_factory=list)   # 결과·결론·계획 절의 주제 묶음(맨 위 문장 + 하위 문장)
     number_ids: list[int] = field(default_factory=list)         # 결론·계획 절 문장(수치 보존 점검 대상)
+    need_table: str = ""                                        # 비교 표가 꼭 있어야 하는 이유(없으면 요구 안 함)
 
 
+_TABLE_REQUEST = (r"표로", r"표를", r"표\s*(형|형태|으로)", r"비교\s*표", r"표\s*(만들|작성|정리|비교)")
 MAX_REQUEST_CHARS = 1000   # 사용자 요청사항 길이 상한(웹 화면 입력칸) — 지시문을 밀어낼 만큼 길면 자른다
 
 REQUEST_RULES = """[사용자 요청사항 — 이 보고서에만 적용]
 아래는 보고서를 받는 사람이 직접 적은 요청입니다. 구성·분량·강조점·절 이름·어조에 관한 요청은 위 [종합 규칙]·[구성]보다 우선해 따릅니다.
 단 [절대 규칙](사실을 바꾸지 않음, 원문에 없는 사실·숫자를 만들지 않음, 쓴 줄의 사실은 빠짐없이)과 [출력 형식]은 요청과 상관없이 지킵니다 —
 요청이 원문에 없는 내용을 요구하면 그 부분은 쓰지 않습니다.
+요청 해석 원칙 (2026-10-09 실측: '경과는 최소한으로, 대안은 표로 비교'에서 비교 표가 빠지고 대응 계획까지 줄어든 오류를 막기 위함):
+- 줄이라는 요청은 **그 말이 가리킨 부분에만** 적용합니다. '경과'는 [구성] ① 현황(경과) 절만 뜻합니다. ② 검토 내용(대안 비교)·③ 대응 계획·④ 결정 요청은
+  경과가 아니므로 줄이지 않고 기본 분량·구체성 그대로 씁니다. 요청에 없는 부분을 임의로 줄이거나 빼지 않습니다.
+- 한 부분을 줄이면 남는 분량은 요청에서 늘리거나 구체적으로 쓰라고 한 부분(없으면 대응 계획)에 씁니다. 전체 분량은 줄지 않습니다.
+- '표로'·'표로 비교'라는 요청은 해당 내용 전부를 반드시 {"m": "표", "rows": …} 줄로 씁니다(줄글·①② 줄로 대신하지 않음). 대안 후보가 문서 여러 곳에 있으면 한 표에 모읍니다.
+- '구체적으로'·'자세히'는 원문에 있는 일정·담당·수치·조건을 빠뜨리지 않고 쓴다는 뜻이지, 원문에 없는 내용을 만든다는 뜻이 아닙니다.
 ---
 {request}
 ---
@@ -311,12 +319,19 @@ def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title
         base = base.replace("[구성]", REQUEST_RULES.replace("{request}", request) + "\n[구성]", 1)
     system = system_prompt(base=base)
     out_title = title or ""
+    need_table = ""
+    if request and any(re.search(cue, request) for cue in _TABLE_REQUEST):
+        need_table = "요청사항에 표가 있음"
+    elif any(k == "절" and m == "표" for doc in docs for k, _, m, _ in doc.items):
+        need_table = "원문에 비교 표가 있음"
+    elif has_alternatives(sentences):
+        need_table = "원문이 대안을 비교함"
     user = (f"문서 {len(docs)}개, 원문 문장 {len(sentences)}개입니다. 괄호 ( ) 안의 줄은 절 제목(맥락)이라 번호가 없고, 들여쓴 문장은 윗줄의 "
             "하위 내용입니다.\n\n" + "\n\n".join(blocks)
             + (f"\n\n[사용자 요청사항] {request}" if request else "")
             + "\n\n위 문서들을 지시대로 하나의 새 보고서로 종합해 JSON 하나로만 출력하세요(첫 글자는 {).")
     newest = max((d.when for d in docs if d.when), default=None)
-    return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None, key_groups, number_ids)
+    return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None, key_groups, number_ids, need_table)
 
 
 def brief_source(prep: Prepared) -> str:
@@ -342,7 +357,7 @@ def synthesize(docs: list[SourceDoc], ask: Ask | None = None, pages: tuple[int, 
     prep = prepare(docs, pages, title, request)
     low, high = page_chars(pages)
     result = rewrite("", ask, year or prep.year, prepared=(prep.title, prep.sentences, prep.user, prep.system),
-                     synth=SynthSpec(low, high, prep.key_groups, prep.number_ids), fallback=concat_structure(prep.ranges))
+                     synth=SynthSpec(low, high, prep.key_groups, prep.number_ids, prep.need_table), fallback=concat_structure(prep.ranges))
     if not (result.title or "").strip():
         result.title = _fallback_title(result, docs, ask, result.notes)
     if clean_request(request):

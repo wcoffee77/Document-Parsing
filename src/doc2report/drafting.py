@@ -26,7 +26,7 @@ MAX_SUMMARY = 60      # □ 요지 글자 수 한도
 SYSTEM = f"""당신은 사내 정식보고서 편집자입니다. 번호가 붙은 문장들을 보고서 구조에 **배치만** 합니다. 문장을 고치거나 만들지 마세요.
 
 출력은 아래 JSON 하나뿐입니다(설명·코드 블록 금지).
-{{"title": "보고서 제목(명사형, 30자 이내)",
+{{"title": "보고서 제목(명사형, 반드시 한 줄: 핵심만 함축해 공백 포함 20자 이내)",
  "sections": [
   {{"heading": "절 제목(명사형, {MAX_HEADING}자 이내, 번호 없이)",
     "groups": [
@@ -333,7 +333,7 @@ REWRITE_SYSTEM = """당신은 사내 정식보고서 작성자입니다. 번호�
 FORMAT_TAIL = """
 [출력 형식 — 반드시 지킴]
 보고서를 글로 쓰지 말고, 아래 모양의 JSON 하나만 출력합니다. 첫 글자는 { 이고 마지막 글자는 } 입니다(설명·코드 블록 금지).
-{"title": "보고서 제목(명사형)", "lines": [{"m": "□", "text": "...", "src": [1]}, {"m": "표", "rows": [["구분", "…"], ["…", "…"]], "src": [2, 3]}], "dropped": [번호, ...]}
+{"title": "보고서 제목(명사형, 반드시 한 줄: 핵심만 함축해 공백 포함 20자 이내)", "lines": [{"m": "□", "text": "...", "src": [1]}, {"m": "표", "rows": [["구분", "…"], ["…", "…"]], "src": [2, 3]}], "dropped": [번호, ...]}
 """
 
 def system_prompt(exclude_docs: set[int] | None = None, base: str | None = None) -> str:
@@ -365,6 +365,7 @@ class SynthSpec:
     # 어떤 문장·수치를 남길지는 LLM이 정한다(문장 모양으로 중요도를 단정하지 않는다 — 2026-10-09 사용자).
     key_groups: list[list[int]] = field(default_factory=list)
     number_ids: list[int] = field(default_factory=list)  # 결론·계획 절 문장 — 인용했다면 그 문장의 수치는 줄에 남아야 한다
+    need_table: str = ""   # 비교 표가 꼭 있어야 하는 이유(요청사항에 '표', 원문에 비교표 등). 비어 있으면 요구 없음
 
 
 @dataclass
@@ -536,6 +537,11 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
                          "과정·세부·중복·이전 시점 값은 빼세요(쓰지 않을 문장은 src에 넣지 마세요)")
     if synth is not None and not rewrite.title.strip():
         style.append("title이 비어 있음 — 보고서 전체를 대표하는 제목(명사형, 20자 안팎)을 title에 쓰세요")
+    if rewrite.title.strip() and not title_fits(rewrite.title):
+        style.append(f"title이 한 줄을 넘음({rewrite.title.strip()[:30]}…) — 핵심만 함축한 명사형 제목으로 공백 포함 {title_char_hint()}자 이내, 반드시 한 줄")
+    if synth is not None and synth.need_table and not any(l.is_table for l in rewrite.lines):
+        style.append(f"비교 표가 없음({synth.need_table}) — 같은 항목(단가·물량·기간·비용·보안 등)으로 대안·후보를 비교하는 내용은 "
+                     "{\"m\": \"표\", \"rows\": [[\"구분\", \"대안1\", …], …]} 줄로 쓰세요. 표를 줄글로 풀어 쓰지 마세요")
     if synth is not None and (synth.key_groups or synth.number_ids):
         cited = {i for line in rewrite.lines for i in line.src}
         lost = [g for g in synth.key_groups if not any(i in cited for i in g)]
@@ -556,6 +562,68 @@ def review(rewrite: Rewrite, sentences: list[str], title: str, year: int | None,
     for i, numbers in (uncovered_by_source(sentences, _cited_lines(rewrite), rules).items() if synth is None else []):
         style.append(f"문장 [{i}]의 수치 {', '.join(numbers)}이(가) 그 문장을 쓴 줄에 없음 — 줄에 넣거나, 숫자를 뺄 거면 그 문장을 dropped로")
     return facts, style
+
+
+def _title_profiles():
+    from .profile import load_profile
+
+    return [load_profile(name) for name in ("formal", "confluence")]   # 두 서식 중 어디에 써도 한 줄이어야 한다
+
+
+def title_fits(title: str) -> bool:
+    """제목이 문서 제목 서식(큰 글씨, 쓸 수 있는 폭)에서 한 줄에 들어가는가. 글꼴 폭을 모르면 한글 1em·그 밖 0.55em로 어림한다."""
+    from .layout.measure import TextMeasurer, is_wide
+
+    text = " ".join((title or "").split())
+    for profile in _title_profiles():
+        spec = profile.font("title")
+        width = profile.page.usable_width * 0.97     # 어림 오차 여유
+        measure = TextMeasurer(spec.east_asia, spec.latin or spec.east_asia, spec.size, bold=bool(spec.bold),
+                               scale=spec.char_scale or 1.0)
+        if measure.widths_known:
+            if measure.wrap_count(text, width) > 1:
+                return False
+        elif sum(spec.size * (1.0 if is_wide(c) else 0.55) * (spec.char_scale or 1.0) for c in text) > width:
+            return False
+    return True
+
+
+def title_char_hint() -> int:
+    """프롬프트에 알려 줄 제목 글자 수(한글 기준) — 가장 좁은 제목 서식 기준."""
+    best = 99
+    for profile in _title_profiles():
+        spec = profile.font("title")
+        best = min(best, int(profile.page.usable_width * 0.97 // (spec.size * (spec.char_scale or 1.0))))
+    return max(best - 2, 8)
+
+
+def fit_title(title: str, ask, notes: list[str], body: str = "") -> str:
+    """제목이 한 줄을 넘으면 LLM에게 줄여 쓰게 하고(최대 2번), 안 되면 어절 단위로 잘라 한 줄에 맞춘다. 줄인 것은 --report에 남긴다."""
+    title = " ".join((title or "").split())
+    if not title or title_fits(title):
+        return title
+    original, limit = title, title_char_hint()
+    for _ in range(2):
+        if ask is None:
+            break
+        try:
+            raw = (ask(f"보고서 제목을 한 줄로 함축합니다. 핵심만 남긴 명사형, 공백 포함 {limit}자 이내, 마침표·따옴표·번호 없이 제목 글자만 한 줄로 출력합니다.",
+                       f"긴 제목: {title}\n\n보고서 본문 일부:\n{body[:1500]}") or "").strip().splitlines()
+        except Exception:  # noqa: BLE001
+            break
+        candidate = " ".join(raw[0].strip(" \"'.「」").split()) if raw else ""
+        if candidate and title_fits(candidate):
+            notes.append(f"제목이 한 줄을 넘어 줄임: {original} → {candidate}")
+            return candidate
+        limit = max(limit - 3, 8)
+    words = title.split()
+    while len(words) > 1 and not title_fits(" ".join(words)):
+        words.pop()
+    cut = " ".join(words)
+    while cut and not title_fits(cut):
+        cut = cut[:-1]
+    notes.append(f"제목이 한 줄을 넘어 어절 단위로 잘라 맞춤(LLM 줄임 실패): {original} → {cut}")
+    return cut
 
 
 def has_alternatives(sentences: list[str], rules=None) -> bool:
@@ -870,7 +938,8 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
     notes += _coverage_notes(result, sentences, body, synth=synth is not None)
     sections = sum(1 for line in result.lines if _SECTION_MARK.match(line.m)) or sum(
         1 for line in result.lines if line.m == "□")
-    return DraftResult(body, None, notes, True, title=result.title or title, mode="rewrite", sections=sections)
+    final_title = fit_title(result.title or title, ask, notes, body)
+    return DraftResult(body, None, notes, True, title=final_title, mode="rewrite", sections=sections)
 
 
 RESCUE_SYSTEM = """당신은 보고서 정리 담당입니다. 번호 붙은 원문 문장과, 그 원문으로 이미 써 둔 보고서 글이 주어집니다.
@@ -892,7 +961,7 @@ def _rescue_plain_text(raw: str, numbered: str, count: int, ask_json: Ask) -> "R
         return None
 
 
-_STRUCTURAL_KEYS = ("표도 ①② 줄도 없음", "번호 절이 없음", "사전에 없는 말", "칸 안 줄이 김")
+_STRUCTURAL_KEYS = ("비교 표가 없음", "title이 한 줄을 넘음", "표도 ①② 줄도 없음", "번호 절이 없음", "사전에 없는 말", "칸 안 줄이 김")
 MAX_FORMAT_RETRIES = 3     # 형식 오류(JSON 아님)로 다시 묻는 최대 횟수 — 내용 수정 1회와 별도
 LINE_REPAIR_TRIES = 2      # 사실 검증에 걸린 줄을 줄 단위로 다시 쓰게 하는 횟수
 
