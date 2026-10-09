@@ -145,8 +145,14 @@ class PageBreak:
     pass
 
 
+@dataclass
+class BlankLine:
+    """원문에서 문단 사이에 엔터로 띄워 둔 빈 줄 하나(Confluence의 빈 `<p>`). 크기는 없다 — 렌더러가 본문 한 줄로 쓴다.
+    `text.keep_blank_lines`가 꺼진 서식에서는 파이프라인이 맨 처음 지운다."""
+
+
 Block = (
-    Heading | Paragraph | ListItem | CodeBlock | Image | Table | Callout | HorizontalRule | PageBreak
+    Heading | Paragraph | ListItem | CodeBlock | Image | Table | Callout | HorizontalRule | PageBreak | BlankLine
 )
 
 

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from lxml import etree
 
 from ..ir import (
+    BlankLine,
     Block,
     Callout,
     Cell,
@@ -541,15 +542,24 @@ def _cell_blocks(el) -> list[Block]:
     )
     if has_block:
         blocks, _ = _children_blocks(el, links=False)
-        return blocks
+        return [b for b in blocks if not isinstance(b, BlankLine)]  # 칸 안의 빈 줄은 원문 간격이 아니라 군더더기
     lines, images = _inline_lines(el)
-    return _paragraphs_from_lines(lines, images)
+    return [b for b in _paragraphs_from_lines(lines, images) if not isinstance(b, BlankLine)]
 
 
 def _paragraphs_from_lines(lines: list[list[Run]], images: list[Image],
                            align: str | None = None) -> list[Block]:
-    blocks: list[Block] = [Paragraph(runs=line, align=align)
-                           for line in lines if any(r.text.strip() for r in line)]
+    blocks: list[Block] = []
+    filled = [any(r.text.strip() for r in line) for line in lines]
+    for i, line in enumerate(lines):
+        if filled[i]:
+            blocks.append(Paragraph(runs=line, align=align))
+        elif not images and (not any(filled) and i == 0 or any(filled[:i]) and any(filled[i:])):
+            # 글자 없는 줄 = 원문의 빈 줄(엔터). 빈 `<p>`(줄 하나뿐)와 `글<br/><br/>글`의 가운데 빈 줄 — 끝에 붙은 `<br/>`는
+            # 브라우저에서도 줄을 만들지 않으므로 뺀다. 연속은 뒤에서 하나로 접는다
+            blocks.append(BlankLine())
+    if not lines and not images:
+        blocks.append(BlankLine())
     blocks.extend(images)
     return blocks
 

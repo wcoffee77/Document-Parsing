@@ -46,11 +46,16 @@ def test_formal_profile_values():
 def test_other_profiles_are_unchanged():
     for name in ("default", "confluence"):
         prof = load_profile(name)
-        assert [(lv.lead_spaces, lv.marker_sep) for lv in prof.numbering] == [(0, "\t")] * 4
-        assert prof.numbering[1].indent == load_profile("default").numbering[1].indent > 0
         assert prof.tables.align == "right" and prof.tables.header_shading == "F2F2F2"
         assert prof.text.annotation_markers == [] and prof.text.note_lead_spaces is None
         assert not prof.has_font("annotation")
+    default = load_profile("default")
+    assert [(lv.lead_spaces, lv.marker_sep) for lv in default.numbering] == [(0, "\t")] * 4
+    assert default.numbering[1].indent > 0
+    # Confluence 변환(2026-10-09): 단락 들여쓰기 대신 공백 — 단계마다 두 칸, 말머리 뒤 한 칸
+    conf = load_profile("confluence")
+    assert [(lv.lead_spaces, lv.marker_sep, lv.indent, lv.hanging) for lv in conf.numbering] == [
+        (0, " ", 0, 0), (2, " ", 0, 0), (4, " ", 0, 0), (6, " ", 0, 0), (8, " ", 0, 0)]
 
 
 def test_levels_are_separated_by_spaces_not_indent(rendered):

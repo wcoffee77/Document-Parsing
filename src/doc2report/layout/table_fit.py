@@ -73,7 +73,7 @@ def table_indents(doc: Document, profile: Profile) -> dict[int, int]:
     `set_list_indent`로 첫 줄을 거기서 시작한다. 제목·일반 문단은 0. ※ 참고 문단은 윗줄보다 더
     들여 쓴 부속 줄이라 기준으로 삼지 않는다."""
     rules = profile.text
-    notes = tuple(rules.note_marks) if (rules.note_indent or rules.note_lead_spaces is not None) else ()
+    notes = tuple(rules.note_marks) if (rules.note_indent or rules.note_lead_spaces is not None or rules.note_extra_spaces is not None) else ()
     boxes = tuple(rules.annotation_markers)  # 주석(*)은 윗줄에 딸린 부속 줄이라 기준으로 삼지 않는다
     skip = notes + boxes
     body = profile.font("body")

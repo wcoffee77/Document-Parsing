@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 
-from ..ir import (DATE_LINE, Block, Callout, Document, Heading, ListItem, Paragraph, Run, Table,
+from ..ir import (DATE_LINE, BlankLine, Block, Callout, PageBreak, Document, Heading, ListItem, Paragraph, Run, Table,
                   invisible_codes, is_blank, plain)
 from .stylize_ko import Change
 
@@ -267,6 +267,33 @@ def clean_page_titles(doc: Document, patterns: list[str]) -> tuple[Document, lis
                                 section_title=block.section_title, page_title=True)
         blocks.append(block)
     return Document(blocks=blocks, title=doc.title, source=doc.source), changes
+
+
+def settle_blank_lines(doc: Document, keep: bool) -> Document:
+    """원문의 빈 줄(`BlankLine`)을 정리한다. keep이 꺼진 서식은 모두 지운다(예전 동작).
+
+    켜진 서식(Confluence 변환)은 문단 사이 빈 줄을 **한 줄**로 살린다 — 연속은 하나로 접고, 문서 맨 앞·맨 뒤와 쪽 나눔 옆,
+    표 바로 뒤(표 뒤 간격이 이미 있다)와 표 제목 바로 뒤(제목은 표에 붙는다)의 빈 줄은 뺀다. 박스(Callout) 안은 항상 뺀다."""
+    def clean(blocks: list[Block]) -> list[Block]:
+        out: list[Block] = []
+        for block in blocks:
+            if isinstance(block, Callout):
+                block.blocks = [b for b in clean(block.blocks) if not isinstance(b, BlankLine)]
+            if isinstance(block, BlankLine):
+                if not keep or not out or isinstance(out[-1], (BlankLine, PageBreak, Table)):
+                    continue
+            elif isinstance(block, PageBreak) and out and isinstance(out[-1], BlankLine):
+                out.pop()
+            elif isinstance(block, Table) and out and isinstance(out[-1], BlankLine):
+                before = out[-2] if len(out) > 1 else None
+                if isinstance(before, Paragraph) and _is_bracket_caption(plain(before.runs).strip()):
+                    out.pop()
+            out.append(block)
+        while out and isinstance(out[-1], BlankLine):
+            out.pop()
+        return out
+
+    return Document(blocks=clean(doc.blocks), title=doc.title, source=doc.source)
 
 
 def drop_blank_blocks(doc: Document) -> tuple[Document, list[Change]]:

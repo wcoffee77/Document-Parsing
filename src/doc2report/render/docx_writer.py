@@ -25,13 +25,14 @@ from ..ir import (
     HorizontalRule,
     Image,
     ListItem,
+    BlankLine,
     PageBreak,
     Paragraph,
     Run,
     Table,
     plain,
 )
-from ..layout.flow import FlowPlan
+from ..layout.flow import FlowPlan, row_heights
 from ..layout.lines import Line, apply_autospace, fit_text
 from ..layout.measure import TextMeasurer, is_wide
 from ..layout.table_fit import TableLayout, plan_tables
@@ -68,6 +69,7 @@ class DocxRenderer:
         self._counters: dict[int, int] = {}
         self._previous: Block | None = None  # 바로 앞에 무엇이 왔는지 (표 뒤 간격 판단용)
         self._break_before = False  # 다음 본문 문단을 새 쪽에서 시작 (PageBreak)
+        self._base_lead = 0  # 마지막 (※가 아닌) 항목의 앞 공백 수 — text.note_extra_spaces 기준
         self._base_indent = 0  # 마지막 (※가 아닌) 문단의 왼쪽 들여쓰기 — ※ 문단은 이보다 더 들여쓴다
         self._last_item: ListItem | None = None  # 주석 줄의 단계 간격을 윗줄 기준으로 잡기 위해
         self._fit_wrapped = 0    # 엔터로 줄을 나눈 문장 수
@@ -227,6 +229,7 @@ class DocxRenderer:
                     paragraph.paragraph_format.space_after = Emu(note_gap)
             if container is None and not is_note:
                 self._base_indent = 0
+                self._base_lead = 0
             self._after_table_gap(paragraph, container, is_note)
             self._set_anchor(self._last_paragraph(paragraph), spec, head, container)
         elif isinstance(block, ListItem):
@@ -241,6 +244,9 @@ class DocxRenderer:
             self._after_table_gap(self._image(block, container), container)
         elif isinstance(block, HorizontalRule):
             self._after_table_gap(self._rule(container), container)
+        elif isinstance(block, BlankLine):
+            if container is None:
+                self._blank_line()
         elif isinstance(block, PageBreak):
             if container is None and next_block is not None and not isinstance(next_block, Table):
                 # 다음 문단에 "쪽 나눔 앞"을 건다 — 나눔 문자를 넣은 빈 문단을 쓰면 새 쪽 맨 위에
@@ -253,9 +259,25 @@ class DocxRenderer:
 
     # ── 개별 블록 ───────────────────────────────────────────────────────
 
+    def _blank_line(self) -> None:
+        """원문에서 엔터로 띄운 빈 줄 — 본문 글자 크기의 빈 문단 하나(앞뒤 간격 없이 줄만)."""
+        spec = self.profile.font("body").model_copy(update={"space_before": 0, "space_after": 0})
+        paragraph = self._new_paragraph()
+        oxml.apply_paragraph_format(paragraph, spec, indent=False)
+        oxml.set_list_indent(paragraph, 0, 0)
+        run = paragraph.add_run("")
+        oxml.apply_run_format(run, spec)
+        paragraph.paragraph_format.space_before = Emu(0)
+        paragraph.paragraph_format.space_after = Emu(0)
+        self._last_para = None
+        self._anchor = None
+        self._base_indent = 0
+        self._base_lead = 0
+
     def _heading(self, block: Heading, container=None) -> None:
         self._counters.clear()  # 제목이 나오면 항목 번호를 다시 1부터
         self._base_indent = 0
+        self._base_lead = 0
         self._last_item = None
         if block.page_title and self.profile.has_font("title"):
             # 입력마다 새 쪽 — 쪽 제목은 문서 제목 서식(큰 글씨·가운데·밑줄)
@@ -318,11 +340,18 @@ class DocxRenderer:
             indent = self._note_indent()
         elif container is None:
             self._base_indent = indent
+            self._base_lead = lead
         # 말머리를 일부러 뺀 항목(꺾쇠 표기)은 내어쓰기 없이 첫 줄과 나머지 줄을 맞춘다.
         hanging = 0 if block.marker == "" else level.hanging
         space = self._item_spacing(block, level, next_block)
         before = self._space_before(block, level, self._is_note(note_text) if container is None else False)
         head = (" " * lead + marker + level.marker_sep) if marker else ""
+        if rules.hang_after_marker and container is None:
+            if not marker:
+                head = " " * lead   # 말머리가 없어도 단계 앞 공백은 친다
+            measure = self._measurer(spec, bool(spec.bold))
+            if head and measure.widths_known:
+                hanging = int(measure.width(head))   # 둘째 줄부터 말머리 뒤 글자에 맞춤
 
         plan = self._fit(block.runs, spec, head, indent=indent, hanging=hanging or 0, container=container)
         if plan is not None:
@@ -558,8 +587,12 @@ class DocxRenderer:
     def _note_lead(self, text: str) -> int | None:
         """※ 줄 앞에 칠 공백 수(text.note_lead_spaces). ※ 줄이 아니거나 안 쓰면 None."""
         rules = self.profile.text
-        if rules.note_lead_spaces is not None and any(text.startswith(m) for m in rules.note_marks):
+        if not any(text.startswith(m) for m in rules.note_marks):
+            return None
+        if rules.note_lead_spaces is not None:
             return rules.note_lead_spaces
+        if rules.note_extra_spaces is not None:
+            return self._base_lead + rules.note_extra_spaces   # 윗줄보다 두 칸 안쪽 (Confluence 변환)
         return None
 
     def _is_annotation(self, text: str) -> bool:
@@ -642,7 +675,7 @@ class DocxRenderer:
 
     def _is_note(self, text: str) -> bool:
         rules = self.profile.text
-        return bool((rules.note_indent or rules.note_lead_spaces is not None)
+        return bool((rules.note_indent or rules.note_lead_spaces is not None or rules.note_extra_spaces is not None)
                     and any(text.startswith(m) for m in rules.note_marks))
 
     def _note_gap(self, is_note: bool, next_block: Block | None) -> int | None:
@@ -863,13 +896,18 @@ class DocxRenderer:
 
         rules = self.profile.tables
         min_height = rules.min_row_height(self.flow.relaxed)
+        stretch = self.flow.row_extra.get(id(block), 0)
+        estimated = row_heights(block, self.profile, layout, relaxed=self.flow.relaxed) if stretch else []
         for index, row in enumerate(table.rows):
             if rules.keep_row_together:
                 oxml.forbid_row_split(row)
             if rules.repeat_header and index < block.header_rows:
                 oxml.mark_header_row(row)
-            if min_height:
-                oxml.set_min_row_height(row, min_height)
+            height = min_height
+            if stretch:  # 쪽이 너무 비어 행을 키운다 — 최소 높이는 어림한 행 높이 + 더할 양 (내용이 더 크면 내용이 이긴다)
+                height = max(min_height or 0, estimated[index] + stretch)
+            if height:
+                oxml.set_min_row_height(row, height)
 
         if rules.keep_on_page and container is None and not layout.landscape:
             self._keep_table_together(table, block, layout)

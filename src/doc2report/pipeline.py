@@ -21,6 +21,7 @@ from .transform.structure import (
     attach_table_notes,
     clean_page_titles,
     drop_blank_blocks,
+    settle_blank_lines,
     fold_headings_into_levels,
     merge_short_list_items,
     normalize_annotations,
@@ -231,6 +232,7 @@ def convert_document(
     if date:
         _insert_dateline(doc, date, prof)
 
+    doc = settle_blank_lines(doc, prof.text.keep_blank_lines)
     doc, changes = drop_blank_blocks(doc)  # 안 그러면 접을 때 "□"만 덜렁 찍힌 줄이 된다
     if not (prof.text.fit_lines and polish == "none"):
         # 글쓴이가 엔터로 나눈 줄바꿈은 줄 맞춤이 켜졌고 문구를 안 고칠 때만 살린다. 문구 다듬기(문장 분리·개조식)는

@@ -249,6 +249,8 @@ class TableRules(_Base):
     keep_on_page: bool = False    # 표가 쪽 사이에서 잘리지 않게(모든 행 keep-with-next) + 앞 문장 줄간격을 미세하게 줄여 한 쪽에 맞춤
     page_fit_min_scale: float = 0.9   # 표를 한 쪽에 넣으려고 앞 문장 줄간격을 줄일 수 있는 하한(원래 줄간격의 배수, 0.9 = 최대 10%)
     page_fit_margin: int | None = None  # 높이 어림 오차 여유 — 이만큼 더 줄어야 "들어간다"고 본다
+    page_fill_target: float = 0.0   # 표가 든 쪽이 이 비율(0.8 = 80%)보다 비면 표 행 높이를 늘려 채운다(0 = 안 함, 2026-10-09 사용자)
+    row_stretch_max: int | None = None  # 그때 한 행에 더할 수 있는 높이의 상한 — 표가 어색하게 늘어지지 않게
     left_align_list_cells: bool = False  # "- 내용"처럼 말머리로 시작하는 칸이 있는 열은 한 줄짜리여도 왼쪽 정렬
     # true: 같은 성격(값)의 열은 폭을 같게 한다 — 정식보고서 표(2026-10-01 사용자: 구분·목표·실적·달성률 폭 동일).
     #       참고 열(note_columns)은 데이터가 아니라 비중을 작게 둔다.
@@ -264,7 +266,7 @@ class TableRules(_Base):
     def _len(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="pt")
 
-    @field_validator("row_height", "row_height_relaxed", mode="before")
+    @field_validator("row_height", "row_height_relaxed", "row_stretch_max", mode="before")
     @classmethod
     def _mm(cls, v: Any) -> Any:
         return None if v is None else parse_length(v, default_unit="mm")
@@ -286,7 +288,7 @@ class TableRules(_Base):
     def _scales(cls, v: Any) -> Any:
         return [] if v is None else [parse_ratio(x) for x in v]
 
-    @field_validator("safety_margin", "width_ratio", "note_column_max", mode="before")
+    @field_validator("safety_margin", "width_ratio", "note_column_max", "page_fill_target", mode="before")
     @classmethod
     def _ratio(cls, v: Any) -> Any:
         return parse_ratio(v)
@@ -353,6 +355,13 @@ class TextRules(_Base):
     # ※ 참고사항 문단은 바로 윗줄 문단의 들여쓰기보다 이만큼 더 들여쓴다(2026-09-29 사용자: +0.4cm).
     note_lead_spaces: int | None = None
     # 있으면 ※ 줄 앞에 이 개수만큼 공백을 친다(정식보고서: 들여쓰기 기능 대신 공백).
+    note_extra_spaces: int | None = None
+    # 있으면 ※ 줄은 바로 윗줄(※ 아닌 항목)의 앞 공백에 이 개수만큼 더 공백을 친다(Confluence 변환 — 윗줄보다 두 칸 안쪽).
+    hang_after_marker: bool = False
+    # 말머리 항목의 둘째 줄부터를 "앞 공백 + 말머리 + 한 칸" 폭만큼 내어 쓴다 — 줄바꿈된 글이 말머리 뒤 글자에 맞는다.
+    # 말머리 없는 항목(marker="")도 단계 앞 공백은 친다(Confluence 변환: 들여쓰기 기능 대신 공백, 2026-10-09 사용자).
+    keep_blank_lines: bool = False
+    # 원문에 엔터로 띄워 둔 빈 줄(Confluence의 빈 문단)을 본문 한 줄로 살린다. 연속은 한 줄(2026-10-09 사용자).
     annotation_markers: list[str] = Field(default_factory=list)
     # 이 기호("*")로 시작하는 문단은 주석 — fonts.annotation(파란 10pt 바탕체)으로 쓰고 항목으로 접지 않는다
     # (2026-10-01 사용자: 정식보고서의 주석은 *로 시작하는 파란 10pt 바탕체. B안 = 텍스트 상자 대신 문단).
@@ -452,7 +461,7 @@ class TextRules(_Base):
         return None if v is None else parse_length(v, default_unit="mm")
 
 
-FORMAT_TEXT_FIELDS = ("end_mark", "note_size_delta", "note_size_delta_after_table", "heading_item_max_chars", "note_indent", "note_lead_spaces",
+FORMAT_TEXT_FIELDS = ("hang_after_marker", "note_extra_spaces", "keep_blank_lines", "end_mark", "note_size_delta", "note_size_delta_after_table", "heading_item_max_chars", "note_indent", "note_lead_spaces",
                       "annotation_markers", "annotation_lead_spaces", "annotation_mark", "annotation_box",
                       "annotation_box_height",
                       "level_bold_original", "fit_lines", "condense_max", "condense_step", "fit_margin",
@@ -761,11 +770,12 @@ def _dump_tables(rules: TableRules) -> dict:
     data = rules.model_dump()
     for key in ("border_width", "cell_margin_y", "space_after", "note_space_before", "max_font_spread", "header_rule_width"):
         data[key] = _pt(data[key])
-    for key in ("cell_margin_x", "cell_margin_x_min", "row_height", "row_height_relaxed"):
+    for key in ("cell_margin_x", "cell_margin_x_min", "row_height", "row_height_relaxed", "row_stretch_max"):
         data[key] = _mm(data[key])
     data["font_ladder"] = [_pt(step) for step in rules.font_ladder]
     data["char_scale_ladder"] = [_pct(step) for step in rules.char_scale_ladder]
     data["safety_margin"] = _pct(rules.safety_margin)
+    data["page_fill_target"] = _pct(rules.page_fill_target)
     data["note_column_size"] = _pt(rules.note_column_size)
     data["note_column_scales"] = [_pct(step) for step in rules.note_column_scales]
     data["note_column_max"] = _pct(rules.note_column_max)

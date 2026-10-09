@@ -22,6 +22,7 @@ from ..ir import (
     HorizontalRule,
     Image,
     ListItem,
+    BlankLine,
     PageBreak,
     Paragraph,
     Table,
@@ -46,6 +47,8 @@ class FlowPlan:
     notes: list[str] = field(default_factory=list)
     # 표를 한 쪽에 넣으려고 줄간격을 줄일 문단·항목: id(block) → 배율(0.9 = 10% 줄임)
     line_scale: dict[int, float] = field(default_factory=dict)
+    # 표 행마다 더할 높이(EMU): id(table) → 행당. 표가 든 쪽이 너무 비면(tables.page_fill_target) 행을 키워 채운다
+    row_extra: dict[int, int] = field(default_factory=dict)
 
 
 def plan_flow(doc: Document, profile: Profile,
@@ -64,9 +67,12 @@ def plan_flow(doc: Document, profile: Profile,
         if relaxed and _fit_tables_on_pages(doc, profile, layouts, relaxed=True)[2]:
             relaxed = plan.relaxed = False   # 넉넉한 간격이 표를 쪽 사이로 밀어낸다 — 표가 잘리지 않는 것이 먼저
             plan.notes.append("넉넉한 간격을 쓰면 표가 쪽을 넘어가 간격을 기본값으로 둠")
-        scales, notes, _ = _fit_tables_on_pages(doc, profile, layouts, relaxed=relaxed)
+        scales, notes, _, spans = _fit_tables_on_pages(doc, profile, layouts, relaxed=relaxed)
         plan.line_scale = scales
         plan.notes += notes
+        if profile.tables.page_fill_target:
+            plan.row_extra, stretch_notes = _stretch_tables(doc, profile, layouts, spans, relaxed=relaxed)
+            plan.notes += stretch_notes
     if relaxed:
         plan.notes.append(
             f"지면에 여유가 있어(약 {spare / usable_h:.0%} 쪽) 단락 간격과 행 높이를 넉넉히 적용함")
@@ -74,10 +80,10 @@ def plan_flow(doc: Document, profile: Profile,
 
 
 def _fit_tables_on_pages(doc: Document, profile: Profile, layouts: dict[int, TableLayout], *, relaxed: bool
-                         ) -> tuple[dict[int, float], list[str], bool]:
+                         ) -> tuple[dict[int, float], list[str], bool, list[tuple[int, int, int]]]:
     """쪽을 넘어 잘릴 표를 찾아, 그 쪽 앞쪽 문단·항목의 줄간격을 미세하게 줄여 한 쪽에 들어가게 한다(2026-10-08 사용자).
 
-    (줄간격을 줄일 블록 → 배율, 리포트 노트, 줄여도 못 넣은 표가 있는가). 높이는 어림이라 확실한 보장은 렌더러의 keep-with-next가 한다 —
+    (줄간격을 줄일 블록 → 배율, 리포트 노트, 줄여도 못 넣은 표가 있는가, 블록마다 (번호, 시작 y, 끝 y)). 높이는 어림이라 확실한 보장은 렌더러의 keep-with-next가 한다 —
     여기서 줄이는 것은 표가 다음 쪽으로 통째로 밀려 윗쪽이 크게 비는 것을 막으려는 시도다. 쪽 높이보다 큰 표는 손대지 않는다."""
     usable = profile.page.usable_height
     rules = profile.tables
@@ -96,6 +102,7 @@ def _fit_tables_on_pages(doc: Document, profile: Profile, layouts: dict[int, Tab
     scales: dict[int, float] = {}
     notes: list[str] = []
     failed = False
+    spans: list[tuple[int, int, int]] = []
     y = title_h
     table_no = 0
     for i, block in enumerate(blocks):
@@ -123,8 +130,49 @@ def _fit_tables_on_pages(doc: Document, profile: Profile, layouts: dict[int, Tab
                     y = page_end    # Word가 표를 통째로 다음 쪽으로 옮긴다
                     notes.append(f"표 {table_no}: 줄간격을 {round((1 - min_scale) * 100)}%까지 줄여도 한 쪽에 안 들어가 표를 다음 쪽으로 넘김"
                                  f"(앞 쪽 아래 약 {blank / 36000:.0f}mm 비게 됨)")
+        spans.append((i, int(y), int(y + heights[i])))
         y += heights[i]
-    return scales, notes, failed
+    return scales, notes, failed, spans
+
+
+def _stretch_tables(doc: Document, profile: Profile, layouts: dict[int, TableLayout], spans: list[tuple[int, int, int]],
+                    *, relaxed: bool) -> tuple[dict[int, int], list[str]]:
+    """표가 든 쪽이 `tables.page_fill_target`(예: 80%)보다 비면 그 쪽 표들의 행 높이를 늘려 채운다(2026-10-09 사용자).
+
+    어림이라 목표를 100%가 아니라 80% 안팎으로 잡고, 한 행에 더할 수 있는 높이는 `row_stretch_max`로 막는다.
+    (id(표) → 행마다 더할 높이, 리포트 노트)."""
+    usable = profile.page.usable_height
+    rules = profile.tables
+    cap = rules.row_stretch_max
+    blocks = doc.blocks
+    by_page: dict[int, list[tuple[int, int, int]]] = {}
+    for i, start, end in spans:
+        by_page.setdefault(int(start // usable), []).append((i, start, end))
+    extra: dict[int, int] = {}
+    notes: list[str] = []
+    seq = {id(b): n for n, b in enumerate((b for b in blocks if isinstance(b, Table)), start=1)}
+    for page, items in sorted(by_page.items()):
+        tables = [blocks[i] for i, _, _ in items if isinstance(blocks[i], Table)
+                  and layouts.get(id(blocks[i])) is not None and not layouts[id(blocks[i])].landscape]
+        if not tables:
+            continue
+        page_start = page * usable
+        used = min(max(end for _, _, end in items), page_start + usable) - page_start
+        need = int(rules.page_fill_target * usable) - used
+        rows = sum(len(t.rows) for t in tables)
+        if need <= 0 or not rows:
+            continue
+        per_row = need // rows
+        if cap is not None:
+            per_row = min(per_row, cap)
+        if per_row <= 0:
+            continue
+        for table in tables:
+            extra[id(table)] = per_row
+        names = ", ".join(str(seq[id(t)]) for t in tables)
+        notes.append(f"{page + 1}쪽이 약 {used / usable:.0%}만 차서 표 {names}의 행 높이를 행마다 약 {per_row / 36000:.1f}mm 늘림"
+                     f"(목표 {rules.page_fill_target:.0%}, 어림)")
+    return extra, notes
 
 
 def _block_start(heights: list[int], index: int, title_h: int) -> int:
@@ -213,6 +261,9 @@ def _block_height(block: Block, profile: Profile, layouts: dict[int, TableLayout
     if isinstance(block, HorizontalRule):
         return _line_height(profile.font("body"))
 
+    if isinstance(block, BlankLine):
+        return int(_line_height(profile.font("body")) * scale)
+
     return 0
 
 
@@ -221,6 +272,16 @@ def table_height(table: Table, profile: Profile, layout: TableLayout | None,
     """표 높이 어림 — 행마다 가장 많이 줄바꿈되는 셀이 행 높이를 정한다."""
     if layout is None or not layout.col_widths:
         return 0
+    total = sum(row_heights(table, profile, layout, relaxed=relaxed))
+    caption = _text_height(table.caption, profile.font("caption"),
+                           profile.page.usable_width, profile) if table.caption else 0
+    notes = sum(_text_height(plain(runs), profile.font("table_note"),
+                             profile.page.usable_width, profile) for runs in table.notes)
+    return total + caption + notes
+
+
+def row_heights(table: Table, profile: Profile, layout: TableLayout, *, relaxed: bool) -> list[int]:
+    """표 행마다 높이 어림(최소 행 높이 반영)."""
     spec = profile.font("table")
     line_height = _line_height(spec.resized(layout.font_size))
     padding = profile.tables.cell_margin_y * 2
@@ -233,14 +294,7 @@ def table_height(table: Table, profile: Profile, layout: TableLayout | None,
              for cell, col, span, r in _grid_with_row(table) if r == row_index),
             default=1,
         )
-    total = 0
-    for lines in lines_per_row:
-        total += max(int(lines * line_height + padding), floor)
-    caption = _text_height(table.caption, profile.font("caption"),
-                           profile.page.usable_width, profile) if table.caption else 0
-    notes = sum(_text_height(plain(runs), profile.font("table_note"),
-                             profile.page.usable_width, profile) for runs in table.notes)
-    return total + caption + notes
+    return [max(int(lines * line_height + padding), floor) for lines in lines_per_row]
 
 
 def _grid_with_row(table: Table):

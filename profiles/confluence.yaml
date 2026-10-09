@@ -50,6 +50,42 @@ fonts:
   callout:                   # Confluence 정보·경고 패널 — 본문과 같은 크기
     size: 12pt
 
+# 들여쓰기는 단락 기능(cm)이 아니라 공백으로 — 상위 단계보다 하위 단계가 두 칸 안쪽 (2026-10-09 사용자:
+# □ → - → · 로 내려갈 때마다 스페이스 두 칸). 말머리 뒤는 공백 한 칸. 단계는 원문 말머리가 정한다(aliases) —
+# 가장 바깥 단계가 0칸(text.normalize_levels). 목록은 통째로 덮어써지므로 다섯 단계를 모두 적는다.
+numbering:
+  - marker: "{n}."
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 0
+    marker_sep: " "
+  - marker: "□"
+    ordered_marker: "□"
+    aliases: ["■", "◻", "ㅁ"]
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 2
+    marker_sep: " "
+  - marker: "-"
+    ordered_marker: "-"
+    aliases: ["–", "—"]
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 4
+    marker_sep: " "
+  - marker: "·"
+    ordered_marker: "·"
+    aliases: ["ㆍ", "ᆞ", "‧", "∙", "•", "."]
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 6
+    marker_sep: " "
+  - marker: "·"
+    indent: 0mm
+    hanging: 0mm
+    lead_spaces: 8
+    marker_sep: " "
+
 # 단락 앞뒤 간격 0pt — 1.·□·- 모든 단계에 똑같이(단계가 바뀌는 자리 간격도 0)
 numbering_all:
   space_before: 0pt
@@ -57,10 +93,19 @@ numbering_all:
   space_after_level_change: 0pt
 
 tables:
+  keep_on_page: true         # 표는 쪽 사이에서 잘리지 않게 — 정식보고서와 같음 (2026-10-09 사용자)
+  page_fit_min_scale: 0.9
+  page_fit_margin: 6mm
+  page_fill_target: 80%      # 표가 든 쪽이 80%보다 비면 표 행 높이를 늘려 채움 (2026-10-09 사용자)
+  row_stretch_max: 15mm      # 한 행에 더할 수 있는 높이의 상한 — 표가 어색하게 늘어지지 않게
   font_ladder: [10pt]        # 10pt 고정 — 글씨가 많아도 더 줄이지 않는다(사용자)
   char_scale_ladder: [80%]   # 장평 80% 고정
 
 text:
+  hang_after_marker: true    # 줄바꿈된 글을 말머리 뒤 글자에 맞춤 (단계 들여쓰기는 앞 공백)
+  keep_blank_lines: true     # 원문의 빈 줄(엔터로 띄운 문단 사이)을 한 줄로 살림 (2026-10-09 사용자)
+  note_indent: 0mm           # ※는 윗줄보다 0.4cm가 아니라 공백 두 칸 안쪽
+  note_extra_spaces: 2
   polish: none               # 문장 다듬기(개조식·명사 종결·LLM) 안 함. --polish를 주면 그쪽이 이긴다
   gaechosik: false
   noun_ending: false

@@ -110,8 +110,7 @@ def test_confluence_profile_extends_default_with_dense_sizes():
     # 덮어쓰지 않은 값(머리글 여백·표 음영·말머리 기호·들여쓰기)은 부모 그대로 — 단위가 두 번 변환되지도 않는다.
     assert conf.page.margin.header == default.page.margin.header
     assert conf.tables.header_shading == default.tables.header_shading
-    assert [(l.marker, l.indent, l.aliases) for l in conf.numbering] == \
-        [(l.marker, l.indent, l.aliases) for l in default.numbering]
+    assert [(l.marker, l.aliases) for l in conf.numbering[:4]] == [(l.marker, l.aliases) for l in default.numbering]
     # numbering_all: 모든 단계의 단락 앞뒤·단계 전환 간격 0
     assert all(l.space_before == l.space_after == l.space_after_level_change == 0
                for l in conf.numbering)

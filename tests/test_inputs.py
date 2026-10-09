@@ -68,7 +68,7 @@ def test_docx_input_converts_end_to_end(word_file, tmp_path):
     assert out.exists()
     texts = [p.text for p in DocxDocument(str(out)).paragraphs if p.text]
     assert texts[0] == "분기 보고"
-    assert "□\t원문에 친 말머리" in texts
+    assert any(t.strip() == "□ 원문에 친 말머리" for t in texts)   # 단계 앞 공백은 공백으로
 
 
 def test_docx_source_is_detected_by_extension(word_file):
@@ -217,7 +217,7 @@ def test_page_mode_puts_each_input_on_new_page_with_big_title(tmp_path):
     convert_many([a, b], out, prof, page_breaks=True, date="2026. 10. 1")
     paras = [p for p in DocxDocument(str(out)).paragraphs if p.text]
     texts = [p.text for p in paras]
-    assert texts == ["첫 보고", "2026. 10. 1", "□\t가 항목", "둘째 보고", "2026. 10. 1", "□\t나 항목"]
+    assert texts == ["첫 보고", "2026. 10. 1", "□ 가 항목", "둘째 보고", "2026. 10. 1", "□ 나 항목"]
     title_size = prof.font("title").size
     for p in (paras[0], paras[3]):
         run = p.runs[0]

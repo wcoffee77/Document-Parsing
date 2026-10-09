@@ -130,8 +130,8 @@ def test_confluence_url_gets_confluence_profile_and_keeps_text(tmp_path, monkeyp
     result = pipeline.convert("https://wiki/pages/1", out)
     assert result.changes == []  # 문구 수정 없음
     texts = {p.text: p for p in DocxDocument(str(out)).paragraphs if p.text}
-    assert "1.\t추진 배경" in texts
+    assert "1. 추진 배경" in texts
     assert any(t.endswith("응답 지연이 지속적으로 발생하였습니다.") for t in texts)
-    assert "ㆍ\t입사예정시기는 10월입니다" in texts
+    assert "      ㆍ 입사예정시기는 10월입니다" in texts   # ㆍ는 넷째 단계 = 앞 공백 6칸
     assert emu_to_pt(texts["보고"].runs[0].font.size) == 18  # Confluence 변환 서식 제목
-    assert emu_to_pt(texts["1.\t추진 배경"].runs[0].font.size) == 12
+    assert emu_to_pt(texts["1. 추진 배경"].runs[0].font.size) == 12

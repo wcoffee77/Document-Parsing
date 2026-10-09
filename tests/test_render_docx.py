@@ -165,10 +165,10 @@ def test_reference_mark_is_two_points_smaller_than_body(tmp_path):
                            ListItem(depth=1, runs=[Run("참고 항목")], marker="※")])
     out = tmp_path / "n.docx"
     DocxRenderer(profile).save(doc, out)
-    sizes = {p.text: emu_to_pt(p.runs[-1].font.size) for p in DocxDocument(str(out)).paragraphs if p.text}
+    sizes = {p.text.strip(): emu_to_pt(p.runs[-1].font.size) for p in DocxDocument(str(out)).paragraphs if p.text}
     assert sizes["일반 문단"] == 12
     assert sizes["※ 참고 문단"] == 10
-    assert sizes["※\t참고 항목"] == 10
+    assert sizes["※ 참고 항목"] == 10
 
 
 def test_note_size_delta_survives_dump_and_reload(tmp_path):
@@ -203,11 +203,11 @@ def test_confluence_does_not_bold_sentences_that_were_not_bold(tmp_path):
     doc, _ = fold_headings_into_levels(doc, profile.text.leading_markers, keep=True)
     out = tmp_path / "b.docx"
     DocxRenderer(profile).save(doc, out)
-    paragraphs = {p.text.split("\t")[-1]: p for p in DocxDocument(str(out)).paragraphs if p.text}
-    assert all(r.bold for r in paragraphs["추진 배경"].runs)  # 제목은 굵게
-    plain_runs = paragraphs["굵지 않은 굵은 부분 그리고 평문"].runs
+    paragraphs = {p.text.strip(): p for p in DocxDocument(str(out)).paragraphs if p.text}
+    assert all(r.bold for r in paragraphs["1. 추진 배경"].runs)  # 제목은 굵게
+    plain_runs = paragraphs["□ 굵지 않은 굵은 부분 그리고 평문"].runs
     assert [bool(r.bold) for r in plain_runs[1:]] == [False, True, False]  # 첫 run은 말머리
-    assert not any(r.bold for r in paragraphs["두 번째 평문"].runs)
+    assert not any(r.bold for r in paragraphs["□ 두 번째 평문"].runs)
 
 
 def test_default_profile_still_bolds_whole_level_sentences(tmp_path):
@@ -251,14 +251,15 @@ def test_bracket_lines_get_no_profile_marker(tmp_path, profile_name, keep):
                            Paragraph(runs=[Run("[참고] 내용")]),
                            Paragraph(runs=[Run("일반 문장")])])
     texts = [p.text for p in _paras(doc, profile, tmp_path, "br.docx")]
+    texts = [t.strip() for t in texts]   # Confluence 변환은 단계 앞 공백을 친다
     assert "【사업현황】" in texts and "[참고] 내용" in texts  # 말머리·탭 없이 그대로
     if profile.text.auto_markers:  # 말머리를 새로 만드는 프로파일이면 일반 문장은 말머리를 받음
         assert any(t.endswith("\t일반 문장") for t in texts)
 
 
-def test_note_mark_is_indented_04cm_deeper_than_line_above(tmp_path):
+def test_note_mark_is_two_spaces_deeper_than_line_above(tmp_path):
+    """Confluence 변환: ※ 줄은 윗줄(※가 아닌 항목)보다 공백 두 칸 안쪽 — 들여쓰기 기능이 아니라 공백(2026-10-09 사용자)."""
     from doc2report.ir import Document, ListItem, Paragraph, Run
-    from doc2report.units import emu_to_mm
 
     profile = load_profile("confluence")
     doc = Document(blocks=[ListItem(depth=1, runs=[Run("윗줄 항목")], marker="-"),
@@ -268,16 +269,11 @@ def test_note_mark_is_indented_04cm_deeper_than_line_above(tmp_path):
     from doc2report.render.docx_writer import DocxRenderer
     out = tmp_path / "n2.docx"
     DocxRenderer(profile).save(doc, out)
-    paras = {p.text: p for p in DocxDocument(str(out)).paragraphs if p.text}
-
-    def first_line_mm(p):
-        fmt = p.paragraph_format
-        return emu_to_mm(int(fmt.left_indent or 0) + int(fmt.first_line_indent or 0))
-
-    above = first_line_mm(paras["-\t윗줄 항목"])
-    assert first_line_mm(paras["※ 참고 1"]) == pytest.approx(above + 4, abs=0.1)
-    assert first_line_mm(paras["※\t참고 2"]) == pytest.approx(above + 4, abs=0.1)  # 연속 ※는 같은 들여쓰기
-    assert first_line_mm(paras["1.\t다른 항목"]) == pytest.approx(0, abs=0.1)
+    texts = [p.text for p in DocxDocument(str(out)).paragraphs if p.text]
+    # depth 1 = □ 단계라 앞 공백 2칸 → ※는 4칸. 연속 ※는 같은 들여쓰기, 다음 항목은 제자리로
+    assert texts == ["  - 윗줄 항목", "    ※ 참고 1", "    ※ 참고 2", "1. 다른 항목"]
+    for paragraph in DocxDocument(str(out)).paragraphs:
+        assert not paragraph.paragraph_format.left_indent or paragraph.paragraph_format.first_line_indent  # 단락 들여쓰기로 단계를 만들지 않음
 
 
 def test_auto_markers_off_keeps_unmarked_text_unmarked_but_indented(tmp_path):
@@ -289,9 +285,9 @@ def test_auto_markers_off_keeps_unmarked_text_unmarked_but_indented(tmp_path):
                            Paragraph(runs=[Run("- 원문 말머리 있음")]),
                            Paragraph(runs=[Run("말머리 없는 문장")])])
     confluence = {p.text: p for p in _paras(doc, load_profile("confluence"), tmp_path, "a.docx")}
-    assert "말머리 없는 문장" in confluence  # 탭·말머리 없이 그대로
-    assert "-\t원문 말머리 있음" in confluence
-    assert "1.\t추진 배경" in confluence
+    assert "  말머리 없는 문장" in confluence  # 말머리 없이 그대로, 단계 앞 공백만
+    assert "    - 원문 말머리 있음" in confluence
+    assert "1. 추진 배경" in confluence
 
     default = [p.text for p in _paras(doc, load_profile("default"), tmp_path, "b.docx")]
     assert any(t.endswith("\t말머리 없는 문장") for t in default)  # 새로 만드는 모드는 그대로 붙임
