@@ -382,6 +382,9 @@ function syncMode() {
   $("#task-hint").textContent = synth
     ? ""
     : "원문 내용은 그대로 두고, 말머리·줄 맞춤·표만 사내 규격에 맞게 바꿉니다.";
+  $("#input-order-hint").textContent = synth
+    ? "순서와 무관하게 주제별로 정리합니다 (문서 날짜를 찾지 못하면 아래 문서를 최신으로 봄)"
+    : "위에서부터 차례로 합쳐 한 문서가 됩니다";
   $("#convert").textContent = synth ? (count >= 2 ? "종합 보고서 만들기" : "요약 보고서 만들기") : "변환하기";
   $("#doc-title").placeholder = synth ? "비우면 LLM이 내용에 맞게 정함" : "비우면 첫 번째 입력의 제목";
   const manual = radio("mode") === "manual";
