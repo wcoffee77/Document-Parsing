@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 13;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 14;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -262,7 +262,7 @@ function setCustom(key, value) {
   syncCombo(key);
 }
 
-// 사용자 설정 칸을 출발 서식의 값으로 채운다(자유롭게 고쳐 쓰는 출발점).
+// 사용자 설정 칸을 출발 모양의 값으로 채운다(자유롭게 고쳐 쓰는 출발점).
 function fillCustom(base) {
   const p = state.profiles[base];
   if (!p) return;
@@ -284,14 +284,14 @@ function syncPreset() {
   const custom = preset === "custom";
   $("#custom-panel").classList.toggle("hidden", !custom);
   const p = state.profiles[custom ? $("#cu-base").value : preset];
-  $("#preset-summary").textContent = custom ? "출발 서식에서 바꾸고 싶은 값만 고치세요 (단위: pt, 배, 장평 %, 여백 cm)"
+  $("#preset-summary").textContent = custom ? "출발 모양에서 바꾸고 싶은 값만 고치세요 (단위: pt, 배, 장평 %, 여백 cm)"
     : (p ? `${p.summary}` : "");
   const hasConfluence = state.inputs.some((i) => i.type === "confluence");
   const suggest = hasConfluence && preset === state.schema.presets[0] && state.profiles.confluence;
   const hint = $("#preset-hint");
   hint.classList.toggle("hidden", !suggest);
   if (suggest) {
-    hint.innerHTML = `Confluence 입력이 있습니다 — '${esc(state.profiles.confluence.label)}' 서식이 맞을 수 있습니다
+    hint.innerHTML = `Confluence 입력이 있습니다 — '${esc(state.profiles.confluence.label)}' 출력이 맞을 수 있습니다
       <button class="btn tiny" id="use-confluence">바꾸기</button>`;
   }
 }
@@ -320,7 +320,6 @@ function collectOptions() {
   return {
     task: radio("task") || "convert",
     pages: $("#syn-pages").value,
-    runs: Number($("#syn-runs").value) || 1,
     mode,
     llm: $("#use-llm").checked,
     allow_llm: $("#use-llm").checked,
@@ -361,7 +360,6 @@ function restoreOptions() {
   setRadio("mode", o.mode || "auto");
   setRadio("task", o.task || "convert");
   if (o.pages) $("#syn-pages").value = o.pages;
-  if (o.runs) $("#syn-runs").value = String(o.runs);
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.text && "keep_leading_markers" in o.text) setMarkerMode(!!o.text.keep_leading_markers, !!o.text.auto_markers);
@@ -386,7 +384,7 @@ function syncMode() {
   const kind = count >= 2 ? "종합" : "요약";
   $("#task-hint").textContent = synth
     ? `LLM이 핵심을 골라 정식보고서 형태로 새로 씁니다 — 지금 입력 ${count}개 → ${count ? kind : "요약(1개)·종합(2개 이상)"}`
-    : "원문 내용은 그대로 두고 사내 규격 서식(말머리·줄 맞춤·표)으로 바꿉니다.";
+    : "원문 내용은 그대로 두고 사내 규격(말머리·줄 맞춤·표)에 맞춰 바꿉니다.";
   $("#convert").textContent = synth ? (count >= 2 ? "종합 보고서 만들기" : "요약 보고서 만들기") : "변환하기";
   $("#doc-title").placeholder = synth ? "비우면 LLM이 내용에 맞게 정함" : "비우면 첫 번째 입력의 제목";
   const manual = radio("mode") === "manual";
@@ -508,7 +506,7 @@ $("#convert").addEventListener("click", async () => {
   const options = collectOptions();
   if (options.date_mode === "pick" && !options.date) return toast("날짜를 골라 주세요", true);
   if (options.task === "synthesize" && !(state.status && state.status.llm.configured)) {
-    return toast("보고서 양식(요약·종합)은 LLM이 있어야 합니다 — 사용자 등록에서 LLM을 넣으세요", true);
+    return toast("보고서 작성(요약·종합)은 LLM이 있어야 합니다 — 사용자 등록에서 LLM을 넣으세요", true);
   }
   saveOptions();
   const inputs = state.inputs.map((i) => ({ type: i.type, url: i.url, upload_id: i.upload_id, name: i.name, text: i.text, title: i.title }));
@@ -553,8 +551,8 @@ function finish(job) {
   const polishName = ({ none: "안 함", rules: "규칙 적용" }[r.polish] || r.polish) + (r.llm ? " + 맞춤법·어조" : "");
   const synth = r.task === "synthesize";
   const line = synth
-    ? `서식 ${esc(r.profile)} · LLM ${esc(r.kind)}${r.mode === "rewrite" ? "" : " <b class=\"bad\">(실패 — 원문 나열)</b>"} · 분량 목표 ${esc(r.pages)}쪽 · 표 ${r.tables}개`
-    : `서식 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건`;
+    ? `출력 ${esc(r.profile)} · LLM ${esc(r.kind)}${r.mode === "rewrite" ? "" : " <b class=\"bad\">(실패 — 원문 나열)</b>"} · 분량 목표 ${esc(r.pages)}쪽 · 표 ${r.tables}개`
+    : `출력 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건`;
   const synthBox = synth ? `
     <div class="summary-box"><b>핵심 요약</b>\n${esc(r.summary || "")}</div>` : "";
   box.innerHTML = `

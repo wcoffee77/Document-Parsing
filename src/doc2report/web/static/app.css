@@ -160,7 +160,7 @@ table.changes th, table.changes td { border: 1px solid var(--line); padding: 4px
 table.changes th { background: #f6f7f9; }
 table.changes td.rule { white-space: nowrap; color: var(--muted); }
 
-.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .history li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .history .hname { font-weight: bold; word-break: break-all; }
 .history .htime { color: var(--muted); font-size: 12px; }
@@ -216,3 +216,4 @@ body.locked main.layout { opacity: .35; pointer-events: none; }
 .chips { flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .summary-box { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px;
   font-size: 12px; white-space: pre-wrap; margin: 8px 0; }
+@media (max-width: 900px) { .history { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); } }

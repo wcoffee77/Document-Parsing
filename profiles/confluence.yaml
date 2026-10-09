@@ -15,7 +15,7 @@
 extends: default
 name: confluence
 description: Confluence·내용 많은 문서 (원문 말머리·문장 유지)
-label: Confluence 변환
+label: Confluence 출력
 preset_order: 2
 
 page:

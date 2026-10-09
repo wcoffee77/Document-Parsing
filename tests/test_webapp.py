@@ -22,7 +22,7 @@ from doc2report.web.server import create_server
 def test_presets_are_profiles_with_preset_order():
     assert opts.presets()[:2] == ["formal", "confluence"] and "default" not in opts.presets()
     report, confluence = opts.profile_info("formal"), opts.profile_info("confluence")
-    assert (report["label"], confluence["label"]) == ("정식보고서", "Confluence 변환")
+    assert (report["label"], confluence["label"]) == ("보고서 양식", "Confluence 출력")
 
 
 def test_confluence_preset_matches_user_spec():
@@ -122,7 +122,7 @@ def test_auto_decides_structured_confluence_vs_unstructured_memo():
     two = opts.auto_decide([memo, memo], ["text", "text"], allow_llm=False, llm_ready=False)
     assert two.summary["heavy"]
     assert two.profile.font("body").size == opts.load_profile("default").font("body").size  # 서식은 그대로
-    assert any("Confluence 변환" in r for r in two.reasons)  # 권하기만
+    assert any("Confluence 출력" in r for r in two.reasons)  # 권하기만
 
 
 def test_auto_rules_keep_the_chosen_preset_format():
@@ -371,7 +371,7 @@ def test_manual_options_order_and_marker_choice_on_screen():
     html = (static / "index.html").read_text(encoding="utf-8")
     js = (static / "app.js").read_text(encoding="utf-8")
     assert html.index("<legend>문장 다듬기</legend>") < html.index("<legend>말머리</legend>") < html.index("<legend>표</legend>")
-    assert "<span>서식 변환</span>" in html and "<span>보고서 양식</span>" in html
+    assert "<span>원문 변환</span>" in html and "<span>보고서 작성</span>" in html and "syn-runs" not in html
     for value in ("keep", "fill", "unify"):
         assert f'name="marker" value="{value}"' in html
     assert "markerValues()" in js and "keep_leading_markers: m !== \"unify\"" in js

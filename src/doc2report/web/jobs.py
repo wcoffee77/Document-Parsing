@@ -47,6 +47,9 @@ class Job:
                 "elapsed": round(time.time() - self.started, 1)}
 
 
+SYNTH_RUNS = 3
+
+
 class JobRunner:
     def __init__(self, output_dir: Path, upload_dir: Path):
         self.output_dir = output_dir
@@ -120,7 +123,7 @@ class JobRunner:
                    for i, (doc, item) in enumerate(zip(docs, inputs), 1)]
         kind = "요약" if len(sources) == 1 else "종합"
         pages = _pages(options.get("pages"), DEFAULT_PAGES)
-        runs = max(1, min(int(options.get("runs") or 1), 3))
+        runs = SYNTH_RUNS  # 고정: 3번까지 만들어 남은 문제가 가장 적은 것(0이면 바로 멈춤)
         title = (options.get("title") or "").strip() or None
         year = datetime.now().year
 

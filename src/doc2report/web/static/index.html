@@ -68,8 +68,8 @@
   <section class="card" id="card-options">
     <h2><span class="num">2</span>작업과 옵션</h2>
     <div class="segmented" role="radiogroup" aria-label="작업">
-      <label><input type="radio" name="task" value="convert" checked><span>서식 변환</span></label>
-      <label><input type="radio" name="task" value="synthesize"><span>보고서 양식</span></label>
+      <label><input type="radio" name="task" value="synthesize"><span>보고서 작성</span></label>
+      <label><input type="radio" name="task" value="convert" checked><span>원문 변환</span></label>
     </div>
     <p class="hint" id="task-hint"></p>
 
@@ -87,12 +87,6 @@
             <option value="2-3">2~3쪽</option>
             <option value="3-5">3~5쪽</option>
           </select></label>
-        <label>여러 번 만들어 고르기
-          <select id="syn-runs">
-            <option value="1" selected>1번 (빠름)</option>
-            <option value="2">2번</option>
-            <option value="3">3번 (남은 문제가 가장 적은 것)</option>
-          </select></label>
       </div>
     </div>
 
@@ -106,7 +100,7 @@
       <p class="explain">문서를 읽어 알맞은 규칙을 자동으로 정합니다. 직접 정하려면 "직접 선택"을 누르세요.</p>
     </div>
 
-    <p class="hint hidden" id="manual-hint">아래 항목은 "출력"에서 고른 서식의 기본값으로 채워져 있습니다. 바꾸고 싶은 것만 고치세요.</p>
+    <p class="hint hidden" id="manual-hint">아래 항목은 "출력"에서 고른 문서 모양의 기본값으로 채워져 있습니다. 바꾸고 싶은 것만 고치세요.</p>
 
     <fieldset id="polish-box">
       <legend>문장 다듬기</legend>
@@ -155,13 +149,13 @@
   <section class="card" id="card-output">
     <h2><span class="num">3</span>출력</h2>
     <div class="block">
-      <span class="label">서식</span>
+      <span class="label">문서 모양</span>
       <div class="segmented small" id="preset-radios" role="radiogroup"></div>
       <p class="hint" id="preset-summary"></p>
       <p class="hint warn-text hidden" id="preset-hint"></p>
       <div id="custom-panel" class="custom hidden">
         <div class="grid2">
-          <label>출발 서식<select id="cu-base"></select></label>
+          <label>출발 모양<select id="cu-base"></select></label>
           <label>글꼴<span class="combo" data-key="font"></span></label>
           <label>제목 크기<span class="combo" data-key="title_size"></span></label>
           <label>본문 크기<span class="combo" data-key="size"></span></label>

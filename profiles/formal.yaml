@@ -16,7 +16,7 @@
 extends: default
 name: formal
 description: 정식보고서 (상급 조직 보고용 — 공백으로 단계 구분, 왼쪽 정렬 표, 파란 주석)
-label: 정식보고서
+label: 보고서 양식
 preset_order: 1
 
 fonts:

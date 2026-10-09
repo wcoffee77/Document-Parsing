@@ -55,7 +55,7 @@ from .jobs import JobRunner, history
 
 STATIC = Path(__file__).parent / "static"
 PACKAGE = Path(__file__).resolve().parents[1]
-API_VERSION = 13  # 화면(app.js)과 서버가 주고받는 형식이 바뀌면 올린다 — app.js의 API_VERSION과 같아야 함
+API_VERSION = 14  # 화면(app.js)과 서버가 주고받는 형식이 바뀌면 올린다 — app.js의 API_VERSION과 같아야 함
 MAX_UPLOAD = 50 * 1024 * 1024
 _STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
