@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 10;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 11;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -77,7 +77,6 @@ async function loadStatus() {
   $("#out-dir").textContent = st.output_dir;
   if (!st.llm.configured) {
     $("#use-llm").closest("label").classList.add("disabled");
-    $("#use-draft").closest("label").classList.add("disabled");
   }
   if (state.schema) syncMode();
 }
@@ -185,15 +184,12 @@ async function loadProfiles() {
     `<label><input type="radio" name="preset" value="${esc(n)}"><span>${
       esc(n === "custom" ? "사용자 설정" : label(n))}</span></label>`).join("");
   const opts = presets.map((n) => `<option value="${esc(n)}">${esc(label(n))}</option>`).join("");
-  $("#rules-base").innerHTML = opts;
   $("#cu-base").innerHTML = opts;
 
   renderChecks("#polish-rules", data.schema.polish);
   renderChecks("#marker-rules", data.schema.markers);
   $("#tbl-align").innerHTML = data.schema.table_align.map((o) =>
     `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
-  const auto = data.schema.auto;
-  $("#auto-heavy").textContent = `${auto.chars.toLocaleString()}자·표 ${auto.tables}개·입력 2개 이상`;
 }
 
 function renderChecks(target, rows) {
@@ -206,7 +202,6 @@ function renderChecks(target, rows) {
 function applyRules(name) {
   const p = state.profiles[name];
   if (!p) return;
-  $("#rules-base").value = name;
   for (const box of $$("[data-rule]")) box.checked = !!p.text[box.dataset.rule];
   setRadio("polish", p.polish);
   $("#tbl-landscape").checked = !!p.tables.allow_landscape;
@@ -315,10 +310,8 @@ function collectOptions() {
     mode,
     llm: $("#use-llm").checked,
     allow_llm: $("#use-llm").checked,
-    draft: $("#use-draft").checked,
     preset: radio("preset") || state.schema.presets[0],
     custom,
-    rules_base: $("#rules-base").value,
     polish: radio("polish"),
     text,
     tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
@@ -348,7 +341,7 @@ function restoreOptions() {
   const known = (n) => n && state.profiles[n] && presets.includes(n);
   setRadio("preset", o && (o.preset === "custom" || known(o.preset)) ? o.preset : first);
   fillCustom(o && o.custom && known(o.custom.base) ? o.custom.base : first);
-  applyRules(o && known(o.rules_base) ? o.rules_base : first);
+  applyRules(o && o.preset && o.preset !== "custom" && known(o.preset) ? o.preset : (o && o.custom && known(o.custom.base) ? o.custom.base : first));
   if (!o) { syncPreset(); return syncMode(); }
   if (o.custom) for (const k of CUSTOM_KEYS) setCustom(k, o.custom[k]);
   setRadio("mode", o.mode || "auto");
@@ -356,7 +349,6 @@ function restoreOptions() {
   if (o.pages) $("#syn-pages").value = o.pages;
   if (o.runs) $("#syn-runs").value = String(o.runs);
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
-  $("#use-draft").checked = !!o.draft;
   if (o.polish) setRadio("polish", o.polish === "llm" ? "rules" : o.polish);  // 예전 "규칙 + LLM"
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
@@ -595,7 +587,7 @@ $("#open-folder").addEventListener("click", async () => {
 // ── 최근 결과 ────────────────────────────────────────────────────────────
 
 async function loadHistory() {
-  const { items } = await api("/api/history");
+  const { items } = await api("/api/history");   // 최근 5개만(서버가 자른다)
   $("#history-empty").classList.toggle("hidden", items.length > 0);
   $("#history").innerHTML = items.map((g) => `<li>
     <div class="hname">${esc(g.stem)}</div><div class="htime">${esc(g.time)}</div>
@@ -620,12 +612,11 @@ $("#llm-test").addEventListener("click", async () => {
 
 // ── 시작 ─────────────────────────────────────────────────────────────────
 
-$("#rules-base").addEventListener("change", (ev) => { applyRules(ev.target.value); syncMode(); });
-$("#cu-base").addEventListener("change", (ev) => { fillCustom(ev.target.value); syncPreset(); });
+$("#cu-base").addEventListener("change", (ev) => { fillCustom(ev.target.value); syncPreset(); applyRules(ev.target.value); syncMode(); });
 document.addEventListener("change", (ev) => {
   if (ev.target.name === "task") syncMode();
   if (ev.target.name === "mode" || ev.target.name === "polish" || ev.target.name === "date") syncMode();
-  if (ev.target.name === "preset") syncPreset();
+  if (ev.target.name === "preset") { syncPreset(); applyRules(ev.target.value === "custom" ? $("#cu-base").value : ev.target.value); syncMode(); }
 });
 
 class StaleServer extends Error {}
