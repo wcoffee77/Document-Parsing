@@ -1,6 +1,6 @@
 [project]
 name = "doc2report"
-version = "0.1.0"
+version = "1.0.0"
 description = "Confluence/Markdown 문서를 사내 규격 보고서(.docx)로 변환"
 readme = "README.md"
 requires-python = ">=3.11"

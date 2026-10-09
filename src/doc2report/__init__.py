@@ -3,5 +3,5 @@
 from .pipeline import ConvertResult, convert
 from .profile import Profile, load_profile
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __all__ = ["convert", "ConvertResult", "Profile", "load_profile"]
