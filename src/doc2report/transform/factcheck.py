@@ -67,6 +67,7 @@ class Rules:
     bound_source: list[str] = field(default_factory=list)
     bound_line: list[str] = field(default_factory=list)
     synthesis_key_sections: list[str] = field(default_factory=list)
+    synthesis_result_sections: list[str] = field(default_factory=list)
 
 
 @lru_cache(maxsize=4)

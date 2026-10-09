@@ -143,6 +143,7 @@ def test_result_sections_are_key_sections_whose_numbers_must_survive():
     prep = prepare([_doc(RESULT_DOC, "d1"), _doc(NEXT_DOC, "d2")])
     keyed = [prep.sentences[i - 1] for i in prep.key_ids]
     assert any("신규 기능 24%" in s for s in keyed) and any("지속 사용 의향 88%" in s for s in keyed)
+    assert not any("테스트 코드" in s for s in keyed)          # 하위 세부(- 항목)는 핵심이 아니다 — 종합 초안 수준으로 짧게
     first = next(i for i, s in enumerate(prep.sentences, 1) if "신규 기능 24%" in s)
     summary = next(i for i, s in enumerate(prep.sentences, 1) if s.startswith("파일럿 결과"))
     thin = Rewrite("t", [Line("□", "파일럿 결과 : 평균 18% 단축, 만족도 4.1점", [summary, first])], [])
@@ -150,8 +151,8 @@ def test_result_sections_are_key_sections_whose_numbers_must_survive():
     assert any("수치" in s and "24" in s for s in style), style              # 24%·12%·31%·88%가 줄에 없다
     tests_i = next(i for i, s in enumerate(prep.sentences, 1) if "테스트 코드" in s)
     sat = next(i for i, s in enumerate(prep.sentences, 1) if "88%" in s)
-    full = Rewrite("t", [Line("□", "파일럿 결과", [first, tests_i, sat, summary]),
-                         Line("-", "작업 시간 평균 18% 단축 (신규 기능 24%, 버그 수정 12%, 테스트 코드 31%)", [first, tests_i]),
+    full = Rewrite("t", [Line("□", "파일럿 결과", [first, sat, summary]),
+                         Line("-", "작업 시간 평균 18% 단축 (신규 기능 24%, 버그 수정 12%)", [first]),
                          Line("-", "만족도 4.1점/5점, 지속 사용 의향 88%", [sat, summary])], [])
     _, style = review(full, prep.sentences, "t", 2026, synth=SynthSpec(0, 0, prep.key_ids))
     assert not [s for s in style if "수치" in s], style
