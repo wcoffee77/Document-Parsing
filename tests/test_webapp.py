@@ -362,3 +362,16 @@ def test_screen_has_no_draft_box_or_rules_base_and_history_shows_five(tmp_path):
     for i in range(8):
         (out / f"2026100{i}_보고{i}.docx").write_bytes(b"x")
     assert len(history(out)) == 5
+
+
+def test_manual_options_order_and_marker_choice_on_screen():
+    """2026-10-09 사용자: 직접 선택은 문장 다듬기 → 말머리 → 표 순서, 작업 이름은 '서식 변환'·'보고서 양식',
+    말머리는 체크박스 둘이 아니라 뜻이 되는 세 조합 중 하나를 고른다(원문 유지·없는 줄에 새로 만들기는 서로 다른 줄에 적용되는 값)."""
+    static = Path(__file__).resolve().parent.parent / "src/doc2report/web/static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "app.js").read_text(encoding="utf-8")
+    assert html.index("<legend>문장 다듬기</legend>") < html.index("<legend>말머리</legend>") < html.index("<legend>표</legend>")
+    assert "<span>서식 변환</span>" in html and "<span>보고서 양식</span>" in html
+    for value in ("keep", "fill", "unify"):
+        assert f'name="marker" value="{value}"' in html
+    assert "markerValues()" in js and "keep_leading_markers: m !== \"unify\"" in js

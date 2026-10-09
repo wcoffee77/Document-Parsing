@@ -69,7 +69,7 @@
     <h2><span class="num">2</span>작업과 옵션</h2>
     <div class="segmented" role="radiogroup" aria-label="작업">
       <label><input type="radio" name="task" value="convert" checked><span>서식 변환</span></label>
-      <label><input type="radio" name="task" value="synthesize"><span>요약·종합 보고서</span></label>
+      <label><input type="radio" name="task" value="synthesize"><span>보고서 양식</span></label>
     </div>
     <p class="hint" id="task-hint"></p>
 
@@ -106,20 +106,7 @@
       <p class="explain">문서를 읽어 알맞은 규칙을 자동으로 정합니다. 직접 정하려면 "직접 선택"을 누르세요.</p>
     </div>
 
-    <div id="manual-panel" class="hidden">
-      <p class="hint">아래 항목은 "출력"에서 고른 서식의 기본값으로 채워져 있습니다. 바꾸고 싶은 것만 고치세요.</p>
-
-      <fieldset>
-        <legend>말머리</legend>
-        <div id="marker-rules" class="checks"></div>
-      </fieldset>
-
-      <fieldset>
-        <legend>표</legend>
-        <label class="check"><input type="checkbox" id="tbl-landscape"> 넓은 표는 가로 페이지 허용</label>
-        <label class="inline">표 위치 <select id="tbl-align"></select></label>
-      </fieldset>
-    </div>
+    <p class="hint hidden" id="manual-hint">아래 항목은 "출력"에서 고른 서식의 기본값으로 채워져 있습니다. 바꾸고 싶은 것만 고치세요.</p>
 
     <fieldset id="polish-box">
       <legend>문장 다듬기</legend>
@@ -133,6 +120,26 @@
         <span class="hint" id="llm-test-out"></span>
       </div>
     </fieldset>
+
+    <div id="manual-panel" class="hidden">
+      <fieldset>
+        <legend>말머리</legend>
+        <div class="checks">
+          <label class="check"><input type="radio" name="marker" value="keep"> 원문 말머리 그대로
+            <span class="hint">원문에 친 1. □ - ㆍ ① ※ 등을 그대로 두고, 말머리 없는 줄은 없는 채로 둠</span></label>
+          <label class="check"><input type="radio" name="marker" value="fill"> 원문 말머리 그대로 + 없는 줄에는 새로 만들기
+            <span class="hint">원문 말머리는 유지하고, 말머리가 없는 줄에만 보고서 말머리(□ - 등)를 붙임</span></label>
+          <label class="check"><input type="radio" name="marker" value="unify"> 보고서 말머리로 통일
+            <span class="hint">원문 말머리를 지우고 모든 줄에 보고서 규칙(1. □ - ·)의 말머리를 새로 붙임</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>표</legend>
+        <label class="check"><input type="checkbox" id="tbl-landscape"> 넓은 표는 가로 페이지 허용</label>
+        <label class="inline">표 위치 <select id="tbl-align"></select></label>
+      </fieldset>
+    </div>
 
     <fieldset id="merge-box">
       <legend>여러 입력 합치기</legend>

@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 12;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 13;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -187,7 +187,6 @@ async function loadProfiles() {
   $("#cu-base").innerHTML = opts;
 
   renderChecks("#polish-rules", data.schema.polish);
-  renderChecks("#marker-rules", data.schema.markers);
   $("#tbl-align").innerHTML = data.schema.table_align.map((o) =>
     `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
 }
@@ -198,11 +197,22 @@ function renderChecks(target, rows) {
     (r.help ? `<span class="hint">${esc(r.help)}</span>` : "") + `</label>`).join("");
 }
 
+// 말머리 선택: 원문 말머리 유지(keep)와 말머리 없는 줄에 새로 만들기(auto)는 서로 다른 줄에 적용되는 두 값이다.
+// 화면에서는 뜻이 되는 세 조합만 보인다 — keep·auto 둘 다 끄면 "모든 말머리 제거"라 만들지 않는다.
+function setMarkerMode(keep, auto) {
+  setRadio("marker", !keep ? "unify" : (auto ? "fill" : "keep"));
+}
+function markerValues() {
+  const m = radio("marker") || "keep";
+  return { keep_leading_markers: m !== "unify", auto_markers: m !== "keep" };
+}
+
 // 직접 선택 모드의 체크박스를 한 서식의 기본 규칙으로 채운다.
 function applyRules(name) {
   const p = state.profiles[name];
   if (!p) return;
   // 서식이 문구를 안 고치는 것이 원칙(polish: none — 정식보고서·Confluence 변환)이면 다듬기 항목은 모두 꺼진 채로 시작한다
+  setMarkerMode(!!p.text.keep_leading_markers, !!p.text.auto_markers);
   for (const box of $$("[data-rule]")) {
     const polishBox = !!box.closest("#polish-rules");
     box.checked = !!p.text[box.dataset.rule] && (!polishBox || p.polish !== "none");
@@ -301,6 +311,7 @@ function collectOptions() {
   const dateMode = radio("date");
   const text = {};
   for (const box of $$("[data-rule]")) text[box.dataset.rule] = box.checked;
+  Object.assign(text, markerValues());
   const formats = ["docx"];
   if ($("#out-pdf").checked && !$("#out-pdf").disabled) formats.push("pdf");
   if ($("#out-md").checked) formats.push("md");
@@ -353,6 +364,7 @@ function restoreOptions() {
   if (o.runs) $("#syn-runs").value = String(o.runs);
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
+  if (o.text && "keep_leading_markers" in o.text) setMarkerMode(!!o.text.keep_leading_markers, !!o.text.auto_markers);
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
   setRadio("merge", o.merge || (o.page_breaks ? "pages" : "continuous"));
   $("#cf-linked").checked = o.linked !== false;
@@ -383,6 +395,7 @@ function syncMode() {
   // 문장 규칙 체크박스는 직접 선택에서만 보인다(자동 판단은 문서를 읽어 정함)
   $("#polish-rules").classList.toggle("hidden", !manual);
   $("#polish-auto-hint").classList.toggle("hidden", manual);
+  $("#manual-hint").classList.toggle("hidden", !manual);
   $("#merge-box").classList.toggle("hidden", state.inputs.length < 2);
   $("#date-pick").classList.toggle("hidden", radio("date") !== "pick");
 }
@@ -495,7 +508,7 @@ $("#convert").addEventListener("click", async () => {
   const options = collectOptions();
   if (options.date_mode === "pick" && !options.date) return toast("날짜를 골라 주세요", true);
   if (options.task === "synthesize" && !(state.status && state.status.llm.configured)) {
-    return toast("요약·종합 보고서는 LLM이 있어야 합니다 — 사용자 등록에서 LLM을 넣으세요", true);
+    return toast("보고서 양식(요약·종합)은 LLM이 있어야 합니다 — 사용자 등록에서 LLM을 넣으세요", true);
   }
   saveOptions();
   const inputs = state.inputs.map((i) => ({ type: i.type, url: i.url, upload_id: i.upload_id, name: i.name, text: i.text, title: i.title }));
