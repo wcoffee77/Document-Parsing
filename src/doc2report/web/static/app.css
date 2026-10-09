@@ -209,3 +209,10 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 .btn.danger { color: var(--bad); }
 .btn.danger:hover { border-color: var(--bad); }
 body.locked main.layout { opacity: .35; pointer-events: none; }
+
+/* 요약·종합 (2026-10-09) */
+#synth-panel { margin-top: 8px; }
+#synth-panel textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.chips { flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.summary-box { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px;
+  font-size: 12px; white-space: pre-wrap; margin: 8px 0; }

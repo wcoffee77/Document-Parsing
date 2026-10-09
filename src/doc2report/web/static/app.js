@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 8;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 9;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -79,6 +79,7 @@ async function loadStatus() {
     $("#use-llm").closest("label").classList.add("disabled");
     $("#use-draft").closest("label").classList.add("disabled");
   }
+  if (state.schema) syncMode();
 }
 
 // ── 사용자 (2026-09-30: 팀 공유 — 누구의 토큰·어떤 API를 쓰는지 늘 보이게) ─────────────
@@ -308,6 +309,10 @@ function collectOptions() {
   const custom = { base: $("#cu-base").value };
   for (const k of CUSTOM_KEYS) custom[k] = getCustom(k);
   return {
+    task: radio("task") || "convert",
+    pages: $("#syn-pages").value,
+    runs: Number($("#syn-runs").value) || 1,
+    request: $("#syn-request").value.trim(),
     mode,
     llm: $("#use-llm").checked,
     allow_llm: $("#use-llm").checked,
@@ -348,6 +353,10 @@ function restoreOptions() {
   if (!o) { syncPreset(); return syncMode(); }
   if (o.custom) for (const k of CUSTOM_KEYS) setCustom(k, o.custom[k]);
   setRadio("mode", o.mode || "auto");
+  setRadio("task", o.task || "convert");
+  if (o.pages) $("#syn-pages").value = o.pages;
+  if (o.runs) $("#syn-runs").value = String(o.runs);
+  $("#syn-request").value = o.request || "";
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
   $("#use-draft").checked = !!o.draft;
   if (o.polish) setRadio("polish", o.polish === "llm" ? "rules" : o.polish);  // 예전 "규칙 + LLM"
@@ -365,6 +374,17 @@ function restoreOptions() {
 }
 
 function syncMode() {
+  const synth = radio("task") === "synthesize";
+  const count = state.inputs.length;
+  $("#synth-panel").classList.toggle("hidden", !synth);
+  $("#convert-panel").classList.toggle("hidden", synth);
+  $("#synth-llm-warn").classList.toggle("hidden", !synth || !state.status || state.status.llm.configured);
+  const kind = count >= 2 ? "종합" : "요약";
+  $("#task-hint").textContent = synth
+    ? `LLM이 핵심을 골라 정식보고서 형태로 새로 씁니다 — 지금 입력 ${count}개 → ${count ? kind : "요약(1개)·종합(2개 이상)"}`
+    : "원문 내용은 그대로 두고 사내 규격 서식(말머리·줄 맞춤·표)으로 바꿉니다.";
+  $("#convert").textContent = synth ? (count >= 2 ? "종합 보고서 만들기" : "요약 보고서 만들기") : "변환하기";
+  $("#doc-title").placeholder = synth ? "비우면 LLM이 내용에 맞게 정함" : "비우면 첫 번째 입력의 제목";
   const manual = radio("mode") === "manual";
   $("#auto-panel").classList.toggle("hidden", manual);
   $("#manual-panel").classList.toggle("hidden", !manual);
@@ -481,6 +501,9 @@ $("#convert").addEventListener("click", async () => {
   if (bad) return toast(`${bad.name}: 파일이 아직 올라가지 않았거나 실패했습니다`, true);
   const options = collectOptions();
   if (options.date_mode === "pick" && !options.date) return toast("날짜를 골라 주세요", true);
+  if (options.task === "synthesize" && !(state.status && state.status.llm.configured)) {
+    return toast("요약·종합 보고서는 LLM이 있어야 합니다 — 사용자 등록에서 LLM을 넣으세요", true);
+  }
   saveOptions();
   const inputs = state.inputs.map((i) => ({ type: i.type, url: i.url, upload_id: i.upload_id, name: i.name, text: i.text, title: i.title }));
 
@@ -522,10 +545,17 @@ function finish(job) {
     r.decision.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
   const notes = r.notes.filter((n) => !n.startsWith("자동 판단:"));
   const polishName = ({ none: "안 함", rules: "파이썬 규칙" }[r.polish] || r.polish) + (r.llm ? " + LLM" : "");
+  const synth = r.task === "synthesize";
+  const line = synth
+    ? `서식 ${esc(r.profile)} · LLM ${esc(r.kind)}${r.mode === "rewrite" ? "" : " <b class=\"bad\">(실패 — 원문 나열)</b>"} · 분량 목표 ${esc(r.pages)}쪽 · 표 ${r.tables}개`
+    : `서식 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건`;
+  const synthBox = synth ? `${r.request ? `<p class="hint">요청사항: ${esc(r.request)}</p>` : ""}
+    <div class="summary-box"><b>핵심 요약</b>\n${esc(r.summary || "")}</div>` : "";
   box.innerHTML = `
     <h3>완료 — ${esc(r.title || r.stem)} <span class="hint">(${job.elapsed}초)</span></h3>
-    <p class="hint">서식 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건</p>
+    <p class="hint">${line}</p>
     <div class="files">${files}</div>
+    ${synthBox}
     ${decision}
     ${notes.length ? `<details open><summary>레이아웃·입력 메모 (${notes.length})</summary><ul class="notes">${
       notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
@@ -594,7 +624,17 @@ $("#llm-test").addEventListener("click", async () => {
 
 $("#rules-base").addEventListener("change", (ev) => { applyRules(ev.target.value); syncMode(); });
 $("#cu-base").addEventListener("change", (ev) => { fillCustom(ev.target.value); syncPreset(); });
+$("#syn-examples").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button");
+  if (!btn) return;
+  const box = $("#syn-request");
+  const add = btn.textContent.trim();
+  if (!box.value.includes(add)) box.value = box.value.trim() ? `${box.value.trim()}, ${add}` : add;
+  box.focus();
+});
+
 document.addEventListener("change", (ev) => {
+  if (ev.target.name === "task") syncMode();
   if (ev.target.name === "mode" || ev.target.name === "polish" || ev.target.name === "date") syncMode();
   if (ev.target.name === "preset") syncPreset();
 });

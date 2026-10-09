@@ -66,7 +66,47 @@
 
   <!-- 2. 옵션 -->
   <section class="card" id="card-options">
-    <h2><span class="num">2</span>변환 옵션</h2>
+    <h2><span class="num">2</span>작업과 옵션</h2>
+    <div class="segmented" role="radiogroup" aria-label="작업">
+      <label><input type="radio" name="task" value="convert" checked><span>서식 변환</span></label>
+      <label><input type="radio" name="task" value="synthesize"><span>요약·종합 보고서</span></label>
+    </div>
+    <p class="hint" id="task-hint"></p>
+
+    <!-- 요약·종합 (2026-10-09): 입력 1개 = 요약, 2개 이상 = 종합. LLM이 핵심을 골라 새로 쓰고 파이썬이 사실을 대조 -->
+    <div id="synth-panel" class="hidden">
+      <p class="explain">입력 <b>1개</b>면 핵심만 뽑아 <b>요약</b>하고, <b>2개 이상</b>이면 주제별로 다시 구성해 <b>종합</b>합니다.
+        숫자·날짜·확정 여부는 원문과 대조해 틀리면 다시 쓰게 하고, 끝내 틀리면 원문 문장으로 되돌립니다.
+        문서마다 값이 다르면 날짜가 가장 나중인 문서의 값을 씁니다.</p>
+      <p class="hint warn-text hidden" id="synth-llm-warn">LLM이 설정되지 않았습니다 — 위의 사용자 등록에서 온프렘 LLM 주소·모델명을 넣어야 만들 수 있습니다.</p>
+      <div class="grid2">
+        <label>분량 (Word 쪽 수)
+          <select id="syn-pages">
+            <option value="1">1쪽</option>
+            <option value="1-2" selected>1~2쪽</option>
+            <option value="2-3">2~3쪽</option>
+            <option value="3-5">3~5쪽</option>
+          </select></label>
+        <label>여러 번 만들어 고르기
+          <select id="syn-runs">
+            <option value="1" selected>1번 (빠름)</option>
+            <option value="2">2번</option>
+            <option value="3">3번 (남은 문제가 가장 적은 것)</option>
+          </select></label>
+      </div>
+      <label class="block">요청사항 <span class="hint">(선택 · 구성·분량·강조점에 반영 — 원문에 없는 사실은 요청해도 쓰지 않습니다)</span>
+        <textarea id="syn-request" rows="3" maxlength="1000"
+          placeholder="예) 경과사항은 최소한으로 줄이고 향후 계획을 구체적으로 작성&#10;예) 결정이 필요한 사항을 맨 앞에 정리"></textarea></label>
+      <div class="row chips" id="syn-examples">
+        <button class="btn tiny" type="button">경과는 최소한으로</button>
+        <button class="btn tiny" type="button">향후 계획을 구체적으로</button>
+        <button class="btn tiny" type="button">결정 요청 사항을 맨 앞에</button>
+        <button class="btn tiny" type="button">대안은 표로 비교</button>
+        <button class="btn tiny" type="button">위험 요인을 강조</button>
+      </div>
+    </div>
+
+    <div id="convert-panel">
     <div class="segmented" role="radiogroup">
       <label><input type="radio" name="mode" value="auto" checked><span>자동 판단</span></label>
       <label><input type="radio" name="mode" value="manual"><span>직접 선택</span></label>
@@ -106,7 +146,7 @@
       </fieldset>
     </div>
 
-    <fieldset>
+    <fieldset id="llm-box">
       <legend>LLM 다듬기</legend>
       <label class="check strong"><input type="checkbox" id="use-draft"> 줄글을 정식보고서로 새로 쓰기 (붙여넣은 글)
         <span class="hint">구어체·장문을 1.·□·-·표 체계의 개조식으로 다시 쓰고, 숫자·날짜·방향을 원문과 대조합니다
@@ -127,6 +167,7 @@
       <label class="check"><input type="radio" name="merge" value="pages"> 입력마다 새 쪽에서 시작
         <span class="hint">쪽마다 그 입력의 제목을 큰 제목(가운데·밑줄)으로. 위 "문서 제목"은 파일 이름에 씀</span></label>
     </fieldset>
+    </div>
   </section>
 
   <!-- 3. 출력 -->

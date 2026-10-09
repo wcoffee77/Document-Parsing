@@ -239,7 +239,26 @@ class Prepared:
     number_ids: list[int] = field(default_factory=list)         # 결론·계획 절 문장(수치 보존 점검 대상)
 
 
-def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title: str | None = None) -> Prepared:
+MAX_REQUEST_CHARS = 1000   # 사용자 요청사항 길이 상한(웹 화면 입력칸) — 지시문을 밀어낼 만큼 길면 자른다
+
+REQUEST_RULES = """[사용자 요청사항 — 이 보고서에만 적용]
+아래는 보고서를 받는 사람이 직접 적은 요청입니다. 구성·분량·강조점·절 이름·어조에 관한 요청은 위 [종합 규칙]·[구성]보다 우선해 따릅니다.
+단 [절대 규칙](사실을 바꾸지 않음, 원문에 없는 사실·숫자를 만들지 않음, 쓴 줄의 사실은 빠짐없이)과 [출력 형식]은 요청과 상관없이 지킵니다 —
+요청이 원문에 없는 내용을 요구하면 그 부분은 쓰지 않습니다.
+---
+{request}
+---
+"""
+
+
+def clean_request(request: str | None) -> str:
+    """요청사항 정리 — 빈 줄·앞뒤 공백을 걷고 길이 상한으로 자른다."""
+    text = "\n".join(line.rstrip() for line in (request or "").strip().splitlines() if line.strip())
+    return text[:MAX_REQUEST_CHARS]
+
+
+def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title: str | None = None,
+            request: str | None = None) -> Prepared:
     from .transform.factcheck import load_rules
 
     rules = load_rules()
@@ -287,13 +306,23 @@ def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title
     start, end = base.index("[절대 규칙 2"), base.index("[절대 규칙 3")
     base = base[:start] + SYNTH_RULE2 + "\n" + base[end:]
     base = base.replace("[구성]", rules + "\n[구성]", 1)
+    request = clean_request(request)
+    if request:   # 구성 규칙 뒤·예시 앞에 둔다 — 예시보다 먼저 읽히고, 출력 형식(맨 끝)은 그대로 마지막에
+        base = base.replace("[구성]", REQUEST_RULES.replace("{request}", request) + "\n[구성]", 1)
     system = system_prompt(base=base)
     out_title = title or ""
     user = (f"문서 {len(docs)}개, 원문 문장 {len(sentences)}개입니다. 괄호 ( ) 안의 줄은 절 제목(맥락)이라 번호가 없고, 들여쓴 문장은 윗줄의 "
             "하위 내용입니다.\n\n" + "\n\n".join(blocks)
+            + (f"\n\n[사용자 요청사항] {request}" if request else "")
             + "\n\n위 문서들을 지시대로 하나의 새 보고서로 종합해 JSON 하나로만 출력하세요(첫 글자는 {).")
     newest = max((d.when for d in docs if d.when), default=None)
     return Prepared(out_title, sentences, user, system, ranges, newest.year if newest else None, key_groups, number_ids)
+
+
+def brief_source(prep: Prepared) -> str:
+    """drafting.brief에 넘길 원문 — brief는 첫 줄을 제목으로 보고 떼므로 빈 제목 줄을 앞에 둔다(안 그러면 첫 문장의 숫자를
+    '원문에 없는 숫자'로 세어 수치왜곡이 거짓으로 잡혔다 — 2026-10-09 웹 화면 확인 중 발견)."""
+    return "\n" + "\n".join(prep.sentences)
 
 
 def concat_structure(ranges: list[tuple[str, int, int]]):
@@ -305,16 +334,19 @@ def concat_structure(ranges: list[tuple[str, int, int]]):
 
 
 def synthesize(docs: list[SourceDoc], ask: Ask | None = None, pages: tuple[int, int] = DEFAULT_PAGES,
-               title: str | None = None, year: int | None = None) -> DraftResult:
-    """여러 문서 → 종합 보고서 글(정식보고서 변환기가 읽는 글). 사실 검증은 drafting.review가 한다."""
+               title: str | None = None, year: int | None = None, request: str | None = None) -> DraftResult:
+    """여러 문서 → 종합 보고서 글(정식보고서 변환기가 읽는 글). 사실 검증은 drafting.review가 한다.
+    request: 사용자 요청사항(예: 경과는 최소한으로, 향후 계획은 구체적으로) — 구성·분량·강조는 따르되 사실 규칙은 못 넘는다."""
     if not docs:
         raise ValueError("문서가 없습니다")
-    prep = prepare(docs, pages, title)
+    prep = prepare(docs, pages, title, request)
     low, high = page_chars(pages)
     result = rewrite("", ask, year or prep.year, prepared=(prep.title, prep.sentences, prep.user, prep.system),
                      synth=SynthSpec(low, high, prep.key_groups, prep.number_ids), fallback=concat_structure(prep.ranges))
     if not (result.title or "").strip():
         result.title = _fallback_title(result, docs, ask, result.notes)
+    if clean_request(request):
+        result.notes.insert(0, f"사용자 요청사항 반영: {clean_request(request)[:120]}")
     result.notes.insert(0, "종합 입력: " + ", ".join(f"문서{n} 문장 {a}~{b}" for n, (_, a, b) in enumerate(prep.ranges, 1))
                         + f" (날짜순: {' → '.join(d.date or '날짜 없음' for d in order_docs(docs))})")
     return result

@@ -84,7 +84,8 @@ def draft(
         typer.echo(f"  리포트: {report}")
 
 
-def _synthesis_command(sources, output, profile, pages, title, date, shorten, runs, report, *, kind, default_name):
+def _synthesis_command(sources, output, profile, pages, title, date, shorten, runs, report, *, kind, default_name,
+                       request=None):
     """synthesize(여러 문서 종합)와 summarize(긴 문서 하나 요약)의 공통 본문 — 같은 엔진, 입력 문서 수만 다르다."""
     import datetime
     import re
@@ -92,7 +93,7 @@ def _synthesis_command(sources, output, profile, pages, title, date, shorten, ru
     from .account import load_and_apply
     from .drafting import brief, problem_count
     from .pipeline import convert_many, load_document
-    from .synthesis import flatten, prepare, synthesize as run_synthesis
+    from .synthesis import brief_source, flatten, prepare, synthesize as run_synthesis
 
     load_and_apply()
     if not sources:
@@ -114,7 +115,7 @@ def _synthesis_command(sources, output, profile, pages, title, date, shorten, ru
         year = datetime.date.today().year
     best = None
     for _ in range(runs):
-        candidate = run_synthesis(docs, pages=page_range, title=title, year=year)
+        candidate = run_synthesis(docs, pages=page_range, title=title, year=year, request=request)
         best = candidate if best is None or problem_count(candidate) < problem_count(best) else best
         if problem_count(candidate) == 0:
             break
@@ -129,8 +130,8 @@ def _synthesis_command(sources, output, profile, pages, title, date, shorten, ru
     typer.echo(f"[완료] {out}  ({label}, 절 {result.sections}개)  구조 글: {structure_file}")
     for note in load_notes + result.notes + converted.notes:
         typer.echo(f"  · {note}")
-    prep = prepare(docs, page_range, title)
-    summary = brief(result, "\n".join(prep.sentences), year)
+    prep = prepare(docs, page_range, title, request)
+    summary = brief(result, brief_source(prep), year)
     typer.echo("==== 핵심 요약 ====\n" + summary)
     if report:
         lines = [f"# {kind} 판단", "", f"- 방식: {label}", f"- 핵심 요약: {summary.replace(chr(10), ' / ')}",
@@ -150,12 +151,13 @@ def synthesize(
     shorten: bool = typer.Option(True, "--shorten/--no-shorten", help="줄 맞춤에서 두세 글자 넘치는 문장을 LLM으로 줄여 한 줄로"),
     runs: int = typer.Option(1, "--runs", min=1, max=5, help="N번 돌려 남은 문제가 가장 적은 결과를 씀"),
     report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
+    request: str = typer.Option(None, "--request", help="요청사항(예: '경과는 최소한으로, 향후 계획은 구체적으로') — 구성·분량·강조에 반영, 사실 규칙은 그대로"),
 ) -> None:
     """여러 문서(정식보고서·Confluence)를 핵심만 뽑아 새 보고서 하나로 종합한다. LLM이 고르고 다시 쓰며, 파이썬이 숫자·날짜·방향을 원문과 대조한다(synthesis.py)."""
     if len(sources) < 2:
         raise typer.BadParameter("종합하려면 문서가 둘 이상 필요합니다(문서 하나를 요약하려면 summarize)")
     _synthesis_command(sources, output, profile, pages, title, date, shorten, runs, report,
-                       kind="종합", default_name="종합_보고서.docx")
+                       kind="종합", default_name="종합_보고서.docx", request=request)
 
 
 @app.command()
@@ -169,10 +171,11 @@ def summarize(
     shorten: bool = typer.Option(True, "--shorten/--no-shorten", help="줄 맞춤에서 두세 글자 넘치는 문장을 LLM으로 줄여 한 줄로"),
     runs: int = typer.Option(1, "--runs", min=1, max=5, help="N번 돌려 남은 문제가 가장 적은 결과를 씀"),
     report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
+    request: str = typer.Option(None, "--request", help="요청사항(예: '경과는 최소한으로, 향후 계획은 구체적으로') — 구성·분량·강조에 반영, 사실 규칙은 그대로"),
 ) -> None:
     """긴 문서 하나를 핵심만 뽑아 정식보고서 형태로 요약한다. 종합(synthesize)과 같은 엔진으로, LLM이 핵심을 고르고 다시 쓰며 파이썬이 숫자·날짜·방향을 원문과 대조한다."""
     _synthesis_command([source], output, profile, pages, title, date, shorten, runs, report,
-                       kind="요약", default_name="요약_보고서.docx")
+                       kind="요약", default_name="요약_보고서.docx", request=request)
 
 
 

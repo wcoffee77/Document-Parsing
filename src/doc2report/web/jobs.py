@@ -83,20 +83,10 @@ class JobRunner:
 
     def _convert(self, job: Job, payload: dict) -> dict:
         options = payload.get("options") or {}
+        if options.get("task") == "synthesize":
+            return self._synthesize(job, payload)
         inputs, notes, drafted = self._draft_inputs(job, payload.get("inputs") or [], options)
-        sources, kinds = self._sources(inputs)
-
-        docs = []
-        for index, source in enumerate(sources, 1):
-            name = source.name if isinstance(source, LoadedSource) else source
-            job.say(f"입력 읽는 중 ({index}/{len(sources)}): {name}")
-            try:
-                doc, source_notes = load_document(source, linked=options.get("linked", True),
-                                                  progress=job.say)
-            except Exception as exc:
-                raise RuntimeError(f"{index}번 입력({name}) 읽기 실패: {exc}") from exc
-            docs.append(doc)
-            notes.extend(source_notes)
+        docs, kinds = self._load(job, inputs, options, notes)
 
         # 여러 입력 합치기: continuous = 이어 붙이기(입력 제목을 절 제목으로), pages = 입력마다 새 쪽
         merge = options.get("merge") or ("pages" if options.get("page_breaks") else "continuous")
@@ -113,16 +103,83 @@ class JobRunner:
             polish, llm = "none", False
         if decision:
             notes = [f"자동 판단: {reason}" for reason in decision.reasons] + notes
+        # 줄글을 보고서로 새로 쓴 글은 두세 글자 넘치는 줄을 LLM으로 줄여 한 줄로(CLI draft와 같게)
+        out = self._write(job, merged, name, profile, options, notes, polish=polish, llm=llm,
+                          shorten=bool(drafted) and llm_status()["configured"])
+        out.update({"task": "convert",
+                    "decision": ({"reasons": decision.reasons, **decision.summary} if decision else None)})
+        return out
 
+    def _synthesize(self, job: Job, payload: dict) -> dict:
+        """요약·종합 보고서 만들기(2026-10-09 사용자): 입력 1개면 요약, 2개 이상이면 종합. CLI summarize/synthesize와 같은 엔진 —
+        LLM이 핵심을 고르고 다시 쓰며, 파이썬이 숫자·날짜·방향을 원문과 대조한다. 사용자 요청사항은 구성·분량·강조에만 반영된다."""
+        from ..drafting import brief, problem_count
+        from ..synthesis import DEFAULT_PAGES, brief_source, clean_request, flatten, prepare, synthesize
+
+        options = payload.get("options") or {}
+        if not llm_status()["configured"]:
+            raise ValueError("요약·종합 보고서는 LLM이 있어야 만들 수 있습니다 — 위의 사용자 등록에서 온프렘 LLM 주소·모델명을 넣으세요")
+        inputs = payload.get("inputs") or []
+        notes: list[str] = []
+        docs, _ = self._load(job, inputs, options, notes)
+        sources = [flatten(doc, (item.get("title") or item.get("name") or f"입력 {i}").strip())
+                   for i, (doc, item) in enumerate(zip(docs, inputs), 1)]
+        kind = "요약" if len(sources) == 1 else "종합"
+        pages = _pages(options.get("pages"), DEFAULT_PAGES)
+        runs = max(1, min(int(options.get("runs") or 1), 3))
+        title = (options.get("title") or "").strip() or None
+        request = clean_request(options.get("request"))
+        year = datetime.now().year
+
+        best = None
+        for attempt in range(1, runs + 1):
+            job.say(f"LLM으로 {kind} 보고서 쓰는 중 ({attempt}/{runs}회) — 응답·사실 검증에 1~3분 걸릴 수 있음")
+            candidate = synthesize(sources, pages=pages, title=title, year=year, request=request)
+            if best is None or problem_count(candidate) < problem_count(best):
+                best = candidate
+            if problem_count(candidate) == 0:
+                break
+        result = best
+        if result.mode != "rewrite":
+            notes.append(f"LLM {kind}에 실패해 원문 문장을 그대로 늘어놓은 기본 구조로 만들었습니다 — 요약·재구성이 아닙니다")
+        notes += [f"[{kind}] {n}" for n in result.notes]
+        summary = brief(result, brief_source(prepare(sources, pages, title, request)), year)
+
+        doc, load_notes = load_document(load_text(result.text, name=f"{kind} 보고서"))
+        name = title or result.title or sources[-1].title
+        merged = merge_documents([doc], title=name, section_titles=False)
+        profile = opts.format_profile(options)
+        # 검증을 거친 글이라 문구 규칙·교열 LLM은 다시 돌리지 않는다. 두세 글자 넘치는 줄만 LLM으로 줄인다(CLI와 같게)
+        out = self._write(job, merged, name, profile, options, notes + load_notes, polish="none", llm=False, shorten=True)
+        out.update({"task": "synthesize", "kind": kind, "mode": result.mode, "summary": summary,
+                    "request": request, "pages": f"{pages[0]}-{pages[1]}", "decision": None})
+        return out
+
+    def _load(self, job: Job, inputs: list[dict], options: dict, notes: list[str]) -> tuple[list, list[str]]:
+        sources, kinds = self._sources(inputs)
+        docs = []
+        for index, source in enumerate(sources, 1):
+            name = source.name if isinstance(source, LoadedSource) else source
+            job.say(f"입력 읽는 중 ({index}/{len(sources)}): {name}")
+            try:
+                doc, source_notes = load_document(source, linked=options.get("linked", True),
+                                                  progress=job.say)
+            except Exception as exc:
+                raise RuntimeError(f"{index}번 입력({name}) 읽기 실패: {exc}") from exc
+            docs.append(doc)
+            notes.extend(source_notes)
+        return docs, kinds
+
+    def _write(self, job: Job, merged, name, profile, options: dict, notes: list[str], *,
+               polish: str, llm: bool, shorten: bool) -> dict:
+        """변환·파일 쓰기(docx + 고른 형식 + 변경 내역)와 결과 요약 — 서식 변환과 요약·종합이 같이 쓴다."""
         stem = self._reserve(name or "보고서")
         try:
             docx_path = self.output_dir / f"{stem}.docx"
             job.say("문구·구조 규칙 적용 중")
             result = convert_document(merged, docx_path, profile, polish=polish, llm=llm,
                                       date=opts.date_text(options.get("date"), profile),
-                                      notes=notes, progress=job.say,
-                                      # 줄글을 보고서로 새로 쓴 글은 두세 글자 넘치는 줄을 LLM으로 줄여 한 줄로(CLI draft와 같게)
-                                      shorten=bool(drafted) and llm_status()["configured"])
+                                      notes=notes, progress=job.say, shorten=shorten)
             files = [docx_path.name]
             formats = set(options.get("formats") or [])
             if "md" in formats:
@@ -161,7 +218,6 @@ class JobRunner:
             "profile": (f"사용자 설정(출발: {profile.label or profile.name})"
                         if options.get("preset") == "custom" else profile.label or profile.name),
             "preset": options.get("preset") or "default",
-            "decision": ({"reasons": decision.reasons, **decision.summary} if decision else None),
         }
 
     def _draft_inputs(self, job: Job, inputs: list[dict], options: dict) -> tuple[list[dict], list[str], int]:
@@ -234,6 +290,17 @@ class JobRunner:
             self._reserved.add(stem)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         return stem
+
+
+def _pages(value, default: tuple[int, int]) -> tuple[int, int]:
+    """화면의 분량 선택("1-2", "3") → (하한, 상한) 쪽 수."""
+    found = re.fullmatch(r"\s*(\d)\s*(?:[-~]\s*(\d))?\s*", str(value or ""))
+    if not found:
+        return default
+    low, high = int(found.group(1)), int(found.group(2) or found.group(1))
+    if not 1 <= low <= high <= 10:
+        return default
+    return low, high
 
 
 def safe_name(title: str) -> str:
