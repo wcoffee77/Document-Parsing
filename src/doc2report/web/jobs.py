@@ -114,7 +114,7 @@ class JobRunner:
         """요약·종합 보고서 만들기(2026-10-09 사용자): 입력 1개면 요약, 2개 이상이면 종합. CLI summarize/synthesize와 같은 엔진 —
         LLM이 핵심을 고르고 다시 쓰며, 파이썬이 숫자·날짜·방향을 원문과 대조한다. 사용자 요청사항은 구성·분량·강조에만 반영된다."""
         from ..drafting import brief, problem_count
-        from ..synthesis import DEFAULT_PAGES, brief_source, clean_request, flatten, prepare, synthesize
+        from ..synthesis import DEFAULT_PAGES, brief_source, flatten, prepare, synthesize
 
         options = payload.get("options") or {}
         if not llm_status()["configured"]:
@@ -128,13 +128,12 @@ class JobRunner:
         pages = _pages(options.get("pages"), DEFAULT_PAGES)
         runs = max(1, min(int(options.get("runs") or 1), 3))
         title = (options.get("title") or "").strip() or None
-        request = clean_request(options.get("request"))
         year = datetime.now().year
 
         best = None
         for attempt in range(1, runs + 1):
             job.say(f"LLM으로 {kind} 보고서 쓰는 중 ({attempt}/{runs}회) — 응답·사실 검증에 1~3분 걸릴 수 있음")
-            candidate = synthesize(sources, pages=pages, title=title, year=year, request=request)
+            candidate = synthesize(sources, pages=pages, title=title, year=year)
             if best is None or problem_count(candidate) < problem_count(best):
                 best = candidate
             if problem_count(candidate) == 0:
@@ -143,7 +142,7 @@ class JobRunner:
         if result.mode != "rewrite":
             notes.append(f"LLM {kind}에 실패해 원문 문장을 그대로 늘어놓은 기본 구조로 만들었습니다 — 요약·재구성이 아닙니다")
         notes += [f"[{kind}] {n}" for n in result.notes]
-        summary = brief(result, brief_source(prepare(sources, pages, title, request)), year)
+        summary = brief(result, brief_source(prepare(sources, pages, title)), year)
 
         doc, load_notes = load_document(load_text(result.text, name=f"{kind} 보고서"))
         name = title or result.title or sources[-1].title
@@ -152,7 +151,7 @@ class JobRunner:
         # 검증을 거친 글이라 문구 규칙·교열 LLM은 다시 돌리지 않는다. 두세 글자 넘치는 줄만 LLM으로 줄인다(CLI와 같게)
         out = self._write(job, merged, name, profile, options, notes + load_notes, polish="none", llm=False, shorten=True)
         out.update({"task": "synthesize", "kind": kind, "mode": result.mode, "summary": summary,
-                    "request": request, "pages": f"{pages[0]}-{pages[1]}", "decision": None})
+                    "pages": f"{pages[0]}-{pages[1]}", "decision": None})
         return out
 
     def _load(self, job: Job, inputs: list[dict], options: dict, notes: list[str]) -> tuple[list, list[str]]:

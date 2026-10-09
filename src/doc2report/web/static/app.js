@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 9;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 10;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -312,7 +312,6 @@ function collectOptions() {
     task: radio("task") || "convert",
     pages: $("#syn-pages").value,
     runs: Number($("#syn-runs").value) || 1,
-    request: $("#syn-request").value.trim(),
     mode,
     llm: $("#use-llm").checked,
     allow_llm: $("#use-llm").checked,
@@ -356,7 +355,6 @@ function restoreOptions() {
   setRadio("task", o.task || "convert");
   if (o.pages) $("#syn-pages").value = o.pages;
   if (o.runs) $("#syn-runs").value = String(o.runs);
-  $("#syn-request").value = o.request || "";
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
   $("#use-draft").checked = !!o.draft;
   if (o.polish) setRadio("polish", o.polish === "llm" ? "rules" : o.polish);  // 예전 "규칙 + LLM"
@@ -549,7 +547,7 @@ function finish(job) {
   const line = synth
     ? `서식 ${esc(r.profile)} · LLM ${esc(r.kind)}${r.mode === "rewrite" ? "" : " <b class=\"bad\">(실패 — 원문 나열)</b>"} · 분량 목표 ${esc(r.pages)}쪽 · 표 ${r.tables}개`
     : `서식 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건`;
-  const synthBox = synth ? `${r.request ? `<p class="hint">요청사항: ${esc(r.request)}</p>` : ""}
+  const synthBox = synth ? `
     <div class="summary-box"><b>핵심 요약</b>\n${esc(r.summary || "")}</div>` : "";
   box.innerHTML = `
     <h3>완료 — ${esc(r.title || r.stem)} <span class="hint">(${job.elapsed}초)</span></h3>
@@ -624,15 +622,6 @@ $("#llm-test").addEventListener("click", async () => {
 
 $("#rules-base").addEventListener("change", (ev) => { applyRules(ev.target.value); syncMode(); });
 $("#cu-base").addEventListener("change", (ev) => { fillCustom(ev.target.value); syncPreset(); });
-$("#syn-examples").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("button");
-  if (!btn) return;
-  const box = $("#syn-request");
-  const add = btn.textContent.trim();
-  if (!box.value.includes(add)) box.value = box.value.trim() ? `${box.value.trim()}, ${add}` : add;
-  box.focus();
-});
-
 document.addEventListener("change", (ev) => {
   if (ev.target.name === "task") syncMode();
   if (ev.target.name === "mode" || ev.target.name === "polish" || ev.target.name === "date") syncMode();

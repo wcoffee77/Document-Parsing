@@ -52,16 +52,18 @@ def test_one_input_is_summarized(tmp_path, fake_llm):
     assert "긴 문서 1개입니다" in fake_llm[0][0]
 
 
-def test_two_inputs_are_synthesized_with_user_request(tmp_path, fake_llm):
-    request = "경과사항은 최소한으로 줄이고 향후 계획을 구체적으로 작성"
-    job = JobRunner(tmp_path / "out", tmp_path / "up").run_sync(_payload([DOC1, DOC3], request=request, pages="2-3"))
+def test_web_has_no_request_box_and_ignores_stale_request(tmp_path, fake_llm):
+    """2026-10-09 사용자: 요청사항은 해석이 어긋나(경과를 과하게 줄이고 엉뚱한 항목을 표로) 웹에서 뺐다 — 예전 화면이 보내도 무시한다."""
+    from pathlib import Path as P
+    static = P(jobs_mod.__file__).parent / "static"
+    assert "syn-request" not in (static / "index.html").read_text(encoding="utf-8")
+    assert "syn-request" not in (static / "app.js").read_text(encoding="utf-8")
+    job = JobRunner(tmp_path / "out", tmp_path / "up").run_sync(_payload([DOC1, DOC3], request="경과는 최소한으로", pages="2-3"))
     assert job.state == "done", job.error
     r = job.result
-    assert r["kind"] == "종합" and r["request"] == request and r["pages"] == "2-3"
+    assert r["kind"] == "종합" and r["pages"] == "2-3" and "request" not in r
     system, user = fake_llm[0]
-    assert "[사용자 요청사항" in system and request in system and request in user
-    assert system.rindex("[출력 형식") > system.index("[사용자 요청사항")     # 출력 형식은 여전히 맨 끝
-    assert any(n.startswith("[종합] 사용자 요청사항 반영") for n in r["notes"])
+    assert "[사용자 요청사항" not in system and "경과는 최소한으로" not in user
 
 
 def test_synthesis_needs_llm(tmp_path, monkeypatch):
@@ -90,8 +92,8 @@ def test_pages_option(value, expected):
     assert _pages(value, (1, 2)) == expected
 
 
-def test_screen_has_task_switch_request_box_and_examples():
+def test_screen_has_task_switch_and_page_options():
     html = (ROOT / "src/doc2report/web/static/index.html").read_text(encoding="utf-8")
     js = (ROOT / "src/doc2report/web/static/app.js").read_text(encoding="utf-8")
-    assert 'name="task" value="synthesize"' in html and 'id="syn-request"' in html and 'id="syn-pages"' in html
-    assert 'task: radio("task")' in js and "request:" in js
+    assert 'name="task" value="synthesize"' in html and 'id="syn-pages"' in html
+    assert 'task: radio("task")' in js
