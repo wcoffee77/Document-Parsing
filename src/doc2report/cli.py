@@ -84,19 +84,8 @@ def draft(
         typer.echo(f"  리포트: {report}")
 
 
-@app.command()
-def synthesize(
-    sources: list[str] = typer.Argument(..., help="종합할 문서 2개 이상(.docx·.txt·.md 파일 또는 Confluence URL, 섞어도 됨)"),
-    output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로(기본: 첫 입력 옆 종합_보고서.docx)"),
-    profile: str = typer.Option("formal", "-p", "--profile", help="서식(기본 formal)"),
-    pages: str = typer.Option("1-2", "--pages", help="분량 목표 쪽 수 — '1-2' 또는 '3'(공백 뺀 글자 수로 환산해 지시)"),
-    title: str = typer.Option(None, "--title", help="보고서 제목(생략하면 LLM이 정함)"),
-    date: str = typer.Option("today", "--date", help="제목 아래 날짜 ('today', '2026. 10. 2', 'none'은 안 씀)"),
-    shorten: bool = typer.Option(True, "--shorten/--no-shorten", help="줄 맞춤에서 두세 글자 넘치는 문장을 LLM으로 줄여 한 줄로"),
-    runs: int = typer.Option(1, "--runs", min=1, max=5, help="N번 돌려 남은 문제가 가장 적은 결과를 씀"),
-    report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
-) -> None:
-    """여러 문서(정식보고서·Confluence)를 핵심만 뽑아 새 보고서 하나로 종합한다. LLM이 고르고 다시 쓰며, 파이썬이 숫자·날짜·방향을 원문과 대조한다(synthesis.py)."""
+def _synthesis_command(sources, output, profile, pages, title, date, shorten, runs, report, *, kind, default_name):
+    """synthesize(여러 문서 종합)와 summarize(긴 문서 하나 요약)의 공통 본문 — 같은 엔진, 입력 문서 수만 다르다."""
     import datetime
     import re
 
@@ -106,8 +95,8 @@ def synthesize(
     from .synthesis import flatten, prepare, synthesize as run_synthesis
 
     load_and_apply()
-    if len(sources) < 2:
-        raise typer.BadParameter("종합하려면 문서가 둘 이상 필요합니다")
+    if not sources:
+        raise typer.BadParameter("문서가 없습니다")
     found = re.fullmatch(r"\s*(\d+)\s*(?:[-~]\s*(\d+))?\s*", pages)
     if not found:
         raise typer.BadParameter("--pages는 '1-2' 또는 '3' 형식")
@@ -130,13 +119,13 @@ def synthesize(
         if problem_count(candidate) == 0:
             break
     result = best
-    first = Path(sources[0]) if "://" not in sources[0] else Path("종합")
-    out = output or first.with_name("종합_보고서.docx")
+    first = Path(sources[0]) if "://" not in sources[0] else Path(default_name)
+    out = output or first.with_name(default_name)
     structure_file = out.with_name(out.stem + "_구조.txt")
     structure_file.write_text(result.text, encoding="utf-8")
     converted = convert_many([str(structure_file)], out, profile, date=None if date == "none" else date,
                              title=title or result.title or None, shorten=shorten, section_titles=False)
-    label = {"rewrite": "LLM 종합", "fallback": "규칙 기본 구조(LLM 실패 — 문서별 이어 붙이기일 뿐 종합이 아님)"}.get(result.mode, result.mode)
+    label = {"rewrite": f"LLM {kind}", "fallback": f"규칙 기본 구조(LLM 실패 — 원문 문장을 그대로 늘어놓은 것일 뿐 {kind}이 아님)"}.get(result.mode, result.mode)
     typer.echo(f"[완료] {out}  ({label}, 절 {result.sections}개)  구조 글: {structure_file}")
     for note in load_notes + result.notes + converted.notes:
         typer.echo(f"  · {note}")
@@ -144,10 +133,48 @@ def synthesize(
     summary = brief(result, "\n".join(prep.sentences), year)
     typer.echo("==== 핵심 요약 ====\n" + summary)
     if report:
-        lines = ["# 다문서 종합 판단", "", f"- 방식: {label}", f"- 핵심 요약: {summary.replace(chr(10), ' / ')}",
+        lines = [f"# {kind} 판단", "", f"- 방식: {label}", f"- 핵심 요약: {summary.replace(chr(10), ' / ')}",
                  *[f"- {n}" for n in load_notes + result.notes], "", converted.report()]
         report.write_text("\n".join(lines), encoding="utf-8")
         typer.echo(f"  리포트: {report}")
+
+
+@app.command()
+def synthesize(
+    sources: list[str] = typer.Argument(..., help="종합할 문서 2개 이상(.docx·.txt·.md 파일 또는 Confluence URL, 섞어도 됨)"),
+    output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로(기본: 첫 입력 옆 종합_보고서.docx)"),
+    profile: str = typer.Option("formal", "-p", "--profile", help="서식(기본 formal)"),
+    pages: str = typer.Option("1-2", "--pages", help="분량 목표 쪽 수 — '1-2' 또는 '3'(공백 뺀 글자 수로 환산해 지시)"),
+    title: str = typer.Option(None, "--title", help="보고서 제목(생략하면 LLM이 정함)"),
+    date: str = typer.Option("today", "--date", help="제목 아래 날짜 ('today', '2026. 10. 2', 'none'은 안 씀)"),
+    shorten: bool = typer.Option(True, "--shorten/--no-shorten", help="줄 맞춤에서 두세 글자 넘치는 문장을 LLM으로 줄여 한 줄로"),
+    runs: int = typer.Option(1, "--runs", min=1, max=5, help="N번 돌려 남은 문제가 가장 적은 결과를 씀"),
+    report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
+) -> None:
+    """여러 문서(정식보고서·Confluence)를 핵심만 뽑아 새 보고서 하나로 종합한다. LLM이 고르고 다시 쓰며, 파이썬이 숫자·날짜·방향을 원문과 대조한다(synthesis.py)."""
+    if len(sources) < 2:
+        raise typer.BadParameter("종합하려면 문서가 둘 이상 필요합니다(문서 하나를 요약하려면 summarize)")
+    _synthesis_command(sources, output, profile, pages, title, date, shorten, runs, report,
+                       kind="종합", default_name="종합_보고서.docx")
+
+
+@app.command()
+def summarize(
+    source: str = typer.Argument(..., help="요약할 긴 문서 1개(.docx·.txt·.md 파일 또는 Confluence URL)"),
+    output: Path = typer.Option(None, "-o", "--output", help="출력 .docx 경로(기본: 입력 옆 요약_보고서.docx)"),
+    profile: str = typer.Option("formal", "-p", "--profile", help="서식(기본 formal)"),
+    pages: str = typer.Option("1-2", "--pages", help="분량 목표 쪽 수 — '1-2' 또는 '3'(공백 뺀 글자 수로 환산해 지시)"),
+    title: str = typer.Option(None, "--title", help="보고서 제목(생략하면 LLM이 정함)"),
+    date: str = typer.Option("today", "--date", help="제목 아래 날짜 ('today', '2026. 10. 2', 'none'은 안 씀)"),
+    shorten: bool = typer.Option(True, "--shorten/--no-shorten", help="줄 맞춤에서 두세 글자 넘치는 문장을 LLM으로 줄여 한 줄로"),
+    runs: int = typer.Option(1, "--runs", min=1, max=5, help="N번 돌려 남은 문제가 가장 적은 결과를 씀"),
+    report: Path = typer.Option(None, "--report", help="판단·변경 내역을 저장할 .md 경로"),
+) -> None:
+    """긴 문서 하나를 핵심만 뽑아 정식보고서 형태로 요약한다. 종합(synthesize)과 같은 엔진으로, LLM이 핵심을 고르고 다시 쓰며 파이썬이 숫자·날짜·방향을 원문과 대조한다."""
+    _synthesis_command([source], output, profile, pages, title, date, shorten, runs, report,
+                       kind="요약", default_name="요약_보고서.docx")
+
+
 
 
 @app.command()

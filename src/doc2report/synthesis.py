@@ -278,6 +278,11 @@ def prepare(docs: list[SourceDoc], pages: tuple[int, int] = DEFAULT_PAGES, title
     low, high = page_chars(pages)
     rules = SYNTH_RULES.replace("{low}", f"{low:,}").replace("{high}", f"{high:,}").replace(
         "{pages}", f"{pages[0]}~{pages[1]}" if pages[0] != pages[1] else str(pages[0]))
+    if len(docs) == 1:   # 긴 문서 하나를 요약해 새 보고서로: 문서 간 병합 규칙 대신 핵심 선별 규칙
+        rules = rules.replace(
+            "- 입력은 같은 주제를 다룬 문서 여러 개(날짜 오름차순, 아래 문서일수록 최신)입니다. 문서별로 이어 붙이지 말고, 읽는 사람이 한 번에 이해하도록\n"
+            "  **주제별로 새로 구성**합니다.",
+            "- 입력은 긴 문서 1개입니다. 원문의 문단 순서에 얽매이지 말고, 읽는 사람이 한 번에 이해하도록 **핵심만 골라 새로 구성**합니다.", 1)
     base = REWRITE_SYSTEM
     start, end = base.index("[절대 규칙 2"), base.index("[절대 규칙 3")
     base = base[:start] + SYNTH_RULE2 + "\n" + base[end:]
@@ -302,8 +307,8 @@ def concat_structure(ranges: list[tuple[str, int, int]]):
 def synthesize(docs: list[SourceDoc], ask: Ask | None = None, pages: tuple[int, int] = DEFAULT_PAGES,
                title: str | None = None, year: int | None = None) -> DraftResult:
     """여러 문서 → 종합 보고서 글(정식보고서 변환기가 읽는 글). 사실 검증은 drafting.review가 한다."""
-    if len(docs) < 2:
-        raise ValueError("종합하려면 문서가 둘 이상 필요합니다")
+    if not docs:
+        raise ValueError("문서가 없습니다")
     prep = prepare(docs, pages, title)
     low, high = page_chars(pages)
     result = rewrite("", ask, year or prep.year, prepared=(prep.title, prep.sentences, prep.user, prep.system),

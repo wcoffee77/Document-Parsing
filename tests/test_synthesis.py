@@ -127,9 +127,35 @@ def test_without_llm_falls_back_to_document_by_document_concatenation():
     assert any("규칙 기본 구조" in n for n in result.notes)
 
 
-def test_needs_two_documents():
+def test_single_document_is_summarized_with_its_own_prompt():
+    """긴 문서 하나를 요약해 새 보고서로(2026-10-09 사용자: 자주 쓰는 기능) — 같은 엔진, 문서 간 병합 문구 대신 핵심 선별 문구."""
+    docs = [_doc(DOC1, "d1")]
+    prep = prepare(docs)
+    assert "긴 문서 1개입니다" in prep.system and "여러 개(날짜 오름차순" not in prep.system
+    assert "문서 1개," in prep.user
+    ids = {s: i for i, s in enumerate(prep.sentences, 1)}
+    find = lambda part: next(i for s, i in ids.items() if part in s)   # noqa: E731
+    reply = json.dumps({"title": "부품 수급 요약", "lines": [
+        {"m": "1.", "text": "현 황", "src": [find("26주")]},
+        {"m": "□", "text": "리드타임 : 26주 (전년 동기 18주)", "src": [find("26주")]}], "dropped": []}, ensure_ascii=False)
+    result = synthesize(docs, ask=_fake(reply), year=2026)
+    assert result.mode == "rewrite" and "26주 (전년 동기 18주)" in result.text
+    assert len(prepare([_doc(DOC1, "a"), _doc(DOC2, "b")]).system) != len(prep.system)   # 두 문서용 지시문은 따로
+
+
+def test_no_documents_is_an_error():
     with pytest.raises(ValueError):
-        synthesize([_doc(DOC1, "d1")], ask=_fake("{}"))
+        synthesize([], ask=_fake("{}"))
+
+
+def test_cli_has_summarize_and_synthesize_needs_two():
+    from typer.testing import CliRunner
+
+    from doc2report.cli import app
+    runner = CliRunner()
+    assert runner.invoke(app, ["summarize", "--help"]).exit_code == 0
+    result = runner.invoke(app, ["synthesize", "only_one.docx"])
+    assert result.exit_code != 0 and "summarize" in result.output
 
 
 def test_undated_documents_keep_input_order():
