@@ -318,7 +318,7 @@ function collectOptions() {
   const custom = { base: $("#cu-base").value };
   for (const k of CUSTOM_KEYS) custom[k] = getCustom(k);
   return {
-    task: radio("task") || "convert",
+    task: radio("task") || "synthesize",
     pages: $("#syn-pages").value,
     mode,
     llm: $("#use-llm").checked,
@@ -358,7 +358,7 @@ function restoreOptions() {
   if (!o) { syncPreset(); return syncMode(); }
   if (o.custom) for (const k of CUSTOM_KEYS) setCustom(k, o.custom[k]);
   setRadio("mode", o.mode || "auto");
-  setRadio("task", o.task || "convert");
+  setRadio("task", o.task || "synthesize");
   if (o.pages) $("#syn-pages").value = o.pages;
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
@@ -383,8 +383,8 @@ function syncMode() {
   $("#synth-llm-warn").classList.toggle("hidden", !synth || !state.status || state.status.llm.configured);
   const kind = count >= 2 ? "종합" : "요약";
   $("#task-hint").textContent = synth
-    ? `LLM이 핵심을 골라 정식보고서 형태로 새로 씁니다 — 지금 입력 ${count}개 → ${count ? kind : "요약(1개)·종합(2개 이상)"}`
-    : "원문 내용은 그대로 두고 사내 규격(말머리·줄 맞춤·표)에 맞춰 바꿉니다.";
+    ? `핵심만 골라 보고서로 새로 씁니다 — 입력 ${count}개 → ${count ? kind : "요약(1개)·종합(2개 이상)"}`
+    : "원문 내용은 그대로 두고, 말머리·줄 맞춤·표만 사내 규격에 맞게 바꿉니다.";
   $("#convert").textContent = synth ? (count >= 2 ? "종합 보고서 만들기" : "요약 보고서 만들기") : "변환하기";
   $("#doc-title").placeholder = synth ? "비우면 LLM이 내용에 맞게 정함" : "비우면 첫 번째 입력의 제목";
   const manual = radio("mode") === "manual";

@@ -371,7 +371,7 @@ def test_manual_options_order_and_marker_choice_on_screen():
     html = (static / "index.html").read_text(encoding="utf-8")
     js = (static / "app.js").read_text(encoding="utf-8")
     assert html.index("<legend>문장 다듬기</legend>") < html.index("<legend>말머리</legend>") < html.index("<legend>표</legend>")
-    assert "<span>원문 변환</span>" in html and "<span>보고서 작성</span>" in html and "syn-runs" not in html
+    assert "<span>서식 변환</span>" in html and "<span>보고서 작성</span>" in html and "syn-runs" not in html
     for value in ("keep", "fill", "unify"):
         assert f'name="marker" value="{value}"' in html
     assert "markerValues()" in js and "keep_leading_markers: m !== \"unify\"" in js

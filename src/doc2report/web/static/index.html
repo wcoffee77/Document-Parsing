@@ -37,25 +37,24 @@
       <textarea id="cf-urls" rows="3" placeholder="페이지 주소를 붙여 넣으세요. 여러 페이지는 한 줄에 하나씩.&#10;예) https://confluence.회사/pages/viewpage.action?pageId=123456"></textarea>
       <div class="row">
         <button class="btn" id="cf-add">목록에 추가</button>
-        <span class="hint">추가하면 제목을 불러와 주소가 맞는지 확인합니다.</span>
+        <span class="hint">추가하면 제목을 불러와 주소를 확인합니다.</span>
       </div>
       <label class="check"><input type="checkbox" id="cf-linked" checked> 본문에 연결된 페이지도 함께 불러오기
-        <span class="hint">"페이지 포함"·"발췌 포함"(펼치기 + 안에 넣은 것 포함)·"하위 페이지" 매크로가 가리키는 페이지와
-          첨부 Word 파일을 넣습니다. 불러온 문서는 새 쪽에서 그 문서 제목과 함께 시작합니다(발췌는 그 자리에).
-          최대 40쪽·4단계.</span></label>
+        <span class="hint">"페이지 포함"·"발췌 포함"·"하위 페이지" 매크로가 가리키는 페이지와 첨부 Word 파일을 넣습니다.
+          불러온 문서는 새 쪽에서 제목과 함께 시작합니다(발췌는 그 자리에). 최대 40쪽·4단계.</span></label>
     </div>
 
     <div class="panel hidden" data-panel="docx">
       <label class="drop" id="drop">
         <input type="file" id="file-input" accept=".docx" multiple hidden>
         <strong>Word(.docx) 파일을 여기에 끌어 놓거나 눌러서 고르세요</strong>
-        <span class="hint">여러 개 가능 · 50MB 이하 · .doc은 Word에서 .docx로 저장 후</span>
+        <span class="hint">여러 개 가능 · 50MB 이하 · .doc은 .docx로 저장 후 사용</span>
       </label>
     </div>
 
     <div class="panel hidden" data-panel="text">
       <input type="text" id="tx-title" placeholder="이 글의 제목 (선택)">
-      <textarea id="tx-body" rows="8" placeholder="메일·메신저·메모 내용을 그대로 붙여 넣으세요.&#10;한 줄이 한 문단이 됩니다. 엑셀에서 복사한 표(탭으로 나뉜 칸)는 표로 바뀝니다."></textarea>
+      <textarea id="tx-body" rows="8" placeholder="메일·메신저·메모를 그대로 붙여 넣으세요.&#10;한 줄이 한 문단이 되고, 엑셀에서 복사한 표는 표로 바뀝니다."></textarea>
       <div class="row"><button class="btn" id="tx-add">목록에 추가</button></div>
     </div>
 
@@ -66,19 +65,20 @@
 
   <!-- 2. 옵션 -->
   <section class="card" id="card-options">
-    <h2><span class="num">2</span>작업과 옵션</h2>
+    <h2><span class="num">2</span>문서 작성 옵션</h2>
     <div class="segmented" role="radiogroup" aria-label="작업">
-      <label><input type="radio" name="task" value="synthesize"><span>보고서 작성</span></label>
-      <label><input type="radio" name="task" value="convert" checked><span>원문 변환</span></label>
+      <label><input type="radio" name="task" value="synthesize" checked><span>보고서 작성</span></label>
+      <label><input type="radio" name="task" value="convert"><span>서식 변환</span></label>
     </div>
     <p class="hint" id="task-hint"></p>
 
     <!-- 요약·종합 (2026-10-09): 입력 1개 = 요약, 2개 이상 = 종합. LLM이 핵심을 골라 새로 쓰고 파이썬이 사실을 대조 -->
     <div id="synth-panel" class="hidden">
-      <p class="explain">입력 <b>1개</b>면 핵심만 뽑아 <b>요약</b>하고, <b>2개 이상</b>이면 주제별로 다시 구성해 <b>종합</b>합니다.
-        숫자·날짜·확정 여부는 원문과 대조해 틀리면 다시 쓰게 하고, 끝내 틀리면 원문 문장으로 되돌립니다.
-        문서마다 값이 다르면 날짜가 가장 나중인 문서의 값을 씁니다.</p>
-      <p class="hint warn-text hidden" id="synth-llm-warn">LLM이 설정되지 않았습니다 — 위의 사용자 등록에서 온프렘 LLM 주소·모델명을 넣어야 만들 수 있습니다.</p>
+      <p class="explain">입력한 글의 <b>핵심만 골라 사내 보고서(개조식)로 새로 씁니다.</b>
+        입력이 1개면 요약, 2개 이상이면 주제별로 묶어 종합합니다.
+        숫자·날짜·확정 여부는 원문과 대조하고, 틀리면 다시 쓰며, 끝내 틀리면 원문 문장을 씁니다.
+        문서마다 값이 다르면 날짜가 가장 늦은 문서의 값을 씁니다.</p>
+      <p class="hint warn-text hidden" id="synth-llm-warn">LLM이 등록되지 않았습니다. 사용자 등록에 온프렘 LLM 주소·모델명을 넣어야 작성할 수 있습니다.</p>
       <div class="grid2">
         <label>분량 (Word 쪽 수)
           <select id="syn-pages">
@@ -97,18 +97,17 @@
     </div>
 
     <div id="auto-panel">
-      <p class="explain">문서를 읽어 알맞은 규칙을 자동으로 정합니다. 직접 정하려면 "직접 선택"을 누르세요.</p>
+      <p class="explain">문서를 읽고 말머리·문장 규칙을 자동으로 정합니다. 직접 정하려면 "직접 선택"을 누르세요.</p>
     </div>
 
-    <p class="hint hidden" id="manual-hint">아래 항목은 "출력"에서 고른 문서 모양의 기본값으로 채워져 있습니다. 바꾸고 싶은 것만 고치세요.</p>
+    <p class="hint hidden" id="manual-hint">아래 항목은 "출력"에서 고른 문서 모양의 기본값입니다. 바꿀 것만 고치세요.</p>
 
     <fieldset id="polish-box">
       <legend>문장 다듬기</legend>
-      <p class="hint" id="polish-auto-hint">문장 규칙은 문서를 읽어 자동으로 정합니다.</p>
+      <p class="hint" id="polish-auto-hint">문장 규칙은 자동으로 정합니다.</p>
       <div id="polish-rules" class="checks"></div>
       <label class="check"><input type="checkbox" id="use-llm"> 맞춤법·어조 다듬기
-        <span class="hint">맞춤법·띄어쓰기를 고치고 정식 보고서 어조로 바꾸며 모호한 표현을 분명하게 합니다.
-          사실·수치와 문장 끝 형태는 그대로 두고, 제목과 표 안은 건드리지 않습니다. 시간이 더 걸립니다.</span></label>
+        <span class="hint">LLM이 맞춤법·띄어쓰기·어조를 고칩니다. 사실·수치와 문장 끝은 그대로 두고 제목·표 안은 건드리지 않습니다. 시간이 더 걸립니다.</span></label>
       <div class="row">
         <button class="btn ghost" id="llm-test">LLM 연결 시험</button>
         <span class="hint" id="llm-test-out"></span>
@@ -120,11 +119,11 @@
         <legend>말머리</legend>
         <div class="checks">
           <label class="check"><input type="radio" name="marker" value="keep"> 원문 말머리 그대로
-            <span class="hint">원문에 친 1. □ - ㆍ ① ※ 등을 그대로 두고, 말머리 없는 줄은 없는 채로 둠</span></label>
+            <span class="hint">원문의 말머리를 그대로 두고, 없는 줄도 없는 채로 둠</span></label>
           <label class="check"><input type="radio" name="marker" value="fill"> 원문 말머리 그대로 + 없는 줄에는 새로 만들기
-            <span class="hint">원문 말머리는 유지하고, 말머리가 없는 줄에만 보고서 말머리(□ - 등)를 붙임</span></label>
+            <span class="hint">원문 말머리는 두고, 없는 줄에만 보고서 말머리(□ - 등)를 붙임</span></label>
           <label class="check"><input type="radio" name="marker" value="unify"> 보고서 말머리로 통일
-            <span class="hint">원문 말머리를 지우고 모든 줄에 보고서 규칙(1. □ - ·)의 말머리를 새로 붙임</span></label>
+            <span class="hint">원문 말머리를 지우고 모든 줄에 보고서 말머리(1. □ - ·)를 붙임</span></label>
         </div>
       </fieldset>
 
@@ -138,9 +137,9 @@
     <fieldset id="merge-box">
       <legend>여러 입력 합치기</legend>
       <label class="check"><input type="radio" name="merge" value="continuous" checked> 쪽 구분 없이 이어 붙이기
-        <span class="hint">각 입력은 제목을 절 제목으로 넣어 구분</span></label>
+        <span class="hint">입력마다 제목을 절 제목으로 달아 구분</span></label>
       <label class="check"><input type="radio" name="merge" value="pages"> 입력마다 새 쪽에서 시작
-        <span class="hint">쪽마다 그 입력의 제목을 큰 제목(가운데·밑줄)으로. 위 "문서 제목"은 파일 이름에 씀</span></label>
+        <span class="hint">쪽 맨 위에 입력 제목을 큰 제목으로 씀. 위 "문서 제목"은 파일 이름에만 씀</span></label>
     </fieldset>
     </div>
   </section>
