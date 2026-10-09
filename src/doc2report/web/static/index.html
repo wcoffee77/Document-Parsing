@@ -48,7 +48,6 @@
       <label class="drop" id="drop">
         <input type="file" id="file-input" accept=".docx" multiple hidden>
         <strong>Word(.docx) 파일을 여기에 끌어 놓거나 눌러서 고르세요</strong>
-        <span class="warn-red">NASCA 해제된 일반 문서만 사용 가능</span>
         <span class="hint">여러 개 가능 · 50MB 이하 · .doc은 .docx로 저장 후 사용</span>
       </label>
     </div>
@@ -77,7 +76,7 @@
     <div id="synth-panel" class="hidden">
       <p class="explain">입력한 문서를 보고서 양식으로 변환합니다.<br>
         2개 이상 문서를 입력하면 핵심 내용을 요약해 하나의 보고서로 생성합니다.<br>
-        <span class="hint">(문서마다 숫자·값이 다르면 날짜가 가장 늦은 문서의 값을 사용)</span></p>
+        <span class="hint">(문서마다 숫자·값이 다르면 가장 최근 문서의 값을 사용)</span></p>
       <p class="hint warn-text hidden" id="synth-llm-warn">LLM이 등록되지 않았습니다. 사용자 등록에 온프렘 LLM 주소·모델명을 넣어야 작성할 수 있습니다.</p>
       <div class="grid2">
         <label>분량 (Word 쪽 수)
