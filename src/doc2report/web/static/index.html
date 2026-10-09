@@ -48,6 +48,7 @@
       <label class="drop" id="drop">
         <input type="file" id="file-input" accept=".docx" multiple hidden>
         <strong>Word(.docx) 파일을 여기에 끌어 놓거나 눌러서 고르세요</strong>
+        <span class="warn-red">NASCA 해제된 일반 문서만 사용 가능</span>
         <span class="hint">여러 개 가능 · 50MB 이하 · .doc은 .docx로 저장 후 사용</span>
       </label>
     </div>
@@ -74,10 +75,9 @@
 
     <!-- 요약·종합 (2026-10-09): 입력 1개 = 요약, 2개 이상 = 종합. LLM이 핵심을 골라 새로 쓰고 파이썬이 사실을 대조 -->
     <div id="synth-panel" class="hidden">
-      <p class="explain">입력한 글의 <b>핵심만 골라 사내 보고서(개조식)로 새로 씁니다.</b>
-        입력이 1개면 요약, 2개 이상이면 주제별로 묶어 종합합니다.
-        숫자·날짜·확정 여부는 원문과 대조하고, 틀리면 다시 쓰며, 끝내 틀리면 원문 문장을 씁니다.
-        문서마다 값이 다르면 날짜가 가장 늦은 문서의 값을 씁니다.</p>
+      <p class="explain">입력한 문서를 보고서 양식으로 변환합니다.<br>
+        2개 이상 문서를 입력하면 핵심 내용을 요약해 하나의 보고서로 생성합니다.<br>
+        <span class="hint">(문서마다 숫자·값이 다르면 날짜가 가장 늦은 문서의 값을 사용)</span></p>
       <p class="hint warn-text hidden" id="synth-llm-warn">LLM이 등록되지 않았습니다. 사용자 등록에 온프렘 LLM 주소·모델명을 넣어야 작성할 수 있습니다.</p>
       <div class="grid2">
         <label>분량 (Word 쪽 수)
@@ -130,7 +130,6 @@
       <fieldset>
         <legend>표</legend>
         <label class="check"><input type="checkbox" id="tbl-landscape"> 넓은 표는 가로 페이지 허용</label>
-        <label class="inline">표 위치 <select id="tbl-align"></select></label>
       </fieldset>
     </div>
 

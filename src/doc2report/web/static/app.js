@@ -187,8 +187,6 @@ async function loadProfiles() {
   $("#cu-base").innerHTML = opts;
 
   renderChecks("#polish-rules", data.schema.polish);
-  $("#tbl-align").innerHTML = data.schema.table_align.map((o) =>
-    `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
 }
 
 function renderChecks(target, rows) {
@@ -218,7 +216,6 @@ function applyRules(name) {
     box.checked = !!p.text[box.dataset.rule] && (!polishBox || p.polish !== "none");
   }
   $("#tbl-landscape").checked = !!p.tables.allow_landscape;
-  $("#tbl-align").value = p.tables.align;
 }
 
 const COMBO_KEYS = ["font", "title_size", "size", "line_spacing", "body_scale", "table_size", "table_scale"];
@@ -327,7 +324,7 @@ function collectOptions() {
     custom,
     polish: $$("#polish-rules [data-rule]").some((b) => b.checked) ? "rules" : "none",   // 하나라도 고르면 규칙 적용, 없으면 안 함
     text,
-    tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
+    tables: { allow_landscape: $("#tbl-landscape").checked },
     merge: radio("merge") || "continuous",
     linked: $("#cf-linked").checked,
     title: $("#doc-title").value.trim(),
@@ -357,13 +354,13 @@ function restoreOptions() {
   applyRules(o && o.preset && o.preset !== "custom" && known(o.preset) ? o.preset : (o && o.custom && known(o.custom.base) ? o.custom.base : first));
   if (!o) { syncPreset(); return syncMode(); }
   if (o.custom) for (const k of CUSTOM_KEYS) setCustom(k, o.custom[k]);
-  setRadio("mode", o.mode || "auto");
-  setRadio("task", o.task || "synthesize");
+  setRadio("mode", "auto");   // 실행할 때마다 자동 판단으로 시작
+  setRadio("task", "synthesize");   // 실행할 때마다 보고서 작성으로 시작
   if (o.pages) $("#syn-pages").value = o.pages;
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.text && "keep_leading_markers" in o.text) setMarkerMode(!!o.text.keep_leading_markers, !!o.text.auto_markers);
-  if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
+  if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape }
   setRadio("merge", o.merge || (o.page_breaks ? "pages" : "continuous"));
   $("#cf-linked").checked = o.linked !== false;
   setRadio("date", o.date_mode ?? "");
@@ -383,7 +380,7 @@ function syncMode() {
   $("#synth-llm-warn").classList.toggle("hidden", !synth || !state.status || state.status.llm.configured);
   const kind = count >= 2 ? "종합" : "요약";
   $("#task-hint").textContent = synth
-    ? `핵심만 골라 보고서로 새로 씁니다 — 입력 ${count}개 → ${count ? kind : "요약(1개)·종합(2개 이상)"}`
+    ? ""
     : "원문 내용은 그대로 두고, 말머리·줄 맞춤·표만 사내 규격에 맞게 바꿉니다.";
   $("#convert").textContent = synth ? (count >= 2 ? "종합 보고서 만들기" : "요약 보고서 만들기") : "변환하기";
   $("#doc-title").placeholder = synth ? "비우면 LLM이 내용에 맞게 정함" : "비우면 첫 번째 입력의 제목";
