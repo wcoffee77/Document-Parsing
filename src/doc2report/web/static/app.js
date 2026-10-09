@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 11;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 12;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -202,8 +202,11 @@ function renderChecks(target, rows) {
 function applyRules(name) {
   const p = state.profiles[name];
   if (!p) return;
-  for (const box of $$("[data-rule]")) box.checked = !!p.text[box.dataset.rule];
-  setRadio("polish", p.polish);
+  // 서식이 문구를 안 고치는 것이 원칙(polish: none — 정식보고서·Confluence 변환)이면 다듬기 항목은 모두 꺼진 채로 시작한다
+  for (const box of $$("[data-rule]")) {
+    const polishBox = !!box.closest("#polish-rules");
+    box.checked = !!p.text[box.dataset.rule] && (!polishBox || p.polish !== "none");
+  }
   $("#tbl-landscape").checked = !!p.tables.allow_landscape;
   $("#tbl-align").value = p.tables.align;
 }
@@ -312,7 +315,7 @@ function collectOptions() {
     allow_llm: $("#use-llm").checked,
     preset: radio("preset") || state.schema.presets[0],
     custom,
-    polish: radio("polish"),
+    polish: $$("#polish-rules [data-rule]").some((b) => b.checked) ? "rules" : "none",   // 하나라도 고르면 규칙 적용, 없으면 안 함
     text,
     tables: { allow_landscape: $("#tbl-landscape").checked, align: $("#tbl-align").value },
     merge: radio("merge") || "continuous",
@@ -349,7 +352,6 @@ function restoreOptions() {
   if (o.pages) $("#syn-pages").value = o.pages;
   if (o.runs) $("#syn-runs").value = String(o.runs);
   $("#use-llm").checked = !!(o.llm ?? o.allow_llm);
-  if (o.polish) setRadio("polish", o.polish === "llm" ? "rules" : o.polish);  // 예전 "규칙 + LLM"
   for (const box of $$("[data-rule]")) if (o.text && box.dataset.rule in o.text) box.checked = o.text[box.dataset.rule];
   if (o.tables) { $("#tbl-landscape").checked = !!o.tables.allow_landscape; if (o.tables.align) $("#tbl-align").value = o.tables.align; }
   setRadio("merge", o.merge || (o.page_breaks ? "pages" : "continuous"));
@@ -378,8 +380,9 @@ function syncMode() {
   const manual = radio("mode") === "manual";
   $("#auto-panel").classList.toggle("hidden", manual);
   $("#manual-panel").classList.toggle("hidden", !manual);
-  // 문장 다듬기 "안 함"이면 세부 규칙은 아예 보이지 않게(2026-09-29 사용자)
-  $("#polish-rules").classList.toggle("hidden", radio("polish") === "none");
+  // 문장 규칙 체크박스는 직접 선택에서만 보인다(자동 판단은 문서를 읽어 정함)
+  $("#polish-rules").classList.toggle("hidden", !manual);
+  $("#polish-auto-hint").classList.toggle("hidden", manual);
   $("#merge-box").classList.toggle("hidden", state.inputs.length < 2);
   $("#date-pick").classList.toggle("hidden", radio("date") !== "pick");
 }
@@ -534,7 +537,7 @@ function finish(job) {
   const decision = r.decision ? `<div class="decision"><b>자동 판단 결과</b><ul>${
     r.decision.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
   const notes = r.notes.filter((n) => !n.startsWith("자동 판단:"));
-  const polishName = ({ none: "안 함", rules: "파이썬 규칙" }[r.polish] || r.polish) + (r.llm ? " + LLM" : "");
+  const polishName = ({ none: "안 함", rules: "규칙 적용" }[r.polish] || r.polish) + (r.llm ? " + 맞춤법·어조" : "");
   const synth = r.task === "synthesize";
   const line = synth
     ? `서식 ${esc(r.profile)} · LLM ${esc(r.kind)}${r.mode === "rewrite" ? "" : " <b class=\"bad\">(실패 — 원문 나열)</b>"} · 분량 목표 ${esc(r.pages)}쪽 · 표 ${r.tables}개`
@@ -615,7 +618,7 @@ $("#llm-test").addEventListener("click", async () => {
 $("#cu-base").addEventListener("change", (ev) => { fillCustom(ev.target.value); syncPreset(); applyRules(ev.target.value); syncMode(); });
 document.addEventListener("change", (ev) => {
   if (ev.target.name === "task") syncMode();
-  if (ev.target.name === "mode" || ev.target.name === "polish" || ev.target.name === "date") syncMode();
+  if (ev.target.name === "mode" || ev.target.name === "date") syncMode();
   if (ev.target.name === "preset") { syncPreset(); applyRules(ev.target.value === "custom" ? $("#cu-base").value : ev.target.value); syncMode(); }
 });
 
