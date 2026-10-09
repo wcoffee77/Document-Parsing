@@ -94,6 +94,10 @@ git clone <저장소 주소> doc2report
 cd doc2report
 ```
 
+받은 직후 **한 번만** `exclude_samples.bat`을 실행하세요. 시험용 샘플(`samples\`, 약 30개 문서)을 이 PC의 폴더에서 숨깁니다
+(저장소에서 지우는 것이 아니라 내 폴더에서만 숨기는 것이라 `git pull`은 그대로 되고 `git status`에도 안 뜹니다).
+직접 명령으로 하려면 `git sparse-checkout set --no-cone "/*" "!/samples/"`, 다시 받고 싶으면 `git sparse-checkout disable`.
+
 그 다음 설치 묶음 zip 안의 **`runtime` 폴더만** 이 폴더에 복사하면 `start_webapp.bat`·`doctor.bat`이 그 파이썬을
 쓴다(설치 끝). 이후 업데이트는 `git checkout main` → `git pull origin main` → 검은 창을 닫고 다시 실행.
 패키지 구성이 바뀐 버전이면 `doctor.bat`이 "필요한 패키지가 빠짐"으로 알려 준다 — 그때만 새 묶음의

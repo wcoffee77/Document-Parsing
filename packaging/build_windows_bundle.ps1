@@ -31,7 +31,8 @@ $stage = Join-Path $root "$OutDir\doc2report"
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 # 1) 앱 파일 — git이 추적하는 파일만(개인 토큰 스크립트·결과 폴더·가상환경이 섞이지 않게)
-git archive --format=zip -o "$OutDir\app.zip" HEAD
+# 시험용 샘플(samples/)은 배포에 넣지 않는다(저장소에는 테스트용으로 남아 있음)
+git archive --format=zip -o "$OutDir\app.zip" HEAD -- . ":(exclude)samples"
 Expand-Archive "$OutDir\app.zip" $stage
 Remove-Item "$OutDir\app.zip"
 foreach ($drop in @("tests", ".github", "tools", "packaging", "uv.lock", ".gitignore", ".gitattributes")) {
