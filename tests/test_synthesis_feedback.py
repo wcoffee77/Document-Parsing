@@ -205,3 +205,15 @@ def test_synthesis_without_title_gets_a_fallback_title():
         return json.dumps(body, ensure_ascii=False)
     result = synthesize(docs, ask=broken_title, year=2026)
     assert result.title == "부품 대응 계획"                                     # 가장 최근(10. 2) 문서 제목
+
+
+def test_flattened_table_lines_are_restored_to_tables():
+    """2026-10-09: LLM이 풀어 쓴 표 문장을 글 줄로 옮기면 표로 되돌린다."""
+    from doc2report.drafting import Line, restore_flattened_tables
+    lines = [Line("□", "단계별 흐름", [1]),
+             Line("-", "표 '항목' = audit log -> 기록 내용 = 전체 이력; 보관 = 5년", [2]),
+             Line("-", "표 '항목' = 승인 이력 → 기록 내용 = 결재 전체; 보관 = 3년", [3])]
+    notes = restore_flattened_tables(lines)
+    assert len(lines) == 2 and lines[1].m == "표" and lines[1].src == [2, 3]
+    assert lines[1].rows == [["항목", "기록 내용", "보관"], ["audit log", "전체 이력", "5년"], ["승인 이력", "결재 전체", "3년"]]
+    assert notes and "표로 되돌림" in notes[0]

@@ -920,6 +920,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         notes += [f"최종 점검에서 남음: {item}" for item in leftover]
     except Exception:  # noqa: BLE001
         pass
+    notes += restore_flattened_tables(result.lines)
     notes += orient_tables(result.lines)
     if synth is None:   # 종합은 같은 항목으로 여러 후보를 비교하는 표를 그대로 둔다(2026-10-08 사용자: 대체 공급사 3곳 비교는 표)
         notes += tables_to_ordinals(result.lines)
@@ -1416,6 +1417,56 @@ def draft_best(text: str, runs: int = 1, ask: Ask | None = None, mode: str = "re
 
 _ATTRIBUTE_HEAD = re.compile(r"장점|단점|효과|기대|이점|고려|조건|한계|제약|비용|리스크|위험|난점|내용|요건|일정|개요|방식|시행|기간")
 _OPTION_HEAD = re.compile(r"안\)|안$|^\(?\d안|첫째|둘째|셋째|[①-⑳]|^[A-C]안")
+
+
+_FLAT_TABLE = re.compile(r"^표\s*'([^']*)'\s*=\s*(.*?)\s*(?:→|->)\s*(.+)$")
+_FLAT_PAIR = re.compile(r"\s*([^=;]+?)\s*=\s*([^;]*?)\s*(?:;|$)")
+
+
+def restore_flattened_tables(lines: list[Line]) -> list[str]:
+    """원문 표는 LLM에 "표 '구분' = 행이름 → 열1=값; 열2=값" 한 문장으로 풀어 보낸다(synthesis._table_sentences). LLM이 이 문장을
+    표 줄이 아니라 글 줄로 그대로 옮기면 "표 '항목' = audit log -> 기록 내용 = …"이 문서에 찍힌다(2026-10-09 사용자). 같은 머리말로
+    이어진 그런 줄들을 다시 표로 묶는다."""
+    notes: list[str] = []
+    out: list[Line] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = None if line.rows is not None else _FLAT_TABLE.match(line.text.strip())
+        if not m:
+            out.append(line)
+            i += 1
+            continue
+        head0 = m.group(1)
+        run: list[tuple[str, list[tuple[str, str]]]] = []
+        src: list[int] = []
+        j = i
+        while j < len(lines) and lines[j].rows is None:
+            mm = _FLAT_TABLE.match(lines[j].text.strip())
+            if not mm or mm.group(1) != head0:
+                break
+            pairs = [(a.strip(), b.strip()) for a, b in _FLAT_PAIR.findall(mm.group(3)) if a.strip()]
+            run.append((mm.group(2).strip(), pairs))
+            src += [x for x in lines[j].src if x not in src]
+            j += 1
+        cols: list[str] = []
+        for _, pairs in run:
+            for name, _v in pairs:
+                if name not in cols:
+                    cols.append(name)
+        if not cols:
+            out.extend(lines[i:j])
+            i = j
+            continue
+        rows = [[head0 or "구분"] + cols]
+        for label, pairs in run:
+            values = dict(pairs)
+            rows.append([label] + [values.get(c, "") for c in cols])
+        out.append(Line("표", "", src, rows))
+        notes.append(f"구조 보정: 풀어 쓴 표 줄 {j - i}개를 표로 되돌림('{head0 or '구분'}')")
+        i = j
+    lines[:] = out
+    return notes
 
 
 def orient_tables(lines: list[Line]) -> list[str]:
