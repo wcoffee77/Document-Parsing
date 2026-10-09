@@ -52,8 +52,8 @@ SYNTH_RULES = """[종합 규칙 — 여러 문서를 새 보고서 하나로]
   ③ 계획·대응: 실행 내용·일정. 비용·효과는 별도 절로 떼지 않고, 그 방안을 택한 근거로 방안 아래 '-'에 씁니다.
   ④ 결정 요청(필요할 때만): 승인·결정할 일 2~3줄.
 - 경과·현황은 간결하게(대표 지표만), 결정과 후속 조치가 담긴 부분은 자세히 씁니다. title은 비우지 않고, 핵심만 함축한 명사형으로 **반드시 한 줄**(공백 포함 20자 이내)로 씁니다.
-- 원문 문장 중 "표 '구분' = 행이름 → 열=값; 열=값" 꼴은 원문 표를 한 행씩 풀어 쓴 것입니다. 이 글을 줄 글로 옮기지 말고 {"m": "표", "rows": …}
-  표 줄로 다시 만듭니다(첫 행은 머리말, 이후 행마다 행이름과 열 값).
+- 원문 표의 모양을 따라 그리지 않습니다. 표 안 내용도 다른 문장처럼 핵심만 골라 새로 씁니다. 표 줄은 같은 항목으로 대안을 비교할 때만 쓰고,
+  원문 문장의 틀('행이름 : 열 값, 열 값')을 글 줄이나 표 칸에 그대로 옮기지 않습니다.
 - 같은 사실이 여러 문서에 있으면 한 번만 쓰고 src에는 근거 문장을 모두 적습니다.
 - 같은 항목의 값이 문서마다 다르면 **가장 나중 문서의 값**을 씁니다. 바뀐 것을 남길 때는 '항목 : 기존 A → B (사유)'로 씁니다.
   화살표(→)는 **두 값 사이에만** 씁니다. 사유·원인은 괄호에 따로 씁니다('B (기존 A → 사유)'처럼 화살표 뒤에 사유를 쓰면 안 됩니다).
@@ -148,7 +148,8 @@ def _cell_text(cell) -> str:
 
 
 def _table_sentences(table: Table) -> list[str]:
-    """표는 행마다 한 문장: "구분 '비용': (1안)=…; (2안)=…" — 칸 값은 그대로 두고 어느 열의 값인지만 붙인다."""
+    """표는 행마다 한 문장: "행이름 : 열 값, 열 값" — 보고서에 표 틀이 그대로 옮겨지지 않도록 평범한 문장으로 보낸다."""
+    from .drafting import plain_table_sentence
     rows = [[_cell_text(c) for c in row.cells] for row in table.rows]
     if len(rows) < 2:
         return [" | ".join(r) for r in rows if any(r)]
@@ -157,9 +158,8 @@ def _table_sentences(table: Table) -> list[str]:
     for row in body:
         if not any(row):
             continue
-        label = row[0]
-        pairs = "; ".join(f"{head[i] if i < len(head) and head[i] else f'열{i}'}={v}" for i, v in enumerate(row) if i and v)
-        out.append(f"표 '{head[0] or '구분'}' = {label} → {pairs}" if label else f"표: {pairs}")
+        pairs = [(head[i] if i < len(head) and head[i] else f"열{i}", v) for i, v in enumerate(row) if i and v]
+        out.append(plain_table_sentence(row[0], pairs))
     return out
 
 

@@ -207,13 +207,20 @@ def test_synthesis_without_title_gets_a_fallback_title():
     assert result.title == "부품 대응 계획"                                     # 가장 최근(10. 2) 문서 제목
 
 
-def test_flattened_table_lines_are_restored_to_tables():
-    """2026-10-09: LLM이 풀어 쓴 표 문장을 글 줄로 옮기면 표로 되돌린다."""
-    from doc2report.drafting import Line, restore_flattened_tables
-    lines = [Line("□", "단계별 흐름", [1]),
-             Line("-", "표 '항목' = audit log -> 기록 내용 = 전체 이력; 보관 = 5년", [2]),
-             Line("-", "표 '항목' = 승인 이력 → 기록 내용 = 결재 전체; 보관 = 3년", [3])]
-    notes = restore_flattened_tables(lines)
-    assert len(lines) == 2 and lines[1].m == "표" and lines[1].src == [2, 3]
-    assert lines[1].rows == [["항목", "기록 내용", "보관"], ["audit log", "전체 이력", "5년"], ["승인 이력", "결재 전체", "3년"]]
-    assert notes and "표로 되돌림" in notes[0]
+def test_flattened_table_frames_never_reach_the_report():
+    """2026-10-09: 원문 표 틀(표 '…' = … -> …)은 글 줄이든 표 칸이든 보고서에 남지 않는다."""
+    from doc2report.drafting import Line, scrub_flattened_tables
+    lines = [Line("-", "표 '항목' = audit log -> 기록 내용 = 전체 이력; 보관 = 5년", [2]),
+             Line("표", "", [3], [["구분", "내용"], ["표 '구분' = 기간 → Phase 1 = 4~6주", "x"]])]
+    notes = scrub_flattened_tables(lines)
+    assert lines[0].text == "audit log : 기록 내용 전체 이력, 보관 5년"
+    assert lines[1].rows[1][0] == "기간 : Phase 1 4~6주" and len(notes) == 2
+    assert not any("표 '" in (l.text or "") for l in lines)
+
+
+def test_source_table_sentences_do_not_carry_a_table_frame():
+    from doc2report.ir import Cell, Paragraph, Row, Table
+    from doc2report.synthesis import _table_sentences
+    def cell(t): return Cell(blocks=[Paragraph(runs=[__import__("doc2report.ir", fromlist=["Run"]).Run(t)])])
+    tbl = Table(rows=[Row(cells=[cell("항목"), cell("기록 내용")]), Row(cells=[cell("audit log"), cell("전체 이력")])])
+    assert _table_sentences(tbl) == ["audit log : 기록 내용 전체 이력"]

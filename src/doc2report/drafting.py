@@ -920,7 +920,7 @@ def rewrite(text: str, ask: Ask | None = None, year: int | None = None,
         notes += [f"최종 점검에서 남음: {item}" for item in leftover]
     except Exception:  # noqa: BLE001
         pass
-    notes += restore_flattened_tables(result.lines)
+    notes += scrub_flattened_tables(result.lines)
     notes += orient_tables(result.lines)
     if synth is None:   # 종합은 같은 항목으로 여러 후보를 비교하는 표를 그대로 둔다(2026-10-08 사용자: 대체 공급사 3곳 비교는 표)
         notes += tables_to_ordinals(result.lines)
@@ -1419,53 +1419,41 @@ _ATTRIBUTE_HEAD = re.compile(r"장점|단점|효과|기대|이점|고려|조건|
 _OPTION_HEAD = re.compile(r"안\)|안$|^\(?\d안|첫째|둘째|셋째|[①-⑳]|^[A-C]안")
 
 
-_FLAT_TABLE = re.compile(r"^표\s*'([^']*)'\s*=\s*(.*?)\s*(?:→|->)\s*(.+)$")
+_FLAT_TABLE = re.compile(r"^\s*표\s*'([^']*)'\s*=\s*(.*?)\s*(?:→|->)\s*(.+)$")
 _FLAT_PAIR = re.compile(r"\s*([^=;]+?)\s*=\s*([^;]*?)\s*(?:;|$)")
 
 
-def restore_flattened_tables(lines: list[Line]) -> list[str]:
-    """원문 표는 LLM에 "표 '구분' = 행이름 → 열1=값; 열2=값" 한 문장으로 풀어 보낸다(synthesis._table_sentences). LLM이 이 문장을
-    표 줄이 아니라 글 줄로 그대로 옮기면 "표 '항목' = audit log -> 기록 내용 = …"이 문서에 찍힌다(2026-10-09 사용자). 같은 머리말로
-    이어진 그런 줄들을 다시 표로 묶는다."""
+def plain_table_sentence(label: str, pairs: list[tuple[str, str]]) -> str:
+    """원문 표의 한 행을 LLM에 보내는(그리고 새어 나온 풀어쓴 줄을 고치는) 자연스러운 문장: "행이름 : 열 값, 열 값"."""
+    body = ", ".join(f"{name} {value}".strip() for name, value in pairs if value)
+    return f"{label} : {body}" if label and body else (label or body)
+
+
+def _unflatten(text: str) -> str | None:
+    m = _FLAT_TABLE.match(text)
+    if not m:
+        return None
+    pairs = [(a.strip(), b.strip()) for a, b in _FLAT_PAIR.findall(m.group(3)) if a.strip()]
+    return plain_table_sentence(m.group(2).strip(), pairs) or None
+
+
+def scrub_flattened_tables(lines: list[Line]) -> list[str]:
+    """보고서 작성은 원문 표를 따라 그리는 것이 아니라 핵심을 새로 쓰는 일이다(2026-10-09 사용자). LLM이 원문 표를 풀어 보낸 문장의 틀
+    ("표 '항목' = … -> 열 = 값")을 글 줄이나 표 칸에 그대로 옮기면 그 틀을 없애고 평범한 문장("행이름 : 열 값, 열 값")으로 바꾼다."""
     notes: list[str] = []
-    out: list[Line] = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        m = None if line.rows is not None else _FLAT_TABLE.match(line.text.strip())
-        if not m:
-            out.append(line)
-            i += 1
+    for line in lines:
+        if line.rows is not None:
+            for row in line.rows:
+                for k, cell in enumerate(row):
+                    fixed = _unflatten(cell)
+                    if fixed is not None:
+                        row[k] = fixed
+                        notes.append("구조 보정: 표 칸에 새어 나온 원문 표 틀을 문장으로 고침")
             continue
-        head0 = m.group(1)
-        run: list[tuple[str, list[tuple[str, str]]]] = []
-        src: list[int] = []
-        j = i
-        while j < len(lines) and lines[j].rows is None:
-            mm = _FLAT_TABLE.match(lines[j].text.strip())
-            if not mm or mm.group(1) != head0:
-                break
-            pairs = [(a.strip(), b.strip()) for a, b in _FLAT_PAIR.findall(mm.group(3)) if a.strip()]
-            run.append((mm.group(2).strip(), pairs))
-            src += [x for x in lines[j].src if x not in src]
-            j += 1
-        cols: list[str] = []
-        for _, pairs in run:
-            for name, _v in pairs:
-                if name not in cols:
-                    cols.append(name)
-        if not cols:
-            out.extend(lines[i:j])
-            i = j
-            continue
-        rows = [[head0 or "구분"] + cols]
-        for label, pairs in run:
-            values = dict(pairs)
-            rows.append([label] + [values.get(c, "") for c in cols])
-        out.append(Line("표", "", src, rows))
-        notes.append(f"구조 보정: 풀어 쓴 표 줄 {j - i}개를 표로 되돌림('{head0 or '구분'}')")
-        i = j
-    lines[:] = out
+        fixed = _unflatten(line.text)
+        if fixed is not None:
+            line.text = fixed
+            notes.append("구조 보정: 원문 표 틀(표 '…' = … -> …)이 그대로 찍힌 줄을 문장으로 고침")
     return notes
 
 
