@@ -168,7 +168,10 @@ def test_cli_has_llm_and_shorten_flags():
 
     from doc2report.cli import app
 
+    import re
+
     out = CliRunner().invoke(app, ["convert", "--help"]).output
+    out = re.sub(r"\x1b\[[0-9;]*m", "", out)  # Windows 콘솔에서는 옵션 이름에 색상 코드가 끼어 들어간다
     assert "--llm" in out and "--shorten" in out
 
 
