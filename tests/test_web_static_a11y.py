@@ -56,3 +56,41 @@ def test_p2_layout_rules():
     assert "overflow-wrap: anywhere" in CSS and 'class="acts"' in JS
     # 모바일 탭은 한 줄
     assert re.search(r"\.tab\s*\{[^}]*white-space:\s*nowrap", CSS)
+
+
+def test_dark_mode_uses_tokens_not_hardcoded_colors():
+    # 다크 모드(prefers-color-scheme)가 있고, 색은 :root 토큰으로만 쓴다(하드코딩이 남으면 다크에서 흰 상자가 생긴다)
+    assert "prefers-color-scheme: dark" in CSS
+    assert "color-scheme: light dark" in CSS and 'name="color-scheme"' in HTML
+    body = CSS.split("* { box-sizing", 1)[1]            # :root·다크 블록 뒤의 규칙들
+    leftovers = [m for m in re.findall(r"#[0-9a-fA-F]{3,6}\b", body)]
+    # 흰 글자(#fff)와 파일 종류 배지(진한 바탕 + 흰 글자)는 두 모드 공통이라 허용
+    allowed = {"#fff", "#2b579a", "#c43e1c", "#444", "#6b7280"}
+    assert not [c for c in leftovers if c.lower() not in allowed], leftovers
+
+
+def test_dark_palette_text_contrast():
+    def lum(h):
+        h = h.lstrip("#")
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+    def ratio(a, b):
+        hi, lo = sorted((lum(a), lum(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def tokens(block):
+        return dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{6})", block))
+
+    dark = tokens(CSS.split("prefers-color-scheme: dark")[1].split("}")[0])
+    light = tokens(CSS.split("@media (prefers-color-scheme: dark)")[0])
+    pairs = [("ink", "card"), ("ink", "bg"), ("ink", "surface"), ("muted", "card"), ("muted", "bg"), ("muted", "surface"),
+             ("muted", "chip"), ("accent", "card"), ("accent", "accent-soft"), ("ok", "ok-soft"), ("warn", "warn-soft"),
+             ("bad", "bad-soft"), ("ink", "code")]
+    for mode, t in (("dark", dark), ("light", light)):
+        for fg, bg in pairs:
+            if fg in t and bg in t:
+                assert ratio(t[fg], t[bg]) >= 4.5, (mode, fg, bg, round(ratio(t[fg], t[bg]), 2))
+    # 흰 글자가 올라가는 바탕(버튼·알림)
+    assert ratio("#ffffff", dark["accent-fill"]) >= 4.5 and ratio("#ffffff", light["bad-fill"]) >= 4.5
