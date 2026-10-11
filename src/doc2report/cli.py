@@ -92,6 +92,7 @@ def _synthesis_command(sources, output, profile, pages, title, date, shorten, ru
 
     from .account import load_and_apply
     from .drafting import brief, problem_count
+    from .parsers.docx_reader import UnreadableDocx
     from .pipeline import convert_many, load_document
     from .synthesis import brief_source, flatten, prepare, synthesize as run_synthesis
 
@@ -104,7 +105,11 @@ def _synthesis_command(sources, output, profile, pages, title, date, shorten, ru
     page_range = (int(found.group(1)), int(found.group(2) or found.group(1)))
     docs, load_notes = [], []
     for source in sources:
-        loaded, notes = load_document(source)
+        try:
+            loaded, notes = load_document(source)
+        except UnreadableDocx as exc:
+            typer.echo(f"[오류] {exc}", err=True)
+            raise typer.Exit(1) from None
         docs.append(flatten(loaded, Path(source).stem if "://" not in source else source))
         load_notes += [f"{source}: {n}" for n in notes]
     year = None
@@ -211,6 +216,7 @@ def convert(
                                       help="Confluence 본문 링크(다른 페이지의 책갈피 포함)가 가리키는 내용도 불러옴"),
 ) -> None:
     from .account import load_and_apply
+    from .parsers.docx_reader import UnreadableDocx
 
     load_and_apply()  # 웹 화면에서 등록한 사용자의 토큰·LLM 설정(있으면 환경변수보다 우선)
     out = output or Path(_default_output(source))
@@ -228,8 +234,12 @@ def convert(
         typer.echo(f"서식 저장: {save_profile}")
 
     def once() -> None:
-        result = run_convert(source, out, effective, polish=polish, date=date, linked=not no_linked,
-                             follow_links=follow_links, llm=True if llm else None, shorten=shorten)
+        try:
+            result = run_convert(source, out, effective, polish=polish, date=date, linked=not no_linked,
+                                 follow_links=follow_links, llm=True if llm else None, shorten=shorten)
+        except UnreadableDocx as exc:
+            typer.echo(f"[오류] {exc}", err=True)
+            raise typer.Exit(1) from None
         typer.echo(f"[완료] {out}  (표 {len(result.layouts)}개, 문구 수정 {len(result.changes)}건)")
         for note in result.notes:
             typer.echo(f"  · {note}")

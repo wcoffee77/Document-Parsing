@@ -293,6 +293,8 @@ def convert_document(
     renderer = DocxRenderer(prof, layouts, flow, shortener=shortener)
 
     notes = list(notes or [])
+    if not doc.blocks and not doc.title:
+        notes.append("변환할 내용이 없습니다 — 입력이 비었거나 공백·보이지 않는 글자뿐입니다(빈 문서가 만들어짐)")
     if output is None:
         result = renderer.render(doc)
         notes.extend(result.notes)

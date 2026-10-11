@@ -40,8 +40,20 @@ class ParsedDocx:
     notes: list[str] = field(default_factory=list)
 
 
+class UnreadableDocx(ValueError):
+    """Word 파일로 읽을 수 없는 파일(손상됐거나 문서보안 DRM이 걸림)."""
+
+
 def parse_docx(path: str | Path, *, source: str | None = None,
                image_dir: str | Path | None = None) -> ParsedDocx:
+    try:
+        with open(path, "rb") as handle:
+            signature = handle.read(2)
+    except OSError as exc:
+        raise UnreadableDocx(f"파일을 열 수 없습니다: {path} ({exc.strerror or exc})") from exc
+    if signature != b"PK":  # .docx는 zip이다 — DRM이 걸린 파일은 zip이 아니라서 못 읽는다
+        raise UnreadableDocx(f"Word 파일로 읽을 수 없습니다: {path} — 손상됐거나 문서보안(DRM)이 걸린 파일입니다. "
+                             "Word에서 열어 다시 저장하거나, 내용을 글 붙여넣기(.txt)로 넣어 주세요")
     reader = _Reader(open_docx(str(path)), Path(image_dir) if image_dir else Path(path).parent)
     blocks = reader.blocks(reader.docx.element.body)
     title = reader.title
