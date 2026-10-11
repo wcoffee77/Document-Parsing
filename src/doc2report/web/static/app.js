@@ -632,9 +632,9 @@ function fileRow(f) {
     ? `<a class="btn tiny" href="${href}" target="_blank" rel="noopener">브라우저로 보기</a>` : "";
   return `<div class="file"><span class="badge ${f.kind}">${KIND_NAME[f.kind] || f.kind}</span>
     <span class="fname">${esc(f.name)}</span>
-    <button class="btn tiny" data-open="${esc(f.name)}">열기</button>${view}
+    <span class="acts"><button class="btn tiny" data-open="${esc(f.name)}">열기</button>${view}
     <a class="btn tiny" href="${href}?download=1" download>내려받기</a>
-    <button class="btn tiny" data-folder="${esc(f.name)}" title="탐색기에서 이 파일 위치 열기">폴더</button></div>`;
+    <button class="btn tiny" data-folder="${esc(f.name)}" title="탐색기에서 이 파일 위치 열기">폴더</button></span></div>`;
 }
 
 document.addEventListener("click", async (ev) => {

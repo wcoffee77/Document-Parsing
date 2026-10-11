@@ -41,3 +41,18 @@ def test_small_text_and_touch_targets():
     assert not re.search(r"font-size:\s*1[01]px", CSS)
     assert re.search(r"\.check\s*\{[^}]*min-height:\s*32px", CSS)
     assert re.search(r"\.btn\.tiny\s*\{[^}]*min-height:\s*32px", CSS)
+
+
+def test_p2_layout_rules():
+    # 실행 버튼과 안내는 한 덩어리(하단 고정 바)
+    bar = HTML.split('class="actionbar"')[1].split("</div>")[0]
+    assert 'id="convert-note"' in bar and 'id="convert"' in bar
+    assert re.search(r"\.actionbar\s*\{[^}]*position:\s*sticky", CSS)
+    # 카드가 옆 카드 높이로 늘어나 빈 흰 공간이 생기지 않게
+    assert re.search(r"\.layout\s*\{[^}]*align-items:\s*start", CSS)
+    # 체크박스·라디오 줄은 grid — 글자가 길어 줄이 바뀌어도 버튼과 어긋나지 않는다
+    assert re.search(r"\.check\s*\{[^}]*display:\s*grid", CSS)
+    # 파일 카드는 이름 줄 + 버튼 줄(파일명이 'x' 한 글자만 따로 남던 것)
+    assert "overflow-wrap: anywhere" in CSS and 'class="acts"' in JS
+    # 모바일 탭은 한 줄
+    assert re.search(r"\.tab\s*\{[^}]*white-space:\s*nowrap", CSS)
