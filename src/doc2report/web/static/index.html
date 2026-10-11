@@ -23,18 +23,27 @@
 
 <div id="banner" class="banner hidden" role="alert"></div>
 
+<div id="setup-hint" class="setup-hint hidden" role="status">
+  <span><b>사용자 등록 전입니다.</b> 서식 변환(Word·붙여넣은 글)은 등록 없이 바로 쓸 수 있고,
+    Confluence 가져오기와 보고서 작성(LLM)에는 등록이 필요합니다.</span>
+  <button class="btn" id="setup-open" type="button">사용자 등록</button>
+</div>
+
 <main class="layout">
   <!-- 1. 입력 -->
   <section class="card" id="card-input">
     <h2><span class="num">1</span>입력</h2>
-    <div class="tabs" role="tablist">
-      <button class="tab active" data-tab="confluence" role="tab">Confluence 주소</button>
-      <button class="tab" data-tab="docx" role="tab">Word 파일</button>
-      <button class="tab" data-tab="text" role="tab">글 붙여넣기</button>
+    <div class="tabs" role="tablist" aria-label="입력 방법">
+      <button class="tab active" data-tab="confluence" role="tab" id="tab-confluence" type="button"
+        aria-selected="true" aria-controls="panel-confluence" tabindex="0">Confluence 주소</button>
+      <button class="tab" data-tab="docx" role="tab" id="tab-docx" type="button"
+        aria-selected="false" aria-controls="panel-docx" tabindex="-1">Word 파일</button>
+      <button class="tab" data-tab="text" role="tab" id="tab-text" type="button"
+        aria-selected="false" aria-controls="panel-text" tabindex="-1">글 붙여넣기</button>
     </div>
 
-    <div class="panel" data-panel="confluence">
-      <textarea id="cf-urls" rows="3" placeholder="페이지 주소를 붙여 넣으세요. 여러 페이지는 한 줄에 하나씩.&#10;예) https://confluence.회사/pages/viewpage.action?pageId=123456"></textarea>
+    <div class="panel" data-panel="confluence" id="panel-confluence" role="tabpanel" aria-labelledby="tab-confluence">
+      <textarea id="cf-urls" rows="3" aria-label="Confluence 페이지 주소(여러 페이지는 한 줄에 하나씩)" placeholder="페이지 주소를 붙여 넣으세요. 여러 페이지는 한 줄에 하나씩.&#10;예) https://confluence.회사/pages/viewpage.action?pageId=123456"></textarea>
       <div class="row">
         <button class="btn" id="cf-add">목록에 추가</button>
         <span class="hint">추가하면 제목을 불러와 주소를 확인합니다.</span>
@@ -44,7 +53,7 @@
           불러온 문서는 새 쪽에서 제목과 함께 시작합니다(발췌는 그 자리에). 최대 40쪽·4단계.</span></label>
     </div>
 
-    <div class="panel hidden" data-panel="docx">
+    <div class="panel hidden" data-panel="docx" id="panel-docx" role="tabpanel" aria-labelledby="tab-docx">
       <label class="drop" id="drop">
         <input type="file" id="file-input" accept=".docx" multiple hidden>
         <strong>Word(.docx) 파일을 여기에 끌어 놓거나 눌러서 고르세요</strong>
@@ -52,9 +61,9 @@
       </label>
     </div>
 
-    <div class="panel hidden" data-panel="text">
-      <input type="text" id="tx-title" placeholder="이 글의 제목 (선택)">
-      <textarea id="tx-body" rows="8" placeholder="메일·메신저·메모를 그대로 붙여 넣으세요.&#10;한 줄이 한 문단이 되고, 엑셀에서 복사한 표는 표로 바뀝니다."></textarea>
+    <div class="panel hidden" data-panel="text" id="panel-text" role="tabpanel" aria-labelledby="tab-text">
+      <input type="text" id="tx-title" aria-label="붙여넣은 글의 제목(선택)" placeholder="이 글의 제목 (선택)">
+      <textarea id="tx-body" rows="8" aria-label="붙여넣을 글" placeholder="메일·메신저·메모를 그대로 붙여 넣으세요.&#10;한 줄이 한 문단이 되고, 엑셀에서 복사한 표는 표로 바뀝니다."></textarea>
       <div class="row"><button class="btn" id="tx-add">목록에 추가</button></div>
     </div>
 
@@ -77,7 +86,6 @@
       <p class="explain">입력한 문서를 보고서 양식으로 변환합니다.<br>
         2개 이상 문서를 입력하면 핵심 내용을 요약해 하나의 보고서로 생성합니다.<br>
         <span class="hint">(문서마다 숫자·값이 다르면 가장 최근 문서의 값을 사용)</span></p>
-      <p class="hint warn-text hidden" id="synth-llm-warn">LLM이 등록되지 않았습니다. 사용자 등록에 온프렘 LLM 주소·모델명을 넣어야 작성할 수 있습니다.</p>
       <div class="grid2">
         <label>분량 (Word 쪽 수)
           <select id="syn-pages">
@@ -182,7 +190,7 @@
         <label><input type="radio" name="date" value="today"><span>오늘</span></label>
         <label><input type="radio" name="date" value="pick"><span>직접 지정</span></label>
       </div>
-      <input type="date" id="date-pick" class="hidden">
+      <input type="date" id="date-pick" class="hidden" aria-label="문서에 넣을 날짜">
     </div>
 
     <div class="block">
@@ -196,6 +204,10 @@
     <p class="hint folder">저장 폴더: <code id="out-dir">…</code>
       <button class="link" id="open-folder">폴더 열기</button></p>
 
+    <p id="convert-note" class="msg hidden" role="status" aria-live="polite">
+      <span id="convert-note-text"></span>
+      <button class="link" id="note-open" type="button">사용자 등록 열기</button>
+    </p>
     <button class="btn primary big" id="convert">변환하기</button>
 
     <div id="progress" class="progress hidden">
@@ -247,7 +259,7 @@
   </form>
 </dialog>
 
-<div id="toast" class="toast hidden"></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -20,6 +20,8 @@ const state = {
   schema: null,
   status: null,
   polling: null,
+  busy: false,       // 변환 작업이 도는 중
+  formError: null,   // 실행 버튼 위에 보일 입력 오류
 };
 
 // ── 서버 호출 ────────────────────────────────────────────────────────────
@@ -52,6 +54,29 @@ function toast(message, bad) {
   toast.timer = setTimeout(() => el.classList.add("hidden"), bad ? 6000 : 2500);
 }
 
+// ── 실행 버튼 상태·안내 (버튼 바로 위에 이유를 보인다) ───────────────────────────
+
+function refreshConvertState() {
+  const st = state.status;
+  const noLlm = !!st && radio("task") === "synthesize" && !st.llm.configured;
+  const button = $("#convert");
+  button.disabled = !!state.busy || noLlm;
+  if (noLlm) button.dataset.blocked = "1"; else delete button.dataset.blocked;
+  const note = $("#convert-note");
+  const text = state.formError
+    || (noLlm ? "LLM이 등록되지 않아 보고서 작성을 실행할 수 없습니다. 사용자 등록에 온프렘 LLM 주소·모델명을 넣어 주세요. (서식 변환은 등록 없이 쓸 수 있습니다)" : "");
+  $("#convert-note-text").textContent = text;
+  $("#note-open").classList.toggle("hidden", !(noLlm && !state.formError));
+  note.classList.toggle("bad", !!state.formError);
+  note.classList.toggle("hidden", !text);
+}
+
+// 입력 확인 오류는 토스트(몇 초 뒤 사라짐) 대신 실행 버튼 위에 남긴다
+function formError(message) {
+  state.formError = message;
+  refreshConvertState();
+}
+
 // ── 상태 표시 ────────────────────────────────────────────────────────────
 
 async function loadStatus() {
@@ -69,6 +94,7 @@ async function loadStatus() {
     banner("읽지 못한 서식 파일이 있습니다 — 그 서식만 빼고 보여 줍니다.", " " + st.profile_errors.join(" / "), true);
   }
   renderAccount(st);
+  refreshConvertState();
   const pdf = $("#st-pdf");
   pdf.textContent = st.pdf.available ? `PDF: ${st.pdf.engine}` : "PDF 변환기 없음";
   pdf.className = "chip " + (st.pdf.available ? "ok" : "bad");
@@ -92,6 +118,7 @@ function renderAccount(st) {
   const user = $("#st-user");
   user.textContent = acc.registered ? `사용자: ${acc.name}` : "사용자 미등록 — 등록하기";
   user.className = "chip user " + (acc.registered ? "ok" : "warn");
+  $("#setup-hint").classList.toggle("hidden", acc.registered);
 
   const cf = $("#st-confluence");
   if (st.confluence.configured) {
@@ -158,6 +185,8 @@ async function accountAction(path, body, button) {
   }
 }
 
+$("#setup-open").addEventListener("click", () => state.status && !state.status.locked && openAccount());
+$("#note-open").addEventListener("click", () => state.status && !state.status.locked && openAccount());
 $("#st-user").addEventListener("click", () => state.status && !state.status.locked && openAccount());
 $("#acc-close").addEventListener("click", () => $("#account-dlg").close());
 $("#acc-save").addEventListener("click", (ev) => accountAction("/api/account", {
@@ -377,7 +406,6 @@ function syncMode() {
   const count = state.inputs.length;
   $("#synth-panel").classList.toggle("hidden", !synth);
   $("#convert-panel").classList.toggle("hidden", synth);
-  $("#synth-llm-warn").classList.toggle("hidden", !synth || !state.status || state.status.llm.configured);
   const kind = count >= 2 ? "종합" : "요약";
   $("#task-hint").textContent = synth
     ? ""
@@ -386,6 +414,8 @@ function syncMode() {
     ? "순서와 무관하게 주제별로 정리합니다 (문서 날짜를 찾지 못하면 아래 문서를 최신으로 봄)"
     : "위에서부터 차례로 합쳐 한 문서가 됩니다";
   $("#convert").textContent = synth ? (count >= 2 ? "종합 보고서 만들기" : "요약 보고서 만들기") : "변환하기";
+  state.formError = null;
+  refreshConvertState();
   $("#doc-title").placeholder = synth ? "비우면 LLM이 내용에 맞게 정함" : "비우면 첫 번째 입력의 제목";
   const manual = radio("mode") === "manual";
   $("#auto-panel").classList.toggle("hidden", manual);
@@ -435,6 +465,10 @@ $("#input-list").addEventListener("click", (ev) => {
 $("#cf-add").addEventListener("click", async () => {
   const urls = $("#cf-urls").value.split(/\s+/).map((u) => u.trim()).filter(Boolean);
   if (!urls.length) return toast("Confluence 페이지 주소를 넣어 주세요", true);
+  if (state.status && !state.status.confluence.configured) {
+    toast("Confluence 주소·토큰을 먼저 등록해 주세요", true);
+    return openAccount();  // 입력한 주소는 그대로 남겨 둔다
+  }
   $("#cf-urls").value = "";
   const added = urls.map((url) => ({ type: "confluence", url, name: url, detail: "제목 확인 중…" }));
   state.inputs.push(...added);
@@ -492,26 +526,46 @@ $("#tx-add").addEventListener("click", () => {
   renderInputs();
 });
 
-$$(".tab").forEach((tab) => tab.addEventListener("click", () => {
-  $$(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+function selectTab(tab, focus) {
+  $$(".tab").forEach((t) => {
+    const on = t === tab;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+    t.tabIndex = on ? 0 : -1;
+  });
   $$(".panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== tab.dataset.tab));
-}));
+  if (focus) tab.focus();
+}
+
+$$(".tab").forEach((tab, index, tabs) => {
+  tab.addEventListener("click", () => selectTab(tab, false));
+  tab.addEventListener("keydown", (ev) => {  // WAI-ARIA 탭 패턴: 좌우·Home·End로 이동
+    const next = { ArrowRight: (index + 1) % tabs.length, ArrowLeft: (index + tabs.length - 1) % tabs.length,
+                   Home: 0, End: tabs.length - 1 }[ev.key];
+    if (next === undefined) return;
+    ev.preventDefault();
+    selectTab(tabs[next], true);
+  });
+});
 
 // ── 변환 ─────────────────────────────────────────────────────────────────
 
 $("#convert").addEventListener("click", async () => {
   const bad = state.inputs.find((i) => i.type === "docx" && !i.upload_id);
-  if (!state.inputs.length) return toast("입력을 하나 이상 추가해 주세요", true);
-  if (bad) return toast(`${bad.name}: 파일이 아직 올라가지 않았거나 실패했습니다`, true);
+  state.formError = null;
+  if (!state.inputs.length) return formError("입력을 하나 이상 추가해 주세요 — 왼쪽 ‘입력’에서 주소·파일·글을 목록에 추가하세요.");
+  if (bad) return formError(`${bad.name}: 파일이 아직 올라가지 않았거나 실패했습니다`);
   const options = collectOptions();
-  if (options.date_mode === "pick" && !options.date) return toast("날짜를 골라 주세요", true);
+  if (options.date_mode === "pick" && !options.date) return formError("날짜를 골라 주세요");
   if (options.task === "synthesize" && !(state.status && state.status.llm.configured)) {
-    return toast("보고서 작성(요약·종합)은 LLM이 있어야 합니다 — 사용자 등록에서 LLM을 넣으세요", true);
+    return refreshConvertState();
   }
+  refreshConvertState();
   saveOptions();
   const inputs = state.inputs.map((i) => ({ type: i.type, url: i.url, upload_id: i.upload_id, name: i.name, text: i.text, title: i.title }));
 
-  $("#convert").disabled = true;
+  state.busy = true;
+  refreshConvertState();
   $("#result").classList.add("hidden");
   $("#progress").classList.remove("hidden");
   $("#progress-log").innerHTML = "<li>시작</li>";
@@ -534,7 +588,8 @@ function poll(id) {
 }
 
 function finish(job) {
-  $("#convert").disabled = false;
+  state.busy = false;
+  refreshConvertState();
   $("#progress").classList.add("hidden");
   const box = $("#result");
   box.classList.remove("hidden", "error");
@@ -662,5 +717,6 @@ class Locked extends Error {}
     restoreOptions();
   }
   loadHistory().catch(() => {});
-  if (!state.status.account.registered) openAccount();  // 처음 쓰는 사람: 사용자 등록부터
+  // 처음 쓰는 사람: 등록 창을 강제로 띄우지 않는다 — 서식 변환은 등록 없이 쓸 수 있다.
+  // 안내 띠(#setup-hint)만 보이고, 등록이 필요한 동작(Confluence 추가·보고서 작성)에서 창을 연다.
 })();
