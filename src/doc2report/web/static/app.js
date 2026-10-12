@@ -4,7 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const STORE_KEY = "doc2report.options.v1";
-const API_VERSION = 14;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
+const API_VERSION = 15;  // 서버(web/server.py)의 API_VERSION과 같아야 한다
 const RESTART_HELP = "서버 창(검은 창)을 모두 닫고 start_webapp.bat을 다시 실행한 뒤, 이 화면에서 Ctrl+F5로 새로 고침하세요.";
 
 // 화면 위에 계속 떠 있는 안내(몇 초 뒤 사라지는 알림으로는 원인을 읽기 어렵다).
@@ -360,7 +360,6 @@ function collectOptions() {
     date: dateMode === "pick" ? $("#date-pick").value : dateMode,
     date_mode: dateMode,
     formats,
-    report: $("#out-report").checked,
   };
 }
 
@@ -396,7 +395,6 @@ function restoreOptions() {
   if (o.date_mode === "pick" && o.date) $("#date-pick").value = o.date;
   $("#out-pdf").checked = (o.formats || []).includes("pdf");
   $("#out-md").checked = (o.formats || []).includes("md");
-  $("#out-report").checked = o.report !== false;
   syncPreset();
   syncMode();
 }
@@ -568,7 +566,8 @@ $("#convert").addEventListener("click", async () => {
   refreshConvertState();
   $("#result").classList.add("hidden");
   $("#progress").classList.remove("hidden");
-  $("#progress-log").innerHTML = "<li>시작</li>";
+  state.stepsHtml = "";
+  renderProgress({ stage: "read", detail: "시작", elapsed: 0 });
   try {
     const { job } = await api("/api/convert", { inputs, options });
     poll(job);
@@ -582,9 +581,26 @@ function poll(id) {
   state.polling = setTimeout(async () => {
     let job;
     try { job = await api(`/api/jobs/${id}`); } catch (e) { return finish({ state: "error", error: e.message }); }
-    $("#progress-log").innerHTML = job.messages.slice(-6).map((m) => `<li>${esc(m)}</li>`).join("");
-    if (job.state === "running") poll(id); else finish(job);
+    if (job.state === "running") { renderProgress(job); poll(id); } else finish(job);
   }, 600);
+}
+
+// 진행 표시: 단계 표시줄 + 현재 한 줄(전체 진행 기록은 작업 기록 파일에 남는다 — 2026-10-12 사용자)
+const STAGES = {
+  convert: [["read", "입력 읽기"], ["build", "문서 만들기"], ["save", "저장"]],
+  synthesize: [["read", "입력 읽기"], ["write", "AI 작성"], ["build", "문서 만들기"], ["save", "저장"]],
+};
+
+function renderProgress(job) {
+  const stages = job.stages && job.stages.length ? job.stages : STAGES[radio("task")] || STAGES.convert;
+  const at = Math.max(0, stages.findIndex(([key]) => key === job.stage));
+  const html = stages.map(([, label], i) =>
+    `<li class="${i < at ? "done" : i === at ? "now" : ""}"${i === at ? ' aria-current="step"' : ""}>` +
+    `<span class="dot">${i < at ? "✓" : i + 1}</span>${esc(label)}</li>`).join("");
+  if (state.stepsHtml !== html) { $("#steps").innerHTML = html; state.stepsHtml = html; }
+  const detail = job.detail || "시작";
+  if ($("#step-detail").textContent !== detail) $("#step-detail").textContent = detail;
+  $("#step-time").textContent = `${Math.round(job.elapsed || 0)}초`;
 }
 
 function finish(job) {
@@ -598,33 +614,33 @@ function finish(job) {
     box.innerHTML = `<h3>변환 실패</h3><p>${esc(job.error)}</p>`;
     return;
   }
+  // 결과: 문서와 "확인이 필요한 항목"만 보인다. 점검 숫자·메모·문구 수정 표는 작업 기록 파일에 있다.
   const r = job.result;
-  const files = r.files.map(fileRow).join("");
-  const decision = r.decision ? `<div class="decision"><b>자동 판단 결과</b><ul>${
-    r.decision.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
-  const notes = r.notes.filter((n) => !n.startsWith("자동 판단:"));
-  const polishName = ({ none: "안 함", rules: "규칙 적용" }[r.polish] || r.polish) + (r.llm ? " + 맞춤법·어조" : "");
+  const docx = r.files.find((f) => f.kind === "docx");
+  const extra = r.files.filter((f) => f.kind === "pdf" || f.kind === "md");
+  const log = r.files.find((f) => f.kind === "report");
+  const attention = r.attention || [];
+  const attHtml = attention.length
+    ? `<div class="attention" role="group" aria-label="확인이 필요한 항목"><b>확인이 필요한 항목 ${attention.length}건</b><ul>${
+      attention.map((a) => `<li class="${esc(a.level)}">${esc(a.text)}</li>`).join("")}</ul></div>`
+    : `<p class="allgood">✓ 점검 이상 없음</p>`;
   const synth = r.task === "synthesize";
-  const line = synth
-    ? `출력 ${esc(r.profile)} · LLM ${esc(r.kind)}${r.mode === "rewrite" ? "" : " <b class=\"bad\">(실패 — 원문 나열)</b>"} · 분량 목표 ${esc(r.pages)}쪽 · 표 ${r.tables}개`
-    : `출력 ${esc(r.profile)} · 문장 다듬기 ${esc(polishName)} · 표 ${r.tables}개 · 문구 수정 ${r.change_count}건`;
-  const synthBox = synth ? `
-    <div class="summary-box"><b>핵심 요약</b>\n${esc(r.summary || "")}</div>` : "";
+  const facts = synth
+    ? [`${esc(r.kind)} 보고서`, `분량 목표 ${esc(r.pages)}쪽`, `표 ${r.tables}개`]
+    : [esc(r.profile), `표 ${r.tables}개`, ...(r.change_count ? [`문구 ${r.change_count}곳 수정됨 — 작업 기록에서 확인`] : [])];
   box.innerHTML = `
     <h3>완료 — ${esc(r.title || r.stem)} <span class="hint">(${job.elapsed}초)</span></h3>
-    <p class="hint">${line}</p>
-    <div class="files">${files}</div>
-    ${synthBox}
-    ${decision}
-    ${notes.length ? `<details open><summary>레이아웃·입력 메모 (${notes.length})</summary><ul class="notes">${
-      notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
-    ${r.changes.length ? `<details><summary>문구 수정 내역 (${r.change_count}건)</summary>
-      <table class="changes"><tr><th>원문</th><th>수정</th><th>규칙</th></tr>${
-      r.changes.map((c) => `<tr><td>${esc(c.before)}</td><td>${esc(c.after)}</td><td class="rule">${esc(c.rule)}</td></tr>`).join("")}</table></details>` : ""}`;
+    <p class="hint">${facts.join(" · ")}</p>
+    <div class="files">${docx ? fileRow(docx) : ""}</div>
+    ${extra.length ? `<div class="more-files">${extra.map(miniFile).join("")}</div>` : ""}
+    ${attHtml}
+    ${log ? `<div class="log-row"><span>작업 기록 <span class="hint">(상세 내용·진행 기록)</span></span>
+      <span class="acts"><a class="btn tiny" href="/files/${encodeURIComponent(log.name)}" target="_blank" rel="noopener">보기</a>
+      <a class="btn tiny" href="/files/${encodeURIComponent(log.name)}?download=1" download>내려받기</a></span></div>` : ""}`;
   loadHistory();
 }
 
-const KIND_NAME = { docx: "Word", pdf: "PDF", md: "MD", report: "변경내역" };
+const KIND_NAME = { docx: "Word", pdf: "PDF", md: "MD", report: "작업 기록" };
 
 function fileRow(f) {
   const href = `/files/${encodeURIComponent(f.name)}`;
@@ -635,6 +651,13 @@ function fileRow(f) {
     <span class="acts"><button class="btn tiny" data-open="${esc(f.name)}">열기</button>${view}
     <a class="btn tiny" href="${href}?download=1" download>내려받기</a>
     <button class="btn tiny" data-folder="${esc(f.name)}" title="탐색기에서 이 파일 위치 열기">폴더</button></span></div>`;
+}
+
+function miniFile(f) {
+  const href = `/files/${encodeURIComponent(f.name)}`;
+  return `<span class="mini"><span class="badge ${f.kind}">${KIND_NAME[f.kind] || f.kind}</span>
+    <button class="btn tiny" data-open="${esc(f.name)}">열기</button>
+    <a class="btn tiny" href="${href}?download=1" download>내려받기</a></span>`;
 }
 
 document.addEventListener("click", async (ev) => {

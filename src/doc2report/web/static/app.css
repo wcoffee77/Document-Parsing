@@ -177,12 +177,22 @@ label.block input { font-weight: normal; margin-top: 4px; }
 .folder { word-break: break-all; }
 code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
-.progress { margin-top: 14px; display: flex; gap: 10px; align-items: flex-start; }
-.progress ol { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
-.progress ol li:last-child { color: var(--ink); font-weight: bold; }
+.progress { margin-top: 14px; }
+.steps { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.steps li { display: flex; align-items: center; gap: 6px; }
+.steps .dot { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 12px;
+  background: var(--chip); color: var(--muted); }
+.steps li.done { color: var(--ok); }
+.steps li.done .dot { background: var(--ok-soft); color: var(--ok); }
+.steps li.now { color: var(--ink); font-weight: bold; }
+.steps li.now .dot { background: var(--accent-fill); color: #fff; }
+.step-detail { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; min-width: 0; }
+.step-detail #step-time { flex: none; white-space: nowrap; }
+.step-detail .spinner { flex: none; }
+.step-detail #step-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .spinner {
   flex: none; width: 18px; height: 18px; border: 3px solid var(--accent-soft); border-top-color: var(--accent);
-  border-radius: 50%; animation: spin .8s linear infinite; margin-top: 2px;
+  border-radius: 50%; animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -195,7 +205,7 @@ code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size:
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
 }
 .file .acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
-.file .badge { font-size: 12px; font-weight: bold; padding: 2px 7px; border-radius: 6px; color: #fff; min-width: 44px; text-align: center; }
+.file .badge, .mini .badge { font-size: 12px; font-weight: bold; padding: 2px 7px; border-radius: 6px; color: #fff; min-width: 44px; text-align: center; }
 .badge.docx { background: #2b579a; } .badge.pdf { background: #c43e1c; } .badge.md { background: #444; } .badge.report { background: #6b7280; }
 .file .fname { min-width: 0; overflow-wrap: anywhere; }
 .decision { background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
@@ -291,3 +301,14 @@ body.locked main.layout { opacity: .35; pointer-events: none; }
   .status { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; padding-bottom: 2px; }
   .chip { white-space: nowrap; flex: none; }
 }
+
+/* 결과: 문서 + 확인이 필요한 항목만 */
+.more-files { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 6px 0; }
+.more-files .mini { display: inline-flex; align-items: center; gap: 6px; }
+.attention { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--warn-line); border-radius: 8px; background: var(--warn-soft); color: var(--warn); }
+.attention ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+.attention li.bad { color: var(--bad); font-weight: bold; }
+.allgood { margin: 10px 0; color: var(--ok); font-weight: bold; }
+.log-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--line); font-size: 13px; }
+.log-row .acts { display: flex; gap: 6px; }

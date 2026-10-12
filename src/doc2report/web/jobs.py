@@ -22,6 +22,7 @@ from ..pipeline import convert_document, load_document, merge_documents
 from ..sources import LoadedSource, load_text
 from ..transform.llm_polish import llm_status
 from . import options as opts
+from .attention import classify
 
 REPORT_SUFFIX = "_변경내역"
 OUTPUT_KINDS = {".docx": "docx", ".pdf": "pdf", ".md": "md"}
@@ -37,17 +38,25 @@ class Job:
     result: dict | None = None
     error: str | None = None
     started: float = field(default_factory=time.time)
+    # 화면에는 단계 표시줄 + 현재 한 줄만 보인다(2026-10-12 사용자). 전체 진행 기록(messages)은 작업 기록 파일에 남는다.
+    stage: str = "read"
+    stages: list[tuple[str, str]] = field(default_factory=lambda: list(CONVERT_STAGES))
+    detail: str = ""
 
     def say(self, message: str) -> None:
         self.messages.append(message)
+        self.detail = message
 
     def to_json(self) -> dict:
         return {"id": self.id, "state": self.state, "messages": self.messages,
+                "stage": self.stage, "stages": [list(s) for s in self.stages], "detail": self.detail,
                 "result": self.result, "error": self.error,
                 "elapsed": round(time.time() - self.started, 1)}
 
 
 SYNTH_RUNS = 3
+CONVERT_STAGES = (("read", "입력 읽기"), ("build", "문서 만들기"), ("save", "저장"))
+SYNTH_STAGES = (("read", "입력 읽기"), ("write", "AI 작성"), ("build", "문서 만들기"), ("save", "저장"))
 
 
 class JobRunner:
@@ -87,6 +96,7 @@ class JobRunner:
     def _convert(self, job: Job, payload: dict) -> dict:
         options = payload.get("options") or {}
         if options.get("task") == "synthesize":
+            job.stages = list(SYNTH_STAGES)
             return self._synthesize(job, payload)
         inputs, notes = payload.get("inputs") or [], []
         docs, kinds = self._load(job, inputs, options, notes)
@@ -102,7 +112,8 @@ class JobRunner:
                                                             llm_ready=llm_status()["configured"])
         if decision:
             notes = [f"자동 판단: {reason}" for reason in decision.reasons] + notes
-        out = self._write(job, merged, name, profile, options, notes, polish=polish, llm=llm, shorten=False)
+        out = self._write(job, merged, name, profile, options, notes, polish=polish, llm=llm, shorten=False,
+                          task_label="서식 변환")
         out.update({"task": "convert",
                     "decision": ({"reasons": decision.reasons, **decision.summary} if decision else None)})
         return out
@@ -128,8 +139,9 @@ class JobRunner:
         year = datetime.now().year
 
         best = None
+        job.stage = "write"
         for attempt in range(1, runs + 1):
-            job.say(f"LLM으로 {kind} 보고서 쓰는 중 ({attempt}/{runs}회) — 응답·사실 검증에 1~3분 걸릴 수 있음")
+            job.say(f"AI가 {kind} 보고서를 쓰는 중 ({attempt}/{runs}회) — 1~3분 걸릴 수 있음")
             candidate = synthesize(sources, pages=pages, title=title, year=year)
             if best is None or problem_count(candidate) < problem_count(best):
                 best = candidate
@@ -146,7 +158,8 @@ class JobRunner:
         merged = merge_documents([doc], title=name, section_titles=False)
         profile = opts.format_profile(options)
         # 검증을 거친 글이라 문구 규칙·교열 LLM은 다시 돌리지 않는다. 두세 글자 넘치는 줄만 LLM으로 줄인다(CLI와 같게)
-        out = self._write(job, merged, name, profile, options, notes + load_notes, polish="none", llm=False, shorten=True)
+        out = self._write(job, merged, name, profile, options, notes + load_notes, polish="none", llm=False, shorten=True,
+                          summary=summary, task_label=f"보고서 작성({kind})")
         out.update({"task": "synthesize", "kind": kind, "mode": result.mode, "summary": summary,
                     "pages": f"{pages[0]}-{pages[1]}", "decision": None})
         return out
@@ -167,15 +180,18 @@ class JobRunner:
         return docs, kinds
 
     def _write(self, job: Job, merged, name, profile, options: dict, notes: list[str], *,
-               polish: str, llm: bool, shorten: bool) -> dict:
-        """변환·파일 쓰기(docx + 고른 형식 + 변경 내역)와 결과 요약 — 서식 변환과 요약·종합이 같이 쓴다."""
+               polish: str, llm: bool, shorten: bool, summary: str | None = None, task_label: str = "") -> dict:
+        """변환·파일 쓰기(docx + 고른 형식 + 작업 기록)와 결과 요약 — 서식 변환과 요약·종합이 같이 쓴다."""
         stem = self._reserve(name or "보고서")
         try:
             docx_path = self.output_dir / f"{stem}.docx"
-            job.say("문구·구조 규칙 적용 중")
+            job.stage = "build"
+            job.say("문서 만드는 중")
             result = convert_document(merged, docx_path, profile, polish=polish, llm=llm,
                                       date=opts.date_text(options.get("date"), profile),
                                       notes=notes, progress=job.say, shorten=shorten)
+            job.stage = "save"
+            job.say("저장 중")
             files = [docx_path.name]
             formats = set(options.get("formats") or [])
             if "md" in formats:
@@ -192,10 +208,11 @@ class JobRunner:
                     files.append(docx_to_pdf(docx_path, self.output_dir / f"{stem}.pdf").name)
                 except Exception as exc:
                     result.notes.append(f"PDF 만들기 실패 — Word 문서만 저장함: {exc}")
-            if options.get("report", True):
-                report = self.output_dir / f"{stem}{REPORT_SUFFIX}.md"
-                report.write_text(result.report(), encoding="utf-8")
-                files.append(report.name)
+            # 작업 기록은 항상 저장한다 — 화면에는 "확인이 필요한 항목"만 보이고 나머지 상세는 이 파일에 있다
+            attention, hidden = classify(result.notes)
+            report = self.output_dir / f"{stem}{REPORT_SUFFIX}.md"
+            report.write_text(_work_log(name, task_label, profile, result, attention, job, summary), encoding="utf-8")
+            files.append(report.name)
         finally:
             with self._names:
                 self._reserved.discard(stem)
@@ -204,6 +221,8 @@ class JobRunner:
             "stem": stem,
             "title": name,
             "files": [{"name": name, "kind": _kind(name)} for name in files],
+            "attention": attention,
+            "hidden_notes": hidden,
             "notes": result.notes,
             "changes": [{"before": c.before, "after": c.after, "rule": c.rule}
                         for c in result.changes[:500]],
@@ -265,6 +284,21 @@ class JobRunner:
             self._reserved.add(stem)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         return stem
+
+
+def _work_log(title, task_label: str, profile, result, attention: list[dict], job: Job, summary: str | None) -> str:
+    """작업 기록 파일(상세). 화면에서 숨긴 모든 것 — 메모·문구 수정·진행 기록·점검 지표 — 이 여기 있다."""
+    lines = [f"# 작업 기록 — {title or '보고서'}", "",
+             f"- 작업: {task_label or '변환'} · 문서 모양: {profile.label or profile.name}",
+             f"- 만든 시각: {datetime.now():%Y-%m-%d %H:%M} · 걸린 시간: {round(time.time() - job.started)}초", ""]
+    lines += ["## 확인이 필요한 항목", ""]
+    lines += [f"- {a['text']}" for a in attention] or ["- 없음"]
+    lines.append("")
+    lines.append(result.report().replace("# 변환 리포트", "## 변환 상세", 1).rstrip())
+    lines += ["", "## 진행 기록", ""] + [f"- {m}" for m in job.messages]
+    if summary:
+        lines += ["", "## 점검 지표 (개발자용 — 보고서 작성 결과를 자동 점검한 숫자)", "", "```", summary, "```"]
+    return "\n".join(lines) + "\n"
 
 
 def _pages(value, default: tuple[int, int]) -> tuple[int, int]:

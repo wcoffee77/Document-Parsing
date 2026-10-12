@@ -75,7 +75,7 @@ def test_synthesis_needs_llm(tmp_path, monkeypatch):
 def test_runs_are_capped_and_stop_when_clean(tmp_path, fake_llm):
     job = JobRunner(tmp_path / "out", tmp_path / "up").run_sync(_payload([DOC1], runs=9))
     assert job.state == "done", job.error
-    tries = [m for m in job.messages if "보고서 쓰는 중" in m]
+    tries = [m for m in job.messages if "보고서를 쓰는 중" in m]
     assert tries and tries[0].endswith("걸릴 수 있음") and "(1/3회)" in tries[0]
 
 
