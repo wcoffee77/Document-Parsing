@@ -25,7 +25,8 @@ $uv = if (Test-Path (Join-Path $root "uv.exe")) { Join-Path $root "uv.exe" } els
 if (-not (Get-Command $uv -ErrorAction SilentlyContinue)) {
     Write-Host ""
     Write-Host "[설치 필요] 파이썬 실행 환경을 찾지 못했습니다." -ForegroundColor Yellow
-    Write-Host "  가장 쉬운 방법: 설치 묶음 zip(doc2report-windows-x64.zip)의 runtime 폴더를 이 폴더에 복사하세요."
+    Write-Host "  git으로 받은 폴더라면 start_webapp.bat을 다시 실행하세요(첫 실행에서 runtime을 자동으로 받습니다 — git 필요)."
+    Write-Host "  받기가 안 되면: 설치 묶음 zip(doc2report-windows-x64.zip)의 runtime 폴더를 이 폴더에 복사하세요."
     Write-Host "  자세한 방법: docs\team-setup.md"
     exit 1
 }

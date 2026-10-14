@@ -1,7 +1,9 @@
 # 팀원용 설치·사용 안내 (doc2report)
 
 각자 **자기 PC에 설치해서 자기 토큰으로** 쓰는 방식이다(공용 서버 없음).
-**파이썬·uv·패키지를 따로 설치하지 않는다** — 필요한 것이 모두 든 설치 묶음(zip)을 풀기만 하면 된다.
+**파이썬·uv·패키지를 따로 설치하지 않는다.** 받는 방법은 둘이다 — **① git 주소로 받기(권장, 아래 "git으로 받기")**:
+`git clone` 한 번 하고 `start_webapp.bat`을 누르면 첫 실행 때 파이썬 실행 환경(runtime)을 자동으로 받는다.
+**② 설치 묶음(zip)**: 필요한 것이 모두 들어 있어 풀기만 하면 된다(git이 없는 PC용).
 관리자 권한, 인터넷(pypi.org 등), PowerShell 실행 정책 변경 모두 필요 없다.
 
 > 왜 이렇게 했나: 처음 사내 PC에 설치할 때 pypi.org·astral.sh 차단, uv 설치 불가, `uv sync` 실패,
@@ -87,23 +89,51 @@
 사용자 등록(`%APPDATA%\doc2report`)과 결과 문서(`문서\doc2report`)는 폴더 밖에 있어 그대로 이어진다.
 예전 서버 창이 떠 있으면 새로 켤 때 자동으로 넘겨받는다.
 
-## 6. git으로 받아 쓰는 경우(코드를 고치거나 자주 업데이트하는 사람)
+## 6. git으로 받기 (권장 — 주소만 공유하면 된다)
+
+필요한 것: **Git for Windows**와, 이 저장소에 `git clone`·`git pull`이 되는 네트워크(그 외 설치 없음).
 
 ```powershell
 git clone <저장소 주소> doc2report
 cd doc2report
 ```
 
-받은 직후 **한 번만** `exclude_samples.bat`을 실행하세요. 시험용 샘플(`samples\`, 약 30개 문서)을 이 PC의 폴더에서 숨깁니다
-(저장소에서 지우는 것이 아니라 내 폴더에서만 숨기는 것이라 `git pull`은 그대로 되고 `git status`에도 안 뜹니다).
-직접 명령으로 하려면 `git sparse-checkout set --no-cone "/*" "!/samples/"`, 다시 받고 싶으면 `git sparse-checkout disable`.
+1. 받은 직후 **한 번만** `exclude_samples.bat`을 실행한다. 시험용 샘플(`samples\`, 약 30개 문서)을 이 PC의 폴더에서 숨긴다
+   (저장소에서 지우는 것이 아니라 내 폴더에서만 숨기는 것이라 `git pull`은 그대로 되고 `git status`에도 안 뜬다).
+   직접 명령으로 하려면 `git sparse-checkout set --no-cone "/*" "!/samples/"`, 다시 받고 싶으면 `git sparse-checkout disable`.
+2. `start_webapp.bat`을 두 번 누른다. **첫 실행에서만** 검은 창에 `Downloading the Python runtime…`이 뜨고 1~2분 걸린다
+   (파이썬과 패키지, 수십 MB). 끝나면 브라우저가 자동으로 열린다.
+3. **업데이트**: 검은 창을 닫고 → `git pull` → `start_webapp.bat`. 패키지 구성이 바뀐 버전이면 `start_webapp.bat`이 알아서
+   새 runtime을 다시 받는다(바뀌지 않았으면 아무것도 안 받는다). 작업 브랜치는 `main` 하나다.
 
-그 다음 설치 묶음 zip 안의 **`runtime` 폴더만** 이 폴더에 복사하면 `start_webapp.bat`·`doctor.bat`이 그 파이썬을
-쓴다(설치 끝). 이후 업데이트는 `git checkout main` → `git pull origin main` → 검은 창을 닫고 다시 실행.
-패키지 구성이 바뀐 버전이면 `doctor.bat`이 "필요한 패키지가 빠짐"으로 알려 준다 — 그때만 새 묶음의
-`runtime`으로 바꾼다. (`runtime` 없이 uv로 쓰는 방법은 [onprem-first-run.md](onprem-first-run.md)의 오프라인 설치.)
+### 어떻게 동작하나
+- 파이썬과 패키지(`runtime`)는 같은 저장소의 **`runtime-win64` 브랜치**에 있다(담당자의 CI가 만들어 올린다). `main`에는 없다.
+- `scripts\ensure_runtime.bat`이 첫 실행 때 그 브랜치를 `runtime\` 폴더로 **얕게 복제**(`git clone --depth 1`)한다.
+  이후에는 `scripts\onprem-requirements.txt`가 바뀌었을 때만 `git fetch`로 갱신한다(두 곳의 패키지 목록을 git이 계산한
+  식별자 `REQ_BLOB`으로 비교하므로 줄바꿈 설정과 무관하다).
+- `runtime\`은 `.gitignore`에 있어 `git status`에 안 뜨고 `git pull`이 건드리지 않는다.
 
-## 담당자용: 설치 묶음 만들기
+### 안 될 때
+| 증상 | 원인·해결 |
+|---|---|
+| `git was not found` | Git for Windows를 설치한다. 못 깔면 설치 묶음 zip의 `runtime` 폴더를 이 폴더에 복사(그러면 자동 받기를 건너뛴다) |
+| `Could not download the Python runtime` | 이 PC에서 저장소에 접근되는지 확인(`git pull`이 되는가). 사내 프록시가 막으면 담당자에게 `doctor.bat` 결과와 함께 문의 |
+| `The runtime folder exists but is incomplete` | 받다 중단된 `runtime` 폴더를 지우고 `start_webapp.bat`을 다시 실행 |
+| 받았는데 `runtime이 이 코드보다 오래된 패키지 구성`(doctor) | 담당자의 `runtime-win64` 빌드가 아직 안 끝난 것. 몇 분 뒤 `start_webapp.bat`을 다시 실행 |
+| 검은 창이 바로 닫힘 / 보안 프로그램이 `python.exe`를 막음 | 사내 보안 정책. `doctor.bat` 결과와 함께 담당자에게(보안팀 예외 등록이 필요할 수 있음 — 확인 필요) |
+
+(`runtime` 없이 uv로 쓰는 방법은 [onprem-first-run.md](onprem-first-run.md)의 오프라인 설치.)
+
+## 담당자용: runtime 브랜치와 설치 묶음
+
+**git 배포(`runtime-win64` 브랜치)**: `main`에 push하면 GitHub Actions(`windows` 작업)가 ① 전체 테스트 → ② `scripts/onprem-requirements.txt`의
+git 식별자(blob id)가 `runtime-win64` 브랜치의 `REQ_BLOB`과 다를 때만 runtime을 새로 만들어 그 브랜치에 올리고(**force push, 이력 1개 —
+저장소가 커지지 않게**) → ③ **받는 사람처럼 새로 `git clone`해 첫 실행 자동 받기·두 번째 실행엔 안 받기·진단·변환**까지 확인한다
+(`git-install-check`). 즉 **패키지를 바꾸면** `uv lock` → `uv export --no-dev --no-hashes --no-emit-project -o scripts/onprem-requirements.txt`
+→ `main`에 push하면 끝이다(`lock-sync` 작업이 두 파일이 같은지 검사한다). 팀원은 다음 실행 때 자동으로 새 runtime을 받는다.
+새 runtime이 만들어지는 몇 분 동안은 팀원의 doctor가 "오래된 패키지 구성"으로 알려 줄 수 있다(정상).
+
+**설치 묶음(zip)** (git이 없는 PC용):
 
 `main`에 push하면 GitHub Actions(`windows` 작업)가 Windows 머신에서 ① 전체 테스트 ② 묶음 만들기
 ③ **받은 사람처럼 다른 폴더에 풀어 시스템 파이썬 없이 진단·변환·웹 서버 실행**까지 해 본다.

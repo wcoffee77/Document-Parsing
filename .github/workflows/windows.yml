@@ -4,6 +4,9 @@ name: windows
 #  - test:   전체 테스트를 Windows에서 (DPAPI 토큰 암호화·PowerShell 경로·경로 구분자 등)
 #  - bundle: 설치 묶음 zip을 만들고, 시스템 파이썬 없이 다른 폴더에 풀어 실제로 실행해 본다
 #  - 태그(v*)를 달면 그 zip을 Release에 올린다
+#  - runtime-branch: main에 올라가면 파이썬+패키지(runtime)를 runtime-win64 브랜치에 올린다(패키지 목록이 바뀐 때만).
+#                    git으로 받은 사람은 start_webapp.bat이 첫 실행 때 이 브랜치를 자동으로 받는다(scripts/ensure_runtime.bat)
+#  - git-install-check: 받는 사람처럼 새로 git clone → 첫 실행에서 runtime 자동 받기 → 진단·변환까지 확인
 on:
   push:
     branches: [main]
@@ -90,3 +93,85 @@ jobs:
           gh release create "${{ github.ref_name }}" dist/doc2report-windows-x64.zip `
             --title "doc2report ${{ github.ref_name }}" `
             --notes "압축을 풀고 start_webapp.bat을 실행하세요. 설치 안내는 docs/team-setup.md"
+
+  runtime-branch:
+    needs: [lock-sync, test]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'   # 수동 실행으로 브랜치에서 먼저 확인할 수 있다
+    runs-on: windows-latest
+    concurrency:
+      group: runtime-branch
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: runtime 브랜치가 이미 이 패키지 목록으로 만들어져 있는지
+        id: need
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $want = (git rev-parse "HEAD:scripts/onprem-requirements.txt").Trim()
+          $have = ""
+          git fetch --depth 1 origin runtime-win64 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) { $have = ((git show "FETCH_HEAD:REQ_BLOB") -join "").Trim() }
+          Write-Host "패키지 목록 $want / runtime 브랜치 $have"
+          "build=$($have -ne $want)".ToLower() | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          $global:LASTEXITCODE = 0
+      - name: runtime 만들기
+        if: steps.need.outputs.build == 'true'
+        shell: pwsh
+        run: ./packaging/build_runtime.ps1 -Target "$env:RUNNER_TEMP\rt" -WorkDir "$env:RUNNER_TEMP\work"
+      - name: runtime-win64 브랜치에 올리기
+        if: steps.need.outputs.build == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $blob = (Get-Content "$env:RUNNER_TEMP\rt\REQ_BLOB" -Raw).Trim()
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan runtime-win64
+          git rm -rf -q .
+          Copy-Item "$env:RUNNER_TEMP\rt\*" . -Recurse -Force
+          Set-Content -Encoding ascii .gitattributes -Value "* -text"
+          git add -A -f
+          git commit -q -m "runtime build (requirements blob $blob, main $env:GITHUB_SHA)"
+          git count-objects -vH
+          git push --force origin runtime-win64
+          Write-Host "runtime-win64 브랜치를 올렸습니다 (패키지 목록 $blob)"
+
+  git-install-check:
+    needs: runtime-branch
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'   # 수동 실행으로 브랜치에서 먼저 확인할 수 있다
+    runs-on: windows-latest
+    steps:
+      - name: 받는 사람처럼 git clone, 첫 실행에서 runtime 자동 받기, 진단·변환
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dest = Join-Path $env:RUNNER_TEMP "fresh"
+          git clone --depth 1 --branch "${{ github.ref_name }}" "https://github.com/${{ github.repository }}.git" $dest
+          Set-Location $dest
+          # 시스템 파이썬이 없는 PC처럼
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'Python|pipx' }) -join ';'
+          $env:DOC2REPORT_HOME = Join-Path $env:RUNNER_TEMP "home2"
+          $env:DOC2REPORT_OUTPUT_DIR = Join-Path $env:RUNNER_TEMP "out2"
+
+          cmd /c "call scripts\ensure_runtime.bat"
+          if ($LASTEXITCODE -ne 0) { throw "첫 실행에서 runtime을 받지 못함" }
+          if (-not (Test-Path "runtime\python.exe")) { throw "runtime\python.exe가 없음" }
+          if (-not (Test-Path "runtime\.git")) { throw "runtime이 git 복제본이 아님" }
+
+          # 두 번째 실행은 아무것도 받지 않아야 한다
+          $second = (cmd /c "call scripts\ensure_runtime.bat" 2>&1) -join "`n"
+          if ($second -match "Downloading") { throw "두 번째 실행에서 runtime을 또 받음: $second" }
+
+          & runtime\python.exe -c "import sys; print(sys.executable); assert 'runtime' in sys.executable"
+          & runtime\python.exe -m doc2report doctor --no-network --save
+          if ($LASTEXITCODE -ne 0) { throw "진단에서 실패 항목이 나옴" }
+
+          $md = Join-Path $env:RUNNER_TEMP "sample2.md"
+          Set-Content -Encoding utf8 $md -Value @("# 시험 보고", "", "## 1. 추진 배경", "", "- 항목 하나")
+          & runtime\python.exe -m doc2report convert $md -o (Join-Path $env:RUNNER_TEMP "sample2.docx")
+          if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "sample2.docx"))) { throw "변환 결과가 없음" }
+          Write-Host "git 설치(첫 실행 자동 받기) 확인 완료"

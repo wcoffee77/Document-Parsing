@@ -39,7 +39,7 @@ class Check:
 
 def run(*, network: bool = True) -> list[Check]:
     checks: list[Check] = []
-    for step in (_python, _packages, _code, _template, _output_dir, _fonts, _pdf, _account, _proxy):
+    for step in (_python, _packages, _runtime, _code, _template, _output_dir, _fonts, _pdf, _account, _proxy):
         checks.extend(_safe(step))
     if network:
         checks.extend(_safe(_confluence))
@@ -99,6 +99,28 @@ def _packages() -> Check:
         return Check(FAIL, "필요한 패키지가 빠짐", ", ".join(missing),
                      "설치 묶음(zip)을 새로 풀거나, 개발 환경이면 wheelhouse로 다시 설치하세요(docs/team-setup.md)")
     return Check(OK, "필요한 패키지 모두 있음", ", ".join(found))
+
+
+def _runtime() -> list[Check]:
+    """git으로 받은 폴더의 runtime(runtime-win64 브랜치)이 이 코드의 패키지 목록으로 만든 것인지.
+    패키지 목록의 git blob id를 비교한다(줄바꿈 설정과 무관 — packaging/build_runtime.ps1)."""
+    stamp = ROOT / "runtime" / "REQ_BLOB"
+    if not stamp.is_file() or not (ROOT / ".git").exists():
+        return []
+    import subprocess
+
+    have = stamp.read_text(encoding="ascii", errors="replace").strip()
+    try:
+        want = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD:scripts/onprem-requirements.txt"],
+                              capture_output=True, text=True, timeout=15).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        want = ""
+    if not want:
+        return [Check(INFO, "runtime: git이 없어 패키지 목록 일치 여부를 확인하지 못함")]
+    if have == want:
+        return [Check(OK, "runtime: 이 코드의 패키지 목록과 같음", have[:10])]
+    return [Check(WARN, "runtime: 이 코드보다 오래된 패키지 구성", f"runtime {have[:10]} / 코드 {want[:10]}",
+                  "start_webapp.bat을 다시 실행하면 새 runtime을 받습니다. 그래도 같으면 담당자의 CI(runtime-win64 빌드)가 끝났는지 확인")]
 
 
 def _code() -> Check:

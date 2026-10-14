@@ -20,11 +20,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$pyver = (python -c "import platform; print(platform.python_version())").Trim()
-$tag = (python -c "import sys; print(f'{sys.version_info[0]}{sys.version_info[1]}')").Trim()
-$arch = (python -c "import platform; print(platform.machine())").Trim()
-if ($arch -ne "AMD64") { throw "64비트(AMD64) 파이썬으로 빌드하세요 (지금: $arch)" }
-Write-Host "파이썬 $pyver 기준으로 묶음을 만듭니다"
+Write-Host "설치 묶음을 만듭니다"
 
 if (Test-Path $OutDir) { Remove-Item -Recurse -Force $OutDir }
 $stage = Join-Path $root "$OutDir\doc2report"
@@ -40,24 +36,9 @@ foreach ($drop in @("tests", ".github", "tools", "packaging", "uv.lock", ".gitig
     if (Test-Path $path) { Remove-Item -Recurse -Force $path }
 }
 
-# 2) 파이썬 — python.org 공식 embeddable(설치 없이 폴더째 쓰는 배포판)
-$embed = "python-$pyver-embed-amd64.zip"
-Invoke-WebRequest "https://www.python.org/ftp/python/$pyver/$embed" -OutFile "$OutDir\$embed"
-Expand-Archive "$OutDir\$embed" "$stage\runtime"
-Remove-Item "$OutDir\$embed"
-# ._pth가 모듈 검색 경로를 정한다: 표준 라이브러리 zip, 패키지, 그리고 앱 소스(..\src)
-Set-Content -Encoding ascii "$stage\runtime\python$tag._pth" -Value @(
-    "python$tag.zip", ".", "Lib\site-packages", "..\src", "import site")
-
-# 3) 패키지 — uv.lock과 같은 버전을 Windows용 바이너리(wheel)로만
-python -m pip install --disable-pip-version-check --no-deps --only-binary=:all: --no-compile `
-    --target "$stage\runtime\Lib\site-packages" -r scripts\onprem-requirements.txt
-if ($LASTEXITCODE -ne 0) { throw "패키지 설치 실패" }
-
-# 4) 빌드 정보 — doctor가 보여 준다
-$commit = (git rev-parse --short HEAD).Trim()
-Set-Content -Encoding utf8 "$stage\runtime\BUILD.txt" -Value @(
-    "commit $commit", "built $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "python $pyver")
+# 2~4) runtime(파이썬 + 패키지 + 빌드 정보) — git의 runtime-win64 브랜치와 같은 스크립트로 만든다
+& "$PSScriptRoot\build_runtime.ps1" -Target "$stage\runtime" -WorkDir $OutDir
+if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "runtime 만들기 실패" }
 
 # 5) 압축
 $zip = Join-Path $root "$OutDir\doc2report-windows-x64.zip"
