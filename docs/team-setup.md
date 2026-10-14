@@ -117,6 +117,7 @@ cd doc2report
 | 증상 | 원인·해결 |
 |---|---|
 | `git was not found` | Git for Windows를 설치한다. 못 깔면 설치 묶음 zip의 `runtime` 폴더를 이 폴더에 복사(그러면 자동 받기를 건너뛴다) |
+| PowerShell에서 `doctor.bat`을 입력하면 "인식되지 않습니다" | 파일은 있다. PowerShell은 현재 폴더의 파일을 이름만으론 실행하지 않는다 → `.\doctor.bat`으로 입력하거나 탐색기에서 두 번 누른다 |
 | `Could not download the Python runtime` | 이 PC에서 저장소에 접근되는지 확인(`git pull`이 되는가). 사내 프록시가 막으면 담당자에게 `doctor.bat` 결과와 함께 문의 |
 | `The runtime folder exists but is incomplete` | 받다 중단된 `runtime` 폴더를 지우고 `start_webapp.bat`을 다시 실행 |
 | 받았는데 `runtime이 이 코드보다 오래된 패키지 구성`(doctor) | 담당자의 `runtime-win64` 빌드가 아직 안 끝난 것. 몇 분 뒤 `start_webapp.bat`을 다시 실행 |
